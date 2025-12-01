@@ -61,19 +61,235 @@ def pinterest_oauth_callback(request):
     code = request.GET.get('code')
     error = request.GET.get('error')
     
+    # Get admin webapp URL from settings
+    admin_webapp_url = getattr(settings, 'ADMIN_WEBAPP_URL', 'https://admin.wedesignz.com')
+    
     if error:
         logger.error(f"Pinterest OAuth error: {error}")
         return HttpResponse(
-            f"<h1>Pinterest Authorization Failed</h1>"
-            f"<p>Error: {error}</p>"
-            f"<p>Please try again.</p>",
+            f"""
+            <!DOCTYPE html>
+            <html lang="en">
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>Pinterest Authorization Failed</title>
+                <style>
+                    * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+                    body {{
+                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+                        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                        min-height: 100vh;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        padding: 20px;
+                    }}
+                    .container {{
+                        background: white;
+                        border-radius: 16px;
+                        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+                        max-width: 600px;
+                        width: 100%;
+                        padding: 40px;
+                        text-align: center;
+                    }}
+                    .icon {{
+                        width: 80px;
+                        height: 80px;
+                        margin: 0 auto 24px;
+                        background: #fee;
+                        border-radius: 50%;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        font-size: 40px;
+                    }}
+                    h1 {{
+                        color: #dc3545;
+                        font-size: 28px;
+                        margin-bottom: 16px;
+                        font-weight: 600;
+                    }}
+                    .error-box {{
+                        background: #fee;
+                        border: 2px solid #fcc;
+                        border-radius: 8px;
+                        padding: 16px;
+                        margin: 24px 0;
+                        color: #721c24;
+                    }}
+                    .error-box strong {{
+                        display: block;
+                        margin-bottom: 8px;
+                        font-size: 14px;
+                        text-transform: uppercase;
+                        letter-spacing: 0.5px;
+                    }}
+                    .actions {{
+                        margin-top: 32px;
+                        display: flex;
+                        flex-direction: column;
+                        gap: 12px;
+                    }}
+                    .btn {{
+                        display: inline-block;
+                        padding: 14px 28px;
+                        border-radius: 8px;
+                        text-decoration: none;
+                        font-weight: 600;
+                        font-size: 16px;
+                        transition: all 0.3s ease;
+                        border: none;
+                        cursor: pointer;
+                    }}
+                    .btn-primary {{
+                        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                        color: white;
+                    }}
+                    .btn-primary:hover {{
+                        transform: translateY(-2px);
+                        box-shadow: 0 8px 20px rgba(102, 126, 234, 0.4);
+                    }}
+                    .btn-secondary {{
+                        background: #f8f9fa;
+                        color: #495057;
+                        border: 2px solid #dee2e6;
+                    }}
+                    .btn-secondary:hover {{
+                        background: #e9ecef;
+                        border-color: #adb5bd;
+                    }}
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <div class="icon">❌</div>
+                    <h1>Authorization Failed</h1>
+                    <div class="error-box">
+                        <strong>Error Details</strong>
+                        {error}
+                    </div>
+                    <p style="color: #6c757d; margin-top: 16px;">
+                        There was an issue authorizing your Pinterest account. Please try again.
+                    </p>
+                    <div class="actions">
+                        <a href="/api/pinterest/authorize/" class="btn btn-primary">Try Again</a>
+                        <a href="{admin_webapp_url}/settings?tab=pinterest" class="btn btn-secondary">Go to Settings</a>
+                    </div>
+                </div>
+            </body>
+            </html>
+            """,
             status=400
         )
     
     if not code:
         return HttpResponse(
-            "<h1>Pinterest Authorization Failed</h1>"
-            "<p>No authorization code received.</p>",
+            f"""
+            <!DOCTYPE html>
+            <html lang="en">
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>Pinterest Authorization Failed</title>
+                <style>
+                    * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+                    body {{
+                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+                        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                        min-height: 100vh;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        padding: 20px;
+                    }}
+                    .container {{
+                        background: white;
+                        border-radius: 16px;
+                        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+                        max-width: 600px;
+                        width: 100%;
+                        padding: 40px;
+                        text-align: center;
+                    }}
+                    .icon {{
+                        width: 80px;
+                        height: 80px;
+                        margin: 0 auto 24px;
+                        background: #fee;
+                        border-radius: 50%;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        font-size: 40px;
+                    }}
+                    h1 {{
+                        color: #dc3545;
+                        font-size: 28px;
+                        margin-bottom: 16px;
+                        font-weight: 600;
+                    }}
+                    .error-box {{
+                        background: #fee;
+                        border: 2px solid #fcc;
+                        border-radius: 8px;
+                        padding: 16px;
+                        margin: 24px 0;
+                        color: #721c24;
+                    }}
+                    .actions {{
+                        margin-top: 32px;
+                        display: flex;
+                        flex-direction: column;
+                        gap: 12px;
+                    }}
+                    .btn {{
+                        display: inline-block;
+                        padding: 14px 28px;
+                        border-radius: 8px;
+                        text-decoration: none;
+                        font-weight: 600;
+                        font-size: 16px;
+                        transition: all 0.3s ease;
+                    }}
+                    .btn-primary {{
+                        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                        color: white;
+                    }}
+                    .btn-primary:hover {{
+                        transform: translateY(-2px);
+                        box-shadow: 0 8px 20px rgba(102, 126, 234, 0.4);
+                    }}
+                    .btn-secondary {{
+                        background: #f8f9fa;
+                        color: #495057;
+                        border: 2px solid #dee2e6;
+                    }}
+                    .btn-secondary:hover {{
+                        background: #e9ecef;
+                        border-color: #adb5bd;
+                    }}
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <div class="icon">⚠️</div>
+                    <h1>No Authorization Code</h1>
+                    <div class="error-box">
+                        No authorization code was received from Pinterest.
+                    </div>
+                    <p style="color: #6c757d; margin-top: 16px;">
+                        Please try authorizing again.
+                    </p>
+                    <div class="actions">
+                        <a href="/api/pinterest/authorize/" class="btn btn-primary">Try Again</a>
+                        <a href="{admin_webapp_url}/settings?tab=pinterest" class="btn btn-secondary">Go to Settings</a>
+                    </div>
+                </div>
+            </body>
+            </html>
+            """,
             status=400
         )
     
@@ -82,9 +298,94 @@ def pinterest_oauth_callback(request):
     redirect_uri = getattr(settings, 'PINTEREST_REDIRECT_URI', None)
     
     if not app_id or not app_secret:
+        admin_webapp_url = getattr(settings, 'ADMIN_WEBAPP_URL', 'https://admin.wedesignz.com')
         return HttpResponse(
-            "<h1>Configuration Error</h1>"
-            "<p>Pinterest credentials not configured.</p>",
+            f"""
+            <!DOCTYPE html>
+            <html lang="en">
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>Configuration Error</title>
+                <style>
+                    * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+                    body {{
+                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+                        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                        min-height: 100vh;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        padding: 20px;
+                    }}
+                    .container {{
+                        background: white;
+                        border-radius: 16px;
+                        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+                        max-width: 600px;
+                        width: 100%;
+                        padding: 40px;
+                        text-align: center;
+                    }}
+                    .icon {{
+                        width: 80px;
+                        height: 80px;
+                        margin: 0 auto 24px;
+                        background: #fff3cd;
+                        border-radius: 50%;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        font-size: 40px;
+                    }}
+                    h1 {{
+                        color: #856404;
+                        font-size: 28px;
+                        margin-bottom: 16px;
+                        font-weight: 600;
+                    }}
+                    .error-box {{
+                        background: #fff3cd;
+                        border: 2px solid #ffc107;
+                        border-radius: 8px;
+                        padding: 16px;
+                        margin: 24px 0;
+                        color: #856404;
+                    }}
+                    .actions {{
+                        margin-top: 32px;
+                    }}
+                    .btn {{
+                        display: inline-block;
+                        padding: 14px 28px;
+                        border-radius: 8px;
+                        text-decoration: none;
+                        font-weight: 600;
+                        font-size: 16px;
+                        transition: all 0.3s ease;
+                        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                        color: white;
+                    }}
+                    .btn:hover {{
+                        transform: translateY(-2px);
+                        box-shadow: 0 8px 20px rgba(102, 126, 234, 0.4);
+                    }}
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <div class="icon">⚠️</div>
+                    <h1>Configuration Error</h1>
+                    <div class="error-box">
+                        Pinterest credentials are not configured. Please contact your administrator.
+                    </div>
+                    <div class="actions">
+                        <a href="{admin_webapp_url}" class="btn">Go to Admin Panel</a>
+                    </div>
+                </div>
+            </body>
+            </html>
+            """,
             status=500
         )
     
@@ -133,9 +434,109 @@ def pinterest_oauth_callback(request):
         expires_in = token_data.get('expires_in', 3600)  # Default to 1 hour if not provided
         
         if not access_token:
+            admin_webapp_url = getattr(settings, 'ADMIN_WEBAPP_URL', 'https://admin.wedesignz.com')
             return HttpResponse(
-                "<h1>Token Exchange Failed</h1>"
-                "<p>No access token received from Pinterest.</p>",
+                f"""
+                <!DOCTYPE html>
+                <html lang="en">
+                <head>
+                    <meta charset="UTF-8">
+                    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                    <title>Token Exchange Failed</title>
+                    <style>
+                        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+                        body {{
+                            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+                            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                            min-height: 100vh;
+                            display: flex;
+                            align-items: center;
+                            justify-content: center;
+                            padding: 20px;
+                        }}
+                        .container {{
+                            background: white;
+                            border-radius: 16px;
+                            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+                            max-width: 600px;
+                            width: 100%;
+                            padding: 40px;
+                            text-align: center;
+                        }}
+                        .icon {{
+                            width: 80px;
+                            height: 80px;
+                            margin: 0 auto 24px;
+                            background: #fee;
+                            border-radius: 50%;
+                            display: flex;
+                            align-items: center;
+                            justify-content: center;
+                            font-size: 40px;
+                        }}
+                        h1 {{
+                            color: #dc3545;
+                            font-size: 28px;
+                            margin-bottom: 16px;
+                            font-weight: 600;
+                        }}
+                        .error-box {{
+                            background: #fee;
+                            border: 2px solid #fcc;
+                            border-radius: 8px;
+                            padding: 16px;
+                            margin: 24px 0;
+                            color: #721c24;
+                        }}
+                        .actions {{
+                            margin-top: 32px;
+                            display: flex;
+                            flex-direction: column;
+                            gap: 12px;
+                        }}
+                        .btn {{
+                            display: inline-block;
+                            padding: 14px 28px;
+                            border-radius: 8px;
+                            text-decoration: none;
+                            font-weight: 600;
+                            font-size: 16px;
+                            transition: all 0.3s ease;
+                        }}
+                        .btn-primary {{
+                            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                            color: white;
+                        }}
+                        .btn-primary:hover {{
+                            transform: translateY(-2px);
+                            box-shadow: 0 8px 20px rgba(102, 126, 234, 0.4);
+                        }}
+                        .btn-secondary {{
+                            background: #f8f9fa;
+                            color: #495057;
+                            border: 2px solid #dee2e6;
+                        }}
+                        .btn-secondary:hover {{
+                            background: #e9ecef;
+                            border-color: #adb5bd;
+                        }}
+                    </style>
+                </head>
+                <body>
+                    <div class="container">
+                        <div class="icon">❌</div>
+                        <h1>Token Exchange Failed</h1>
+                        <div class="error-box">
+                            No access token was received from Pinterest. The authorization may have been cancelled or failed.
+                        </div>
+                        <div class="actions">
+                            <a href="/api/pinterest/authorize/" class="btn btn-primary">Try Again</a>
+                            <a href="{admin_webapp_url}/settings?tab=pinterest" class="btn btn-secondary">Go to Settings</a>
+                        </div>
+                    </div>
+                </body>
+                </html>
+                """,
                 status=400
             )
         
@@ -186,42 +587,244 @@ def pinterest_oauth_callback(request):
             logger.warning(f"Could not fetch boards: {str(e)}")
             boards_info = "<p><em>Could not fetch boards. You can get your board ID from Pinterest API later.</em></p>"
         
-        # Display success message
+        # Get admin webapp URL
+        admin_webapp_url = getattr(settings, 'ADMIN_WEBAPP_URL', 'https://admin.wedesignz.com')
+        
+        # Format boards info with better styling
+        boards_html = ""
+        if boards_info and "<h3>" in boards_info:
+            # Extract boards from the HTML
+            boards_html = boards_info.replace("<h3>Your Pinterest Boards:</h3>", "<h3 style='margin-top: 24px; color: #495057;'>Your Pinterest Boards:</h3>")
+            boards_html = boards_html.replace("<ul>", "<ul style='list-style: none; padding: 0; margin: 16px 0;'>")
+            boards_html = boards_html.replace("<li>", "<li style='background: #f8f9fa; padding: 12px; margin: 8px 0; border-radius: 6px; border-left: 3px solid #667eea;'>")
+            boards_html = boards_html.replace("<code>", "<code style='background: #e9ecef; padding: 4px 8px; border-radius: 4px; font-size: 12px; font-family: 'Courier New', monospace;'>")
+        elif boards_info:
+            boards_html = f"<div style='background: #fff3cd; border: 1px solid #ffc107; padding: 16px; border-radius: 8px; margin: 24px 0;'>{boards_info}</div>"
+        
+        # Display success message with modern UI
         return HttpResponse(
             f"""
-            <html>
+            <!DOCTYPE html>
+            <html lang="en">
             <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
                 <title>Pinterest Authorization Successful</title>
                 <style>
-                    body {{ font-family: Arial, sans-serif; max-width: 800px; margin: 50px auto; padding: 20px; }}
-                    .success {{ background: #d4edda; border: 1px solid #c3e6cb; padding: 15px; border-radius: 5px; margin: 20px 0; }}
-                    .info {{ background: #d1ecf1; border: 1px solid #bee5eb; padding: 15px; border-radius: 5px; margin: 20px 0; }}
-                    code {{ background: #f0f0f0; padding: 2px 6px; border-radius: 3px; font-family: monospace; }}
-                    ul {{ line-height: 1.8; }}
+                    * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+                    body {{
+                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+                        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                        min-height: 100vh;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        padding: 20px;
+                    }}
+                    .container {{
+                        background: white;
+                        border-radius: 16px;
+                        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+                        max-width: 700px;
+                        width: 100%;
+                        padding: 40px;
+                    }}
+                    .success-header {{
+                        text-align: center;
+                        margin-bottom: 32px;
+                    }}
+                    .success-icon {{
+                        width: 100px;
+                        height: 100px;
+                        margin: 0 auto 24px;
+                        background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+                        border-radius: 50%;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        font-size: 50px;
+                        animation: scaleIn 0.5s ease;
+                    }}
+                    @keyframes scaleIn {{
+                        from {{ transform: scale(0); }}
+                        to {{ transform: scale(1); }}
+                    }}
+                    h1 {{
+                        color: #28a745;
+                        font-size: 32px;
+                        margin-bottom: 8px;
+                        font-weight: 700;
+                    }}
+                    .subtitle {{
+                        color: #6c757d;
+                        font-size: 16px;
+                    }}
+                    .info-card {{
+                        background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%);
+                        border: 2px solid #4caf50;
+                        border-radius: 12px;
+                        padding: 20px;
+                        margin: 24px 0;
+                    }}
+                    .info-card h2 {{
+                        color: #2e7d32;
+                        font-size: 20px;
+                        margin-bottom: 12px;
+                        display: flex;
+                        align-items: center;
+                        gap: 8px;
+                    }}
+                    .info-item {{
+                        display: flex;
+                        justify-content: space-between;
+                        align-items: center;
+                        padding: 12px 0;
+                        border-bottom: 1px solid rgba(46, 125, 50, 0.2);
+                    }}
+                    .info-item:last-child {{
+                        border-bottom: none;
+                    }}
+                    .info-label {{
+                        color: #2e7d32;
+                        font-weight: 600;
+                        font-size: 14px;
+                    }}
+                    .info-value {{
+                        color: #1b5e20;
+                        font-size: 14px;
+                    }}
+                    .boards-section {{
+                        background: #f8f9fa;
+                        border-radius: 12px;
+                        padding: 20px;
+                        margin: 24px 0;
+                    }}
+                    .boards-section h3 {{
+                        color: #495057;
+                        font-size: 18px;
+                        margin-bottom: 16px;
+                    }}
+                    .next-steps {{
+                        background: #e3f2fd;
+                        border: 2px solid #2196f3;
+                        border-radius: 12px;
+                        padding: 20px;
+                        margin: 24px 0;
+                    }}
+                    .next-steps h2 {{
+                        color: #1565c0;
+                        font-size: 20px;
+                        margin-bottom: 16px;
+                        display: flex;
+                        align-items: center;
+                        gap: 8px;
+                    }}
+                    .next-steps ol {{
+                        margin-left: 20px;
+                        line-height: 2;
+                        color: #1976d2;
+                    }}
+                    .next-steps li {{
+                        margin-bottom: 8px;
+                    }}
+                    .next-steps code {{
+                        background: #bbdefb;
+                        padding: 4px 8px;
+                        border-radius: 4px;
+                        font-size: 13px;
+                        font-family: 'Courier New', monospace;
+                        color: #0d47a1;
+                    }}
+                    .actions {{
+                        display: flex;
+                        flex-direction: column;
+                        gap: 12px;
+                        margin-top: 32px;
+                    }}
+                    .btn {{
+                        display: inline-block;
+                        padding: 16px 32px;
+                        border-radius: 8px;
+                        text-decoration: none;
+                        font-weight: 600;
+                        font-size: 16px;
+                        transition: all 0.3s ease;
+                        text-align: center;
+                        border: none;
+                        cursor: pointer;
+                    }}
+                    .btn-primary {{
+                        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                        color: white;
+                        box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+                    }}
+                    .btn-primary:hover {{
+                        transform: translateY(-2px);
+                        box-shadow: 0 8px 25px rgba(102, 126, 234, 0.5);
+                    }}
+                    .btn-secondary {{
+                        background: white;
+                        color: #667eea;
+                        border: 2px solid #667eea;
+                    }}
+                    .btn-secondary:hover {{
+                        background: #f8f9ff;
+                        transform: translateY(-2px);
+                    }}
+                    .btn-success {{
+                        background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+                        color: white;
+                        box-shadow: 0 4px 15px rgba(40, 167, 69, 0.4);
+                    }}
+                    .btn-success:hover {{
+                        transform: translateY(-2px);
+                        box-shadow: 0 8px 25px rgba(40, 167, 69, 0.5);
+                    }}
                 </style>
             </head>
             <body>
-                <h1>✅ Pinterest Authorization Successful!</h1>
-                
-                <div class="success">
-                    <h2>Access Token Saved</h2>
-                    <p>Your Pinterest access token has been saved to the database.</p>
-                    <p><strong>Token expires:</strong> {token_expires_at.strftime('%Y-%m-%d %H:%M:%S') if token_expires_at else 'Not specified'}</p>
+                <div class="container">
+                    <div class="success-header">
+                        <div class="success-icon">✅</div>
+                        <h1>Authorization Successful!</h1>
+                        <p class="subtitle">Your Pinterest account has been connected</p>
+                    </div>
+                    
+                    <div class="info-card">
+                        <h2>📋 Connection Details</h2>
+                        <div class="info-item">
+                            <span class="info-label">Status</span>
+                            <span class="info-value" style="color: #28a745; font-weight: 600;">✓ Connected</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">Token Expires</span>
+                            <span class="info-value">{token_expires_at.strftime('%B %d, %Y at %I:%M %p') if token_expires_at else 'Not specified'}</span>
+                        </div>
+                    </div>
+                    
+                    {boards_html}
+                    
+                    <div class="next-steps">
+                        <h2>🚀 Next Steps</h2>
+                        <ol>
+                            <li>If you see boards above, copy the <strong>Board ID</strong> of the board where you want to post designs</li>
+                            <li>Go to Settings in your Admin Panel and select your Pinterest board</li>
+                            <li>Test by approving a design - it will automatically post to Pinterest!</li>
+                        </ol>
+                    </div>
+                    
+                    <div class="actions">
+                        <a href="{admin_webapp_url}/settings?tab=pinterest" class="btn btn-primary">
+                            🎛️ Go to Settings
+                        </a>
+                        <a href="{admin_webapp_url}/designs" class="btn btn-success">
+                            🎨 View Designs
+                        </a>
+                        <a href="{admin_webapp_url}" class="btn btn-secondary">
+                            🏠 Go to Dashboard
+                        </a>
+                    </div>
                 </div>
-                
-                {boards_info}
-                
-                <div class="info">
-                    <h2>Next Steps:</h2>
-                    <ol>
-                        <li>If you see boards above, copy the <strong>Board ID</strong> of the board where you want to post designs</li>
-                        <li>Set the board ID using the management command: <code>python manage.py set_pinterest_board BOARD_ID</code></li>
-                        <li>Or update it in the admin panel under "Pinterest Integration"</li>
-                        <li>Test by approving a design - it should automatically post to Pinterest!</li>
-                    </ol>
-                </div>
-                
-                <p><a href="/admin/common/pinterestintegration/">Go to Admin Panel</a> | <a href="/api/pinterest/status/">Check Status</a></p>
             </body>
             </html>
             """
@@ -238,10 +841,122 @@ def pinterest_oauth_callback(request):
             except:
                 error_msg = e.response.text[:500]
         
+        admin_webapp_url = getattr(settings, 'ADMIN_WEBAPP_URL', 'https://admin.wedesignz.com')
         return HttpResponse(
-            f"<h1>Token Exchange Failed</h1>"
-            f"<p>Error: {error_msg}</p>"
-            f"<p>Please try authorizing again.</p>",
+            f"""
+            <!DOCTYPE html>
+            <html lang="en">
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>Pinterest Authorization Failed</title>
+                <style>
+                    * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+                    body {{
+                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+                        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                        min-height: 100vh;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        padding: 20px;
+                    }}
+                    .container {{
+                        background: white;
+                        border-radius: 16px;
+                        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+                        max-width: 600px;
+                        width: 100%;
+                        padding: 40px;
+                        text-align: center;
+                    }}
+                    .icon {{
+                        width: 80px;
+                        height: 80px;
+                        margin: 0 auto 24px;
+                        background: #fee;
+                        border-radius: 50%;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        font-size: 40px;
+                    }}
+                    h1 {{
+                        color: #dc3545;
+                        font-size: 28px;
+                        margin-bottom: 16px;
+                        font-weight: 600;
+                    }}
+                    .error-box {{
+                        background: #fee;
+                        border: 2px solid #fcc;
+                        border-radius: 8px;
+                        padding: 16px;
+                        margin: 24px 0;
+                        color: #721c24;
+                        text-align: left;
+                        word-break: break-word;
+                    }}
+                    .error-box strong {{
+                        display: block;
+                        margin-bottom: 8px;
+                        font-size: 14px;
+                        text-transform: uppercase;
+                        letter-spacing: 0.5px;
+                    }}
+                    .actions {{
+                        margin-top: 32px;
+                        display: flex;
+                        flex-direction: column;
+                        gap: 12px;
+                    }}
+                    .btn {{
+                        display: inline-block;
+                        padding: 14px 28px;
+                        border-radius: 8px;
+                        text-decoration: none;
+                        font-weight: 600;
+                        font-size: 16px;
+                        transition: all 0.3s ease;
+                    }}
+                    .btn-primary {{
+                        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                        color: white;
+                    }}
+                    .btn-primary:hover {{
+                        transform: translateY(-2px);
+                        box-shadow: 0 8px 20px rgba(102, 126, 234, 0.4);
+                    }}
+                    .btn-secondary {{
+                        background: #f8f9fa;
+                        color: #495057;
+                        border: 2px solid #dee2e6;
+                    }}
+                    .btn-secondary:hover {{
+                        background: #e9ecef;
+                        border-color: #adb5bd;
+                    }}
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <div class="icon">❌</div>
+                    <h1>Token Exchange Failed</h1>
+                    <div class="error-box">
+                        <strong>Error Details</strong>
+                        {error_msg[:500]}
+                    </div>
+                    <p style="color: #6c757d; margin-top: 16px;">
+                        There was an issue exchanging the authorization code for an access token. Please try authorizing again.
+                    </p>
+                    <div class="actions">
+                        <a href="/api/pinterest/authorize/" class="btn btn-primary">Try Again</a>
+                        <a href="{admin_webapp_url}/settings?tab=pinterest" class="btn btn-secondary">Go to Settings</a>
+                    </div>
+                </div>
+            </body>
+            </html>
+            """,
             status=400
         )
 

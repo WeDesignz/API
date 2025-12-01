@@ -214,7 +214,9 @@ EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD', default='')
 DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default='')
 
 # Site Domain (for building absolute URLs)
-SITE_DOMAIN = config('SITE_DOMAIN', default='wedesignz.com')
+SITE_DOMAIN = config('SITE_DOMAIN', default='wedesignz.com')  # Main website domain (for design links)
+MEDIA_DOMAIN = config('MEDIA_DOMAIN', default='devapi.wedesignz.com')  # Media files domain (where images are hosted)
+ADMIN_WEBAPP_URL = config('ADMIN_WEBAPP_URL', default='https://admin.wedesignz.com')  # Admin webapp URL (for redirects)
 
 # Pinterest Integration Settings
 PINTEREST_APP_ID = config('PINTEREST_APP_ID', default='')

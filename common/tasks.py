@@ -1209,16 +1209,22 @@ def post_design_to_pinterest(self, pinterest_post_id, base_url=None):
         image_media = media_files.first()
         
         # Build absolute image URL
-        if base_url:
-            # Remove trailing slash if present
-            base_url = base_url.rstrip('/')
-            image_url = f"{base_url}{image_media.file.url}"
+        # Pinterest requires HTTPS and publicly accessible URLs (no localhost)
+        # Always use MEDIA_DOMAIN from settings (where media files are actually hosted)
+        media_domain = getattr(settings, 'MEDIA_DOMAIN', 'devapi.wedesignz.com')
+        if not media_domain.startswith('http'):
+            media_domain = f"https://{media_domain}"
+        
+        # Validate media domain - must be HTTPS and not localhost
+        if media_domain.startswith('https://') and 'localhost' not in media_domain.lower() and '127.0.0.1' not in media_domain:
+            image_url = f"{media_domain}{image_media.file.url}"
+            logger.info(f"Using Pinterest image URL: {image_url}")
         else:
-            # Fallback: construct from settings
-            domain = getattr(settings, 'SITE_DOMAIN', 'https://wedesignz.com')
-            if not domain.startswith('http'):
-                domain = f"https://{domain}"
-            image_url = f"{domain}{image_media.file.url}"
+            # Invalid domain (localhost), cannot post to Pinterest
+            error_msg = f"Invalid media domain for Pinterest image URL: {media_domain}. Pinterest requires publicly accessible HTTPS URLs."
+            logger.error(error_msg)
+            pinterest_post.mark_failed(error_msg)
+            return
         
         # Prepare pin details
         title = product.title[:100] if product.title else "Design"  # Pinterest limit
