@@ -213,6 +213,20 @@ EMAIL_HOST_USER = config('EMAIL_HOST_USER', default='')
 EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD', default='')
 DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default='')
 
+# Site Domain (for building absolute URLs)
+SITE_DOMAIN = config('SITE_DOMAIN', default='wedesignz.com')
+
+# Pinterest Integration Settings
+PINTEREST_APP_ID = config('PINTEREST_APP_ID', default='')
+PINTEREST_APP_SECRET = config('PINTEREST_APP_SECRET', default='')
+PINTEREST_REDIRECT_URI = config('PINTEREST_REDIRECT_URI', default='https://wedesignz.com/api/pinterest/callback')
+PINTEREST_USE_SANDBOX = config('PINTEREST_USE_SANDBOX', default='True', cast=bool)  # Use sandbox for trial access
+# Note: Access token and board ID are stored in PinterestIntegration model (database)
+# These env vars are fallbacks for initial setup
+PINTEREST_ACCESS_TOKEN = config('PINTEREST_ACCESS_TOKEN', default='')
+PINTEREST_BOARD_ID = config('PINTEREST_BOARD_ID', default='')
+PINTEREST_ENABLED = config('PINTEREST_ENABLED', default='False', cast=bool)
+
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 

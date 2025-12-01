@@ -54,6 +54,7 @@ urlpatterns = [
     path('api/feedback/', include('Feedback.urls')),
     path('api/media/', include('MediaFiles.urls')),
     path('api/accounts/', include('Accounts.urls')),
+    path('api/pinterest/', include('common.urls')),  # Pinterest integration endpoints
     
     # Notifications endpoints (separate from feedback)
     path('api/notifications/', include('Feedback.urls')),  # Reuse Feedback views for notifications

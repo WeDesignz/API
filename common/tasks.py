@@ -1145,3 +1145,190 @@ def send_notification_email(self, user_type, user_id, notification_id):
     except Exception as e:
         logger.error(f"Failed to send notification email to user {user_id}: {str(e)}", exc_info=True)
         raise self.retry(exc=e, countdown=60, max_retries=3)
+
+
+# ==================== PINTEREST TASKS ====================
+
+@shared_task(bind=True, max_retries=3)
+def post_design_to_pinterest(self, pinterest_post_id, base_url=None):
+    """
+    Post a design to Pinterest after approval.
+    This runs asynchronously so it doesn't block the approval process.
+    Updates PinterestPost record with result.
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    try:
+        from django.conf import settings
+        from .models import PinterestPost, PinterestIntegration
+        from Catalog.models import Product
+        
+        # Check if Pinterest is enabled
+        integration = PinterestIntegration.get_instance()
+        if not integration.is_enabled:
+            logger.debug("Pinterest integration is disabled")
+            pinterest_post = PinterestPost.objects.get(id=pinterest_post_id)
+            pinterest_post.mark_failed("Pinterest integration is disabled")
+            return
+        
+        # Get the PinterestPost record
+        try:
+            pinterest_post = PinterestPost.objects.get(id=pinterest_post_id)
+        except PinterestPost.DoesNotExist:
+            logger.error(f"PinterestPost {pinterest_post_id} not found")
+            return
+        
+        # Get the product
+        try:
+            product = pinterest_post.product
+        except Product.DoesNotExist:
+            logger.error(f"Product not found for PinterestPost {pinterest_post_id}")
+            pinterest_post.mark_failed("Product not found")
+            return
+        
+        # Check if Pinterest is configured
+        try:
+            from .pinterest_service import PinterestService
+            pinterest_service = PinterestService()
+        except Exception as e:
+            error_msg = f"Pinterest not configured: {str(e)}"
+            logger.warning(error_msg)
+            pinterest_post.mark_failed(error_msg)
+            return
+        
+        # Get media files (images)
+        media_files = product.get_media().filter(media_type='image')
+        
+        if not media_files.exists():
+            logger.warning(f"No image media found for product {product.id}")
+            pinterest_post.mark_failed("No image media found for product")
+            return
+        
+        # Use the first image (or you can choose based on priority)
+        image_media = media_files.first()
+        
+        # Build absolute image URL
+        if base_url:
+            # Remove trailing slash if present
+            base_url = base_url.rstrip('/')
+            image_url = f"{base_url}{image_media.file.url}"
+        else:
+            # Fallback: construct from settings
+            domain = getattr(settings, 'SITE_DOMAIN', 'https://wedesignz.com')
+            if not domain.startswith('http'):
+                domain = f"https://{domain}"
+            image_url = f"{domain}{image_media.file.url}"
+        
+        # Prepare pin details
+        title = product.title[:100] if product.title else "Design"  # Pinterest limit
+        description = product.description[:800] if product.description else ""
+        
+        # Add design number if available
+        if product.product_number:
+            description = f"Design #{product.product_number}\n\n{description}"
+        
+        # Optional: Add link to design page
+        # Pinterest requires HTTPS and publicly accessible URLs (no localhost)
+        # Always use production domain for Pinterest links (Pinterest doesn't accept localhost)
+        link = None
+        domain = getattr(settings, 'SITE_DOMAIN', 'wedesignz.com')
+        if not domain.startswith('http'):
+            domain = f"https://{domain}"
+        
+        # Validate domain - must be HTTPS and not localhost
+        if domain.startswith('https://') and 'localhost' not in domain.lower() and '127.0.0.1' not in domain:
+            link = f"{domain}/designs/{product.id}"
+            logger.info(f"Using Pinterest link: {link}")
+        else:
+            # Invalid domain (localhost), skip link - Pinterest allows pins without links
+            logger.warning(f"Invalid domain for Pinterest link: {domain}, skipping link (Pinterest allows pins without links)")
+            link = None
+        
+        # Mark as retrying
+        pinterest_post.mark_retrying()
+        
+        # Create pin - only pass link if it's valid
+        pin_params = {
+            'image_url': image_url,
+            'title': title,
+            'description': description,
+        }
+        if link:
+            pin_params['link'] = link
+        
+        result = pinterest_service.create_pin(**pin_params)
+        
+        if result:
+            pin_id = result.get('id')
+            pin_url = result.get('url', '')
+            pinterest_post.mark_success(pin_id=pin_id, pin_url=pin_url)
+            logger.info(f"Successfully posted product {product.id} to Pinterest: {pin_id}")
+        else:
+            error_msg = "Failed to create pin - check Pinterest service logs"
+            pinterest_post.mark_failed(error_msg)
+            logger.error(f"Failed to post product {product.id} to Pinterest")
+            # Retry the task
+            raise Exception("Pinterest API call failed")
+            
+    except Exception as e:
+        logger.error(f"Error posting to Pinterest: {str(e)}", exc_info=True)
+        # Update PinterestPost record with error
+        try:
+            pinterest_post = PinterestPost.objects.get(id=pinterest_post_id)
+            pinterest_post.mark_failed(str(e))
+        except:
+            pass
+        # Retry with exponential backoff
+        raise self.retry(exc=e, countdown=60 * (2 ** self.request.retries))
+
+
+@shared_task
+def retry_failed_pinterest_posts():
+    """
+    Retry all failed Pinterest posts.
+    Called when Pinterest is reconnected or manually triggered.
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    try:
+        from .models import PinterestPost, PinterestIntegration
+        from django.conf import settings
+        
+        # Check if Pinterest is enabled and configured
+        integration = PinterestIntegration.get_instance()
+        if not integration.is_enabled or not integration.is_token_valid():
+            logger.warning("Pinterest is not enabled or token is invalid. Cannot retry posts.")
+            return
+        
+        # Find all failed posts
+        failed_posts = PinterestPost.objects.filter(status='failed')
+        count = failed_posts.count()
+        
+        if count == 0:
+            logger.info("No failed Pinterest posts to retry")
+            return
+        
+        logger.info(f"Retrying {count} failed Pinterest posts...")
+        
+        # Get base URL for image links
+        base_url = getattr(settings, 'SITE_DOMAIN', 'https://wedesignz.com')
+        if not base_url.startswith('http'):
+            base_url = f"https://{base_url}"
+        
+        retried_count = 0
+        for post in failed_posts:
+            try:
+                # Queue the post task
+                post_design_to_pinterest.delay(post.id, base_url)
+                retried_count += 1
+            except Exception as e:
+                logger.error(f"Failed to queue retry for PinterestPost {post.id}: {str(e)}")
+        
+        logger.info(f"Queued {retried_count} Pinterest posts for retry")
+        return f"Retried {retried_count} failed Pinterest posts"
+        
+    except Exception as e:
+        logger.error(f"Error retrying failed Pinterest posts: {str(e)}", exc_info=True)
+        raise

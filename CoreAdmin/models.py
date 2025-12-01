@@ -504,6 +504,36 @@ class DesignApproval(models.Model):
                 logger.error(f'[approve_design] Error updating product status: {str(e)}', exc_info=True)
                 return False
             
+            # Post to Pinterest (async - don't block approval)
+            try:
+                from django.conf import settings
+                from common.models import PinterestPost, PinterestIntegration
+                
+                # Check if Pinterest is enabled
+                integration = PinterestIntegration.get_instance()
+                if integration.is_enabled:
+                    # Create or get PinterestPost record
+                    pinterest_post, created = PinterestPost.objects.get_or_create(
+                        product_id=self.product_id,
+                        defaults={'status': 'pending'}
+                    )
+                    
+                    if created or pinterest_post.status == 'failed':
+                        # Queue async task to post to Pinterest
+                        from common.tasks import post_design_to_pinterest
+                        
+                        base_url = None
+                        if request:
+                            base_url = request.build_absolute_uri('/').rstrip('/')
+                        
+                        post_design_to_pinterest.delay(pinterest_post.id, base_url)
+                        logger.info(f'[approve_design] Queued Pinterest post for product {self.product_id}')
+                    else:
+                        logger.debug(f'[approve_design] PinterestPost already exists for product {self.product_id}')
+            except Exception as e:
+                # Don't fail approval if Pinterest posting fails
+                logger.warning(f'[approve_design] Failed to queue Pinterest post: {str(e)}', exc_info=True)
+            
             # TODO: Send notification to designer (async - don't block)
             # TODO: Send email notification (async - don't block)
             

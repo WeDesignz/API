@@ -1,0 +1,134 @@
+from django.db import models
+from django.utils import timezone
+from django.contrib.auth.models import User
+
+
+class PinterestIntegration(models.Model):
+    """
+    Model to store Pinterest OAuth tokens and configuration.
+    Only one instance should exist (singleton pattern).
+    """
+    access_token = models.TextField(help_text="Pinterest OAuth access token")
+    refresh_token = models.TextField(null=True, blank=True, help_text="Pinterest OAuth refresh token")
+    token_expires_at = models.DateTimeField(null=True, blank=True, help_text="When the access token expires")
+    board_id = models.CharField(max_length=255, help_text="Pinterest board ID where pins will be posted")
+    board_name = models.CharField(max_length=255, null=True, blank=True, help_text="Pinterest board name (for display)")
+    is_enabled = models.BooleanField(default=True, help_text="Enable/disable Pinterest posting")
+    
+    # Status tracking
+    last_successful_post = models.DateTimeField(null=True, blank=True, help_text="Last successful Pinterest post")
+    last_error = models.TextField(null=True, blank=True, help_text="Last error message if any")
+    last_error_at = models.DateTimeField(null=True, blank=True, help_text="When the last error occurred")
+    
+    # Metadata
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='pinterest_integrations')
+    
+    class Meta:
+        db_table = 'pinterest_integration'
+        verbose_name = 'Pinterest Integration'
+        verbose_name_plural = 'Pinterest Integrations'
+    
+    def __str__(self):
+        status = "✅ Enabled" if self.is_enabled else "❌ Disabled"
+        return f"Pinterest Integration - {status}"
+    
+    @classmethod
+    def get_instance(cls):
+        """Get or create the singleton instance."""
+        instance, created = cls.objects.get_or_create(
+            pk=1,
+            defaults={
+                'access_token': '',
+                'board_id': '',
+                'is_enabled': False
+            }
+        )
+        return instance
+    
+    def is_token_valid(self):
+        """Check if the access token is still valid."""
+        if not self.access_token:
+            return False
+        if self.token_expires_at and timezone.now() > self.token_expires_at:
+            return False
+        return True
+    
+    def update_error(self, error_message):
+        """Update error tracking."""
+        self.last_error = error_message
+        self.last_error_at = timezone.now()
+        self.save(update_fields=['last_error', 'last_error_at'])
+    
+    def update_success(self):
+        """Update success tracking."""
+        self.last_successful_post = timezone.now()
+        self.last_error = None
+        self.last_error_at = None
+        self.save(update_fields=['last_successful_post', 'last_error', 'last_error_at'])
+
+
+class PinterestPost(models.Model):
+    """
+    Model to track Pinterest post attempts for each approved design.
+    This allows retrying failed posts when Pinterest is reconnected.
+    """
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('success', 'Success'),
+        ('failed', 'Failed'),
+        ('retrying', 'Retrying'),
+    ]
+    
+    product = models.ForeignKey('Catalog.Product', on_delete=models.CASCADE, related_name='pinterest_posts')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    
+    # Pinterest pin information
+    pin_id = models.CharField(max_length=255, null=True, blank=True, help_text="Pinterest pin ID if successfully posted")
+    pin_url = models.URLField(null=True, blank=True, help_text="URL to the Pinterest pin")
+    
+    # Error tracking
+    error_message = models.TextField(null=True, blank=True, help_text="Error message if posting failed")
+    retry_count = models.IntegerField(default=0, help_text="Number of retry attempts")
+    
+    # Timestamps
+    created_at = models.DateTimeField(auto_now_add=True)
+    posted_at = models.DateTimeField(null=True, blank=True, help_text="When the pin was successfully posted")
+    last_retry_at = models.DateTimeField(null=True, blank=True, help_text="Last retry attempt timestamp")
+    
+    class Meta:
+        db_table = 'pinterest_post'
+        verbose_name = 'Pinterest Post'
+        verbose_name_plural = 'Pinterest Posts'
+        ordering = ['-created_at']
+        # Ensure one Pinterest post record per product (can retry but not duplicate)
+        unique_together = [['product']]
+    
+    def __str__(self):
+        return f"Pinterest Post - {self.product.title} ({self.get_status_display()})"
+    
+    def mark_success(self, pin_id=None, pin_url=None):
+        """Mark the post as successful."""
+        self.status = 'success'
+        self.posted_at = timezone.now()
+        if pin_id:
+            self.pin_id = pin_id
+        if pin_url:
+            self.pin_url = pin_url
+        self.save(update_fields=['status', 'posted_at', 'pin_id', 'pin_url'])
+    
+    def mark_failed(self, error_message):
+        """Mark the post as failed."""
+        self.status = 'failed'
+        self.error_message = error_message
+        self.last_retry_at = timezone.now()
+        self.retry_count += 1
+        self.save(update_fields=['status', 'error_message', 'last_retry_at', 'retry_count'])
+    
+    def mark_retrying(self):
+        """Mark the post as being retried."""
+        self.status = 'retrying'
+        self.last_retry_at = timezone.now()
+        self.save(update_fields=['status', 'last_retry_at'])
+

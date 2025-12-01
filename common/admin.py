@@ -127,3 +127,134 @@ class TaskResultAdmin(PaginatedAdminMixin, admin.ModelAdmin):
 
 # WeDesignz Custom Tasks Admin
 # Note: Custom admin site functionality has been simplified to avoid compatibility issues
+
+
+# Pinterest Integration Admin
+from .models import PinterestIntegration, PinterestPost
+
+
+@admin.register(PinterestIntegration)
+class PinterestIntegrationAdmin(admin.ModelAdmin):
+    list_display = [
+        'is_enabled', 'is_configured', 'is_token_valid', 'board_name', 
+        'last_successful_post', 'last_error_at'
+    ]
+    list_filter = ['is_enabled', 'last_successful_post', 'last_error_at']
+    readonly_fields = [
+        'access_token', 'refresh_token', 'token_expires_at',
+        'last_successful_post', 'last_error', 'last_error_at',
+        'created_at', 'updated_at', 'created_by'
+    ]
+    
+    fieldsets = (
+        ('Configuration', {
+            'fields': ('is_enabled', 'board_id', 'board_name')
+        }),
+        ('OAuth Tokens', {
+            'fields': ('access_token', 'refresh_token', 'token_expires_at'),
+            'classes': ('collapse',)
+        }),
+        ('Status Tracking', {
+            'fields': ('last_successful_post', 'last_error', 'last_error_at'),
+            'classes': ('collapse',)
+        }),
+        ('Metadata', {
+            'fields': ('created_at', 'updated_at', 'created_by'),
+            'classes': ('collapse',)
+        }),
+    )
+    
+    def is_configured(self, obj):
+        return bool(obj.access_token and obj.board_id)
+    is_configured.boolean = True
+    is_configured.short_description = 'Configured'
+    
+    def is_token_valid(self, obj):
+        return obj.is_token_valid()
+    is_token_valid.boolean = True
+    is_token_valid.short_description = 'Token Valid'
+    
+    def has_add_permission(self, request):
+        # Only allow one instance (singleton)
+        return not PinterestIntegration.objects.exists()
+    
+    def has_delete_permission(self, request, obj=None):
+        # Prevent deletion of the singleton
+        return False
+
+
+@admin.register(PinterestPost)
+class PinterestPostAdmin(PaginatedAdminMixin, admin.ModelAdmin):
+    list_display = [
+        'product', 'status', 'pin_id', 'retry_count', 
+        'created_at', 'posted_at', 'last_retry_at', 'action_buttons'
+    ]
+    list_filter = ['status', 'created_at', 'posted_at']
+    search_fields = ['product__title', 'product__product_number', 'pin_id', 'error_message']
+    readonly_fields = [
+        'product', 'pin_id', 'pin_url', 'error_message', 'retry_count',
+        'created_at', 'posted_at', 'last_retry_at'
+    ]
+    ordering = ['-created_at']
+    list_per_page = 25
+    
+    fieldsets = (
+        ('Product Information', {
+            'fields': ('product',)
+        }),
+        ('Pinterest Status', {
+            'fields': ('status', 'pin_id', 'pin_url')
+        }),
+        ('Error Tracking', {
+            'fields': ('error_message', 'retry_count', 'last_retry_at'),
+            'classes': ('collapse',)
+        }),
+        ('Timestamps', {
+            'fields': ('created_at', 'posted_at'),
+            'classes': ('collapse',)
+        }),
+    )
+    
+    def action_buttons(self, obj):
+        if obj.status == 'failed':
+            return format_html(
+                '<a href="/admin/common/pinterestpost/{}/retry/" class="button">Retry</a>',
+                obj.id
+            )
+        return '-'
+    action_buttons.short_description = 'Actions'
+    
+    def get_urls(self):
+        from django.urls import path
+        urls = super().get_urls()
+        custom_urls = [
+            path(
+                '<int:post_id>/retry/',
+                self.admin_site.admin_view(self.retry_post),
+                name='common_pinterestpost_retry',
+            ),
+        ]
+        return custom_urls + urls
+    
+    def retry_post(self, request, post_id):
+        """Retry a failed Pinterest post."""
+        from django.shortcuts import redirect
+        from django.contrib import messages
+        from .models import PinterestPost
+        from .tasks import post_design_to_pinterest
+        from django.conf import settings
+        
+        try:
+            post = PinterestPost.objects.get(id=post_id)
+            if post.status != 'failed':
+                messages.warning(request, f'Post is not in failed status. Current status: {post.get_status_display()}')
+            else:
+                base_url = getattr(settings, 'SITE_DOMAIN', 'https://wedesignz.com')
+                if not base_url.startswith('http'):
+                    base_url = f"https://{base_url}"
+                post_design_to_pinterest.delay(post.id, base_url)
+                messages.success(request, f'Retry queued for Pinterest post: {post.product.title}')
+        except PinterestPost.DoesNotExist:
+            messages.error(request, 'Pinterest post not found')
+        
+        return redirect('admin:common_pinterestpost_changelist')
