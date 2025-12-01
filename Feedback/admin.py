@@ -204,10 +204,10 @@ class FAQAdmin(admin.ModelAdmin):
     Admin interface for FAQ model.
     Manages frequently asked questions.
     """
-    list_display = ['question', 'slug', 'is_active', 'view_count', 'sort_order', 'created_by', 'created_at']
+    list_display = ['question', 'display_locations_display', 'tags_display', 'is_active', 'view_count', 'sort_order', 'created_by', 'created_at']
     list_filter = ['is_active', 'created_at', 'updated_at']
     search_fields = ['question', 'answer', 'slug', 'created_by__username', 'created_by__email']
-    readonly_fields = ['slug', 'view_count', 'created_at', 'updated_at']
+    readonly_fields = ['slug', 'view_count', 'created_at', 'updated_at', 'tags_display']
     list_editable = ['is_active', 'sort_order']
     ordering = ['sort_order', 'id']
     list_per_page = 25
@@ -215,6 +215,15 @@ class FAQAdmin(admin.ModelAdmin):
     fieldsets = (
         ('FAQ Information', {
             'fields': ('question', 'answer', 'slug', 'is_active', 'sort_order', 'view_count')
+        }),
+        ('Display Settings', {
+            'fields': ('display_locations',),
+            'description': 'Select where this FAQ should be displayed. Options: landing_page, customer_dashboard, designer_console, all'
+        }),
+        ('Tags', {
+            'fields': ('tags_display',),
+            'classes': ('collapse',),
+            'description': 'Tags are managed through FAQ Tags. Use the FAQ Tags admin to assign tags to FAQs.'
         }),
         ('User Information', {
             'fields': ('created_by', 'updated_by')
@@ -227,6 +236,26 @@ class FAQAdmin(admin.ModelAdmin):
     
     def get_queryset(self, request):
         return super().get_queryset(request).select_related('created_by', 'updated_by').prefetch_related('tags')
+    
+    def display_locations_display(self, obj):
+        """Display display_locations as a readable string."""
+        if not obj.display_locations:
+            return 'None'
+        locations = obj.display_locations
+        if isinstance(locations, list):
+            if 'all' in locations:
+                return 'All Locations'
+            return ', '.join(location.replace('_', ' ').title() for location in locations)
+        return str(locations)
+    display_locations_display.short_description = 'Display Locations'
+    
+    def tags_display(self, obj):
+        """Display tags as a readable string."""
+        tags = obj.tags.all()
+        if not tags:
+            return 'No tags'
+        return ', '.join(tag.name for tag in tags)
+    tags_display.short_description = 'Tags'
     
     def save_model(self, request, obj, form, change):
         if not change:

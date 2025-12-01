@@ -980,7 +980,7 @@ class FAQSerializer(serializers.ModelSerializer):
         model = FAQ
         fields = [
             'id', 'question', 'answer', 'slug', 'is_active', 'view_count',
-            'sort_order', 'tags', 'tag_ids', 'created_by', 'created_at',
+            'sort_order', 'display_locations', 'tags', 'tag_ids', 'created_by', 'created_at',
             'updated_by', 'updated_at', 'created_by_id', 'updated_by_id'
         ]
         read_only_fields = ['id', 'slug', 'view_count', 'created_at', 'updated_at']
@@ -1062,5 +1062,5 @@ class FAQListSerializer(serializers.ModelSerializer):
         model = FAQ
         fields = [
             'id', 'question', 'answer', 'slug', 'is_active', 'view_count',
-            'sort_order', 'tags', 'created_by', 'created_at'
+            'sort_order', 'display_locations', 'tags', 'created_by', 'created_at'
         ]

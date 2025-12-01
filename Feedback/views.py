@@ -973,18 +973,80 @@ def faqs_list(request):
     POST: Requires authentication, creates a new FAQ.
     """
     if request.method == 'GET':
-        faqs = FAQ.objects.all().order_by('sort_order', 'id')
+        from django.db.models import Q
+        import logging
+        import json
         
-        # Optional filtering
+        logger = logging.getLogger(__name__)
+        
+        # IMPORTANT: Check ALL FAQs first (including inactive) for display_locations
+        # We'll filter by is_active AFTER location filtering
+        all_faqs_in_db = FAQ.objects.all()
+        
+        # Optional filtering by display location
+        location = request.GET.get('location', '')
+        if location:
+            # Use Python filtering to check if location is in display_locations array
+            # Check ALL FAQs in database, not just active ones
+            all_faqs_data = list(all_faqs_in_db.values('id', 'display_locations', 'is_active'))
+            faq_ids = []
+            
+            logger.info(f"Filtering FAQs for location: {location}. Total FAQs in DB: {len(all_faqs_data)}")
+            
+            for faq_data in all_faqs_data:
+                faq_id = faq_data['id']
+                display_locs = faq_data['display_locations']
+                is_active = faq_data['is_active']
+                
+                # Handle different data types
+                if display_locs is None:
+                    logger.debug(f"FAQ {faq_id} has None display_locations")
+                    continue
+                
+                # Convert to list if it's a string
+                if isinstance(display_locs, str):
+                    try:
+                        display_locs = json.loads(display_locs)
+                    except:
+                        logger.warning(f"FAQ {faq_id} has invalid display_locations format: {display_locs}")
+                        continue
+                
+                if isinstance(display_locs, list):
+                    # Check if location is in the list or 'all' is in the list
+                    if location in display_locs or 'all' in display_locs:
+                        faq_ids.append(faq_id)
+                        logger.info(f"FAQ {faq_id} matched location {location}. display_locations: {display_locs}, is_active: {is_active}")
+                else:
+                    logger.warning(f"FAQ {faq_id} has unexpected display_locations type: {type(display_locs)}, value: {display_locs}")
+            
+            logger.info(f"Found {len(faq_ids)} FAQs matching location {location}: {faq_ids}")
+            
+            if faq_ids:
+                # Recreate queryset with filtered IDs
+                faqs = FAQ.objects.filter(id__in=faq_ids)
+            else:
+                # If no matches, return empty queryset
+                logger.warning(f"No FAQs found for location: {location}")
+                faqs = FAQ.objects.none()
+        else:
+            # No location filter, use all FAQs
+            faqs = all_faqs_in_db
+        
+        # For public access, filter by is_active AFTER location filtering
+        if not request.user.is_authenticated or not request.user.is_staff:
+            faqs = faqs.filter(is_active=True)
+        
+        # Optional filtering by search
         search = request.GET.get('search', '')
         if search:
             faqs = faqs.filter(Q(question__icontains=search) | Q(answer__icontains=search))
         
-        # For public access, filter by is_active
-        if not request.user.is_authenticated or not request.user.is_staff:
-            faqs = faqs.filter(is_active=True)
+        # Ensure ordering
+        if not isinstance(faqs, type(FAQ.objects.none())):
+            faqs = faqs.order_by('sort_order', 'id')
         
         serializer = FAQListSerializer(faqs, many=True)
+        logger.info(f"Returning {len(serializer.data)} FAQs")
         return Response(serializer.data, status=status.HTTP_200_OK)
     
     elif request.method == 'POST':

@@ -257,6 +257,10 @@ class FAQ(models.Model):
     is_active = models.BooleanField(default=True)
     view_count = models.PositiveIntegerField(default=0)
     sort_order = models.PositiveIntegerField(default=0)
+    display_locations = models.JSONField(
+        default=list,
+        help_text="List of locations where this FAQ should be displayed. Options: 'landing_page', 'customer_dashboard', 'designer_console', 'all'"
+    )
     created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='created_faqs')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='updated_faqs', null=True, blank=True)
