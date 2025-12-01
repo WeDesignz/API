@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Earnings Bill - WeDesignz</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; 
+            line-height: 1.6; 
+            color: #2d3748; 
+            background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+            padding: 30px 20px;
+            min-height: 100vh;
+        }
+        .email-wrapper {
+            max-width: 680px; 
+            margin: 0 auto; 
+            background-color: #ffffff;
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.15);
+        }
+        .header { 
+            background: linear-gradient(135deg, #d97706 0%, #f59e0b 50%, #fbbf24 100%); 
+            color: #ffffff; 
+            padding: 50px 40px; 
+            text-align: center;
+            position: relative;
+            overflow: hidden;
+        }
+        .header::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            right: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle, rgba(255,255,255,0.15) 0%, transparent 70%);
+            animation: pulse 20s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); opacity: 0.5; }
+            50% { transform: scale(1.1); opacity: 0.8; }
+        }
+        .logo-container {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            margin-bottom: 25px;
+            position: relative;
+            z-index: 1;
+        }
+        .logo-container img {
+            height: 45px;
+            width: auto;
+            filter: brightness(0) invert(1);
+        }
+        .logo-text {
+            height: 32px;
+            width: auto;
+            filter: brightness(0) invert(1);
+        }
+        .header h1 { 
+            font-size: 32px; 
+            font-weight: 700;
+            margin-bottom: 10px;
+            position: relative;
+            z-index: 1;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        .header p { 
+            font-size: 17px;
+            opacity: 0.95;
+            position: relative;
+            z-index: 1;
+        }
+        .content { 
+            padding: 45px 40px; 
+            background: #ffffff;
+        }
+        .greeting {
+            font-size: 24px;
+            font-weight: 700;
+            color: #1e293b;
+            margin-bottom: 20px;
+            background: linear-gradient(135deg, #d97706 0%, #f59e0b 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .intro-text {
+            font-size: 17px;
+            color: #475569;
+            margin-bottom: 35px;
+            line-height: 1.8;
+        }
+        .invoice-details { 
+            background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%); 
+            padding: 30px; 
+            border-radius: 12px; 
+            margin: 30px 0;
+            border: 2px solid #fcd34d;
+            box-shadow: 0 4px 6px rgba(217, 119, 6, 0.15);
+        }
+        .invoice-details h3 {
+            font-size: 22px;
+            font-weight: 700;
+            color: #92400e;
+            margin-bottom: 25px;
+            padding-bottom: 15px;
+            border-bottom: 3px solid #f59e0b;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .invoice-details h3::before {
+            content: '📋';
+            font-size: 24px;
+        }
+        .detail-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 14px 0;
+            border-bottom: 1px solid #fde68a;
+            transition: background-color 0.2s;
+            width: 100%;
+        }
+        .detail-row:hover {
+            background-color: rgba(245, 158, 11, 0.1);
+            padding-left: 10px;
+            padding-right: 10px;
+            border-radius: 6px;
+        }
+        .detail-row:last-child {
+            border-bottom: none;
+        }
+        .detail-label {
+            font-weight: 600;
+            color: #78350f;
+            font-size: 15px;
+            flex: 0 0 auto;
+            min-width: 140px;
+            text-align: left;
+        }
+        .detail-value {
+            color: #92400e;
+            font-weight: 600;
+            font-size: 15px;
+            flex: 0 0 auto;
+            text-align: right;
+            margin-left: auto;
+        }
+        .items-section {
+            margin-top: 30px;
+            padding-top: 25px;
+            border-top: 2px solid #fde68a;
+        }
+        .items-section h4 {
+            font-size: 19px;
+            font-weight: 700;
+            color: #92400e;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .items-section h4::before {
+            content: '🎨';
+            font-size: 20px;
+        }
+        .item { 
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 18px 15px; 
+            border-bottom: 1px solid #fde68a;
+            background: #ffffff;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            transition: transform 0.2s, box-shadow 0.2s;
+            width: 100%;
+        }
+        .item:hover {
+            transform: translateX(5px);
+            box-shadow: 0 2px 8px rgba(245, 158, 11, 0.2);
+        }
+        .item:last-child {
+            margin-bottom: 0;
+        }
+        .item-name {
+            font-weight: 600;
+            color: #92400e;
+            flex: 0 0 auto;
+            min-width: 200px;
+            text-align: left;
+            font-size: 16px;
+        }
+        .item-price {
+            color: #d97706;
+            font-weight: 700;
+            font-size: 17px;
+            flex: 0 0 auto;
+            text-align: right;
+            margin-left: auto;
+        }
+        .earnings-box { 
+            background: linear-gradient(135deg, #fef3c7 0%, #fde68a 50%, #fcd34d 100%); 
+            padding: 30px; 
+            border-radius: 12px; 
+            margin: 30px 0; 
+            border-left: 5px solid #f59e0b;
+            box-shadow: 0 6px 12px rgba(217, 119, 6, 0.25);
+            position: relative;
+            overflow: hidden;
+        }
+        .earnings-box::before {
+            content: '💰';
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            font-size: 60px;
+            opacity: 0.1;
+        }
+        .earnings-box h3 {
+            font-size: 22px;
+            font-weight: 700;
+            color: #78350f;
+            margin-bottom: 25px;
+            margin-top: 0;
+            position: relative;
+            z-index: 1;
+        }
+        .earnings-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 0;
+            font-size: 17px;
+            color: #92400e;
+            position: relative;
+            z-index: 1;
+            border-bottom: 1px solid rgba(217, 119, 6, 0.2);
+            width: 100%;
+        }
+        .earnings-label {
+            flex: 0 0 auto;
+            min-width: 180px;
+            text-align: left;
+            font-weight: 600;
+            color: #78350f;
+        }
+        .earnings-value {
+            flex: 0 0 auto;
+            text-align: right;
+            margin-left: auto;
+            font-weight: 600;
+            color: #92400e;
+        }
+        .earnings-row span:first-child {
+            flex: 0 0 auto;
+            min-width: 180px;
+            text-align: left;
+        }
+        .earnings-row span:last-child {
+            flex: 0 0 auto;
+            text-align: right;
+            margin-left: auto;
+        }
+        .earnings-row:last-of-type {
+            border-bottom: none;
+        }
+        .earnings-row.final {
+            font-size: 26px;
+            font-weight: 800;
+            color: #78350f;
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 3px solid #f59e0b;
+            background: linear-gradient(135deg, #ffffff 0%, #fef3c7 100%);
+            padding: 20px;
+            border-radius: 8px;
+        }
+        .total-section { 
+            margin-top: 25px;
+            padding-top: 25px;
+            border-top: 3px solid #f59e0b;
+            background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+            padding: 20px;
+            border-radius: 10px;
+        }
+        .total-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 0;
+            font-size: 17px;
+            color: #92400e;
+            width: 100%;
+        }
+        .total-label {
+            flex: 0 0 auto;
+            min-width: 180px;
+            text-align: left;
+            font-weight: 600;
+            color: #78350f;
+        }
+        .total-value {
+            flex: 0 0 auto;
+            text-align: right;
+            margin-left: auto;
+            font-weight: 600;
+            color: #92400e;
+        }
+        .total-row span:first-child {
+            flex: 0 0 auto;
+            min-width: 180px;
+            text-align: left;
+        }
+        .total-row span:last-child {
+            flex: 0 0 auto;
+            text-align: right;
+            margin-left: auto;
+        }
+        .total-row.final {
+            font-size: 26px;
+            font-weight: 800;
+            color: #78350f;
+            margin-top: 15px;
+            padding-top: 20px;
+            border-top: 2px solid #fcd34d;
+            background: linear-gradient(135deg, #ffffff 0%, #fef3c7 100%);
+            padding: 20px;
+            border-radius: 8px;
+        }
+        .total-row.final .total-label {
+            color: #78350f;
+            font-weight: 800;
+        }
+        .total-row.final .total-value {
+            color: #78350f;
+            font-weight: 800;
+        }
+        .earnings-row.final .earnings-label {
+            color: #78350f;
+            font-weight: 800;
+        }
+        .earnings-row.final .earnings-value {
+            color: #78350f;
+            font-weight: 800;
+        }
+        .info-box { 
+            background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%); 
+            padding: 25px; 
+            border-radius: 12px; 
+            margin: 30px 0; 
+            border-left: 5px solid #10b981;
+            box-shadow: 0 4px 6px rgba(16, 185, 129, 0.2);
+        }
+        .info-box strong {
+            display: block;
+            font-size: 18px;
+            color: #047857;
+            margin-bottom: 10px;
+            font-weight: 700;
+        }
+        .info-box p {
+            color: #065f46;
+            margin: 0;
+            font-size: 16px;
+            line-height: 1.7;
+        }
+        .button-container {
+            text-align: center;
+            margin: 40px 0;
+        }
+        .button { 
+            display: inline-block; 
+            background: linear-gradient(135deg, #d97706 0%, #f59e0b 100%); 
+            color: #ffffff !important; 
+            padding: 18px 50px; 
+            text-decoration: none; 
+            border-radius: 10px; 
+            font-weight: 700;
+            font-size: 17px;
+            box-shadow: 0 6px 20px rgba(217, 119, 6, 0.4);
+            transition: all 0.3s ease;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+            border: none;
+        }
+        .button:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 10px 30px rgba(217, 119, 6, 0.5);
+            background: linear-gradient(135deg, #b45309 0%, #d97706 100%);
+        }
+        .closing {
+            margin-top: 40px;
+            padding-top: 30px;
+            border-top: 2px solid #fde68a;
+            background: linear-gradient(135deg, #fef3c7 0%, #ffffff 100%);
+            padding: 25px;
+            border-radius: 10px;
+        }
+        .closing p {
+            color: #475569;
+            margin-bottom: 15px;
+            line-height: 1.8;
+            font-size: 16px;
+        }
+        .signature {
+            color: #d97706;
+            font-weight: 700;
+            margin-top: 12px;
+            font-size: 17px;
+        }
+        .footer { 
+            background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
+            text-align: center; 
+            padding: 30px 40px; 
+            color: #cbd5e1; 
+            font-size: 14px;
+        }
+        .footer p {
+            margin: 8px 0;
+        }
+        .footer p:first-child {
+            color: #ffffff;
+            font-weight: 600;
+        }
+        @media only screen and (max-width: 600px) {
+            body { padding: 15px 10px; }
+            .content { padding: 30px 20px; }
+            .header { padding: 35px 25px; }
+            .header h1 { font-size: 26px; }
+            .detail-row, .earnings-row { flex-direction: column; gap: 8px; align-items: flex-start; }
+            .item { flex-direction: column; align-items: flex-start; gap: 8px; }
+            .button { padding: 16px 35px; font-size: 15px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="email-wrapper">
+        <div class="header">
+            <div class="logo-container">
+                {% if logo_url %}
+                <img src="{{ logo_url }}" alt="WeDesignz Logo" style="height: 45px; width: auto;">
+                {% endif %}
+                {% if text_url %}
+                <img src="{{ text_url }}" alt="WeDesignz" class="logo-text" style="height: 32px; width: auto;">
+                {% endif %}
+            </div>
+            <h1>Your Earnings Bill 💰</h1>
+            <p>Your designs have been sold!</p>
+        </div>
+        
+        <div class="content">
+            <div class="greeting">Hello {{ user.first_name|default:user.username }}!</div>
+            <p class="intro-text">Great news! Your designs from order <strong>{{ order.order_number }}</strong> have been purchased, and your earnings have been processed!</p>
+            
+            <div class="invoice-details">
+                <h3>Bill Details</h3>
+                <div class="detail-row">
+                    <span class="detail-label">Bill Number:</span>
+                    <span class="detail-value">{{ invoice.invoice_number }}</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">Order Number:</span>
+                    <span class="detail-value">{{ order.order_number }}</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">Bill Date:</span>
+                    <span class="detail-value">{{ invoice.invoice_date|date:"F d, Y" }}</span>
+                </div>
+                
+                <div class="items-section">
+                    <h4>Your Designs Sold</h4>
+                    {% for product in breakdown.products %}
+                    <div class="item">
+                        <span class="item-name">{{ product.title }}</span>
+                        <span class="item-price">₹{{ product.price|floatformat:2 }}</span>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            
+            <div class="earnings-box">
+                <h3>💰 Earnings Breakdown</h3>
+                <div class="earnings-row">
+                    <span class="earnings-label">Total Sales:</span>
+                    <span class="earnings-value">₹{{ breakdown.product_total|floatformat:2 }}</span>
+                </div>
+                <div class="earnings-row">
+                    <span class="earnings-label">GST (18%):</span>
+                    <span class="earnings-value">₹{{ breakdown.gst_amount|floatformat:2 }}</span>
+                </div>
+                <div class="earnings-row">
+                    <span class="earnings-label">Platform Commission:</span>
+                    <span class="earnings-value">₹{{ breakdown.commission_amount|floatformat:2 }}</span>
+                </div>
+                <div class="earnings-row final">
+                    <span class="earnings-label">Amount Added to Wallet:</span>
+                    <span class="earnings-value">₹{{ breakdown.wallet_amount|floatformat:2 }}</span>
+                </div>
+            </div>
+            
+            <div class="invoice-details">
+                <h3>Bill Summary</h3>
+                <div class="total-row">
+                    <span class="total-label">GST Amount:</span>
+                    <span class="total-value">₹{{ invoice.gst_amount|floatformat:2 }}</span>
+                </div>
+                <div class="total-row">
+                    <span class="total-label">Commission Amount:</span>
+                    <span class="total-value">₹{{ invoice.commission_amount|floatformat:2 }}</span>
+                </div>
+                <div class="total-row final">
+                    <span class="total-label">Bill Total:</span>
+                    <span class="total-value">₹{{ invoice.total_amount|floatformat:2 }}</span>
+                </div>
+                <p style="font-size: 14px; color: #78350f; margin-top: 10px; text-align: center; font-weight: 600;">(GST + Platform Commission)</p>
+            </div>
+            
+            <div class="info-box">
+                <strong>✅ Wallet Updated</strong>
+                <p>Your earnings of <strong>₹{{ breakdown.wallet_amount|floatformat:2 }}</strong> have been added to your wallet. You can now request withdrawals from your designer console.</p>
+            </div>
+            
+            <div class="info-box">
+                <strong>📎 Bill PDF Attached</strong>
+                <p>Your detailed bill PDF is attached to this email for your records and bookkeeping.</p>
+            </div>
+            
+            <p class="intro-text">You can view your wallet balance, earnings history, and request withdrawals from your designer console.</p>
+            
+            <div class="button-container">
+                <a href="{{ site_url }}/designer-console" class="button" style="color: #ffffff !important;">View Designer Console</a>
+            </div>
+            
+            <div class="closing">
+                <p>If you have any questions about your earnings or bill, feel free to contact our support team.</p>
+                <p class="signature">Keep creating amazing designs!<br>The WeDesignz Team</p>
+            </div>
+        </div>
+        
+        <div class="footer">
+            <p>© {% now "Y" %} WeDesignz. All rights reserved.</p>
+            <p>This email was sent to {{ user.email }}</p>
+        </div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wallet Transaction - WeDesignz</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; 
+            line-height: 1.6; 
+            color: #2d3748; 
+            background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
+            padding: 30px 20px;
+            min-height: 100vh;
+        }
+        .email-wrapper {
+            max-width: 680px; 
+            margin: 0 auto; 
+            background-color: #ffffff;
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.15);
+        }
+        .header { 
+            background: linear-gradient(135deg, #16a34a 0%, #22c55e 50%, #4ade80 100%); 
+            color: #ffffff; 
+            padding: 50px 40px; 
+            text-align: center;
+            position: relative;
+            overflow: hidden;
+        }
+        .header::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            right: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle, rgba(255,255,255,0.15) 0%, transparent 70%);
+            animation: pulse 20s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); opacity: 0.5; }
+            50% { transform: scale(1.1); opacity: 0.8; }
+        }
+        .logo-container {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            margin-bottom: 25px;
+            position: relative;
+            z-index: 1;
+        }
+        .logo-container img {
+            height: 45px;
+            width: auto;
+            filter: brightness(0) invert(1);
+        }
+        .logo-text {
+            height: 32px;
+            width: auto;
+            filter: brightness(0) invert(1);
+        }
+        .header h1 { 
+            font-size: 32px; 
+            font-weight: 700;
+            margin-bottom: 10px;
+            position: relative;
+            z-index: 1;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .header p { 
+            font-size: 17px;
+            opacity: 0.95;
+            position: relative;
+            z-index: 1;
+        }
+        .content { 
+            padding: 45px 40px; 
+            background: #ffffff;
+        }
+        .greeting {
+            font-size: 24px;
+            font-weight: 700;
+            color: #1e293b;
+            margin-bottom: 20px;
+            background: linear-gradient(135deg, #16a34a 0%, #22c55e 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .intro-text {
+            font-size: 17px;
+            color: #475569;
+            margin-bottom: 35px;
+            line-height: 1.8;
+        }
+        .transaction-details { 
+            background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%); 
+            padding: 30px; 
+            border-radius: 12px; 
+            margin: 30px 0;
+            border: 2px solid #86efac;
+            box-shadow: 0 4px 6px rgba(22, 163, 74, 0.15);
+        }
+        .transaction-details h3 {
+            font-size: 22px;
+            font-weight: 700;
+            color: #166534;
+            margin-bottom: 25px;
+            padding-bottom: 15px;
+            border-bottom: 3px solid #22c55e;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .transaction-details h3::before {
+            content: '💰';
+            font-size: 24px;
+        }
+        .detail-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 14px 0;
+            border-bottom: 1px solid #86efac;
+            transition: background-color 0.2s;
+            width: 100%;
+        }
+        .detail-row:hover {
+            background-color: rgba(34, 197, 94, 0.1);
+            padding-left: 10px;
+            padding-right: 10px;
+            border-radius: 6px;
+        }
+        .detail-row:last-child {
+            border-bottom: none;
+        }
+        .detail-label {
+            font-weight: 600;
+            color: #15803d;
+            font-size: 15px;
+            flex: 0 0 auto;
+            min-width: 180px;
+            text-align: left;
+        }
+        .detail-value {
+            color: #166534;
+            font-weight: 600;
+            font-size: 15px;
+            flex: 0 0 auto;
+            text-align: right;
+            margin-left: auto;
+        }
+        .amount-box {
+            background: linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%);
+            padding: 25px;
+            border-radius: 10px;
+            margin-top: 20px;
+            text-align: center;
+            border: 2px solid #22c55e;
+        }
+        .amount-box .amount-label {
+            font-size: 14px;
+            color: #15803d;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+        .amount-box .amount-value {
+            font-size: 36px;
+            font-weight: 800;
+            color: #166534;
+        }
+        .amount-box.credit .amount-value {
+            color: #16a34a;
+        }
+        .amount-box.debit .amount-value {
+            color: #dc2626;
+        }
+        .info-box { 
+            background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%); 
+            padding: 25px; 
+            border-radius: 12px; 
+            margin: 30px 0; 
+            border-left: 5px solid #3b82f6;
+            box-shadow: 0 4px 6px rgba(59, 130, 246, 0.2);
+        }
+        .info-box strong {
+            display: block;
+            font-size: 18px;
+            color: #1e40af;
+            margin-bottom: 10px;
+            font-weight: 700;
+        }
+        .info-box p {
+            color: #1e40af;
+            margin: 0;
+            font-size: 16px;
+            line-height: 1.7;
+        }
+        .button-container {
+            text-align: center;
+            margin: 40px 0;
+        }
+        .button { 
+            display: inline-block; 
+            background: linear-gradient(135deg, #16a34a 0%, #22c55e 100%); 
+            color: #ffffff !important; 
+            padding: 18px 50px; 
+            text-decoration: none; 
+            border-radius: 10px; 
+            font-weight: 700;
+            font-size: 17px;
+            box-shadow: 0 6px 20px rgba(22, 163, 74, 0.4);
+            transition: all 0.3s ease;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+            border: none;
+        }
+        .button:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 10px 30px rgba(22, 163, 74, 0.5);
+            background: linear-gradient(135deg, #15803d 0%, #16a34a 100%);
+        }
+        .closing {
+            margin-top: 40px;
+            padding-top: 30px;
+            border-top: 2px solid #86efac;
+            background: linear-gradient(135deg, #f0fdf4 0%, #ffffff 100%);
+            padding: 25px;
+            border-radius: 10px;
+        }
+        .closing p {
+            color: #475569;
+            margin-bottom: 15px;
+            line-height: 1.8;
+            font-size: 16px;
+        }
+        .signature {
+            color: #16a34a;
+            font-weight: 700;
+            margin-top: 12px;
+            font-size: 17px;
+        }
+        .footer { 
+            background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
+            text-align: center; 
+            padding: 30px 40px; 
+            color: #cbd5e1; 
+            font-size: 14px;
+        }
+        .footer p {
+            margin: 8px 0;
+        }
+        .footer p:first-child {
+            color: #ffffff;
+            font-weight: 600;
+        }
+        @media only screen and (max-width: 600px) {
+            body { padding: 15px 10px; }
+            .content { padding: 30px 20px; }
+            .header { padding: 35px 25px; }
+            .header h1 { font-size: 26px; }
+            .detail-row { flex-direction: column; gap: 8px; align-items: flex-start; }
+            .button { padding: 16px 35px; font-size: 15px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="email-wrapper">
+        <div class="header">
+            <div class="logo-container">
+                {% if logo_url %}
+                <img src="{{ logo_url }}" alt="WeDesignz Logo" style="height: 45px; width: auto;">
+                {% endif %}
+                {% if text_url %}
+                <img src="{{ text_url }}" alt="WeDesignz" class="logo-text" style="height: 32px; width: auto;">
+                {% endif %}
+            </div>
+            <h1>Wallet Transaction 💰</h1>
+            <p>Your wallet has been updated</p>
+        </div>
+        
+        <div class="content">
+            <div class="greeting">Hello {{ user.first_name|default:user.username }}!</div>
+            <p class="intro-text">Your wallet transaction has been processed successfully. Here are the details:</p>
+            
+            <div class="transaction-details">
+                <h3>Transaction Details</h3>
+                <div class="detail-row">
+                    <span class="detail-label">Transaction Type:</span>
+                    <span class="detail-value">{{ transaction.get_wallet_transaction_type_display }}</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">Transaction ID:</span>
+                    <span class="detail-value">#{{ transaction.id }}</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">Date & Time:</span>
+                    <span class="detail-value">{{ transaction.created_at|date:"F d, Y, g:i A" }}</span>
+                </div>
+                {% if transaction.description %}
+                <div class="detail-row">
+                    <span class="detail-label">Description:</span>
+                    <span class="detail-value">{{ transaction.description }}</span>
+                </div>
+                {% endif %}
+                {% if transaction.order %}
+                <div class="detail-row">
+                    <span class="detail-label">Related Order:</span>
+                    <span class="detail-value">{{ transaction.order.order_number }}</span>
+                </div>
+                {% endif %}
+                
+                <div class="amount-box {% if transaction.wallet_transaction_type == 'credit' %}credit{% else %}debit{% endif %}">
+                    <div class="amount-label">Transaction Amount</div>
+                    <div class="amount-value">
+                        {% if transaction.wallet_transaction_type == 'credit' %}+{% else %}-{% endif %}₹{{ transaction.amount|floatformat:2 }}
+                    </div>
+                </div>
+            </div>
+            
+            <div class="info-box">
+                <strong>📊 View Your Wallet</strong>
+                <p>You can check your current wallet balance and transaction history in your designer console.</p>
+            </div>
+            
+            <div class="button-container">
+                <a href="{{ site_url }}/designer-console" class="button" style="color: #ffffff !important;">View Wallet</a>
+            </div>
+            
+            <div class="closing">
+                <p>If you have any questions about this transaction, feel free to contact our support team.</p>
+                <p class="signature">Best regards,<br>The WeDesignz Team</p>
+            </div>
+        </div>
+        
+        <div class="footer">
+            <p>© {% now "Y" %} WeDesignz. All rights reserved.</p>
+            <p>This email was sent to {{ user.email }}</p>
+        </div>
+    </div>
+</body>
+</html>
+

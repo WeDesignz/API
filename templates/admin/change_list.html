@@ -1,0 +1,29 @@
+{% extends "admin/change_list.html" %}
+{% load i18n admin_urls static admin_list jazzmin %}
+
+{% block pagination %}
+    {{ block.super }}
+    <div class="pagination-selector" style="display: inline-block; margin-left: 15px; vertical-align: middle;">
+        <label for="per-page-select" style="margin-right: 5px; font-weight: normal;">Rows per page:</label>
+        <select id="per-page-select" onchange="changePerPage(this.value)" style="padding: 4px 8px; border: 1px solid #ddd; border-radius: 4px; background-color: white;">
+            <option value="10" {% if request.GET.per_page == '10' or not request.GET.per_page and cl.list_per_page == 10 %}selected{% endif %}>10</option>
+            <option value="25" {% if request.GET.per_page == '25' or not request.GET.per_page and cl.list_per_page == 25 %}selected{% endif %}>25</option>
+            <option value="50" {% if request.GET.per_page == '50' or not request.GET.per_page and cl.list_per_page == 50 %}selected{% endif %}>50</option>
+            <option value="100" {% if request.GET.per_page == '100' %}selected{% endif %}>100</option>
+            <option value="200" {% if request.GET.per_page == '200' %}selected{% endif %}>200</option>
+            <option value="500" {% if request.GET.per_page == '500' %}selected{% endif %}>500</option>
+        </select>
+    </div>
+    <script>
+        function changePerPage(value) {
+            // Get current URL and update per_page parameter without submitting form
+            var url = new URL(window.location.href);
+            url.searchParams.set('per_page', value);
+            // Reset to first page when changing per page
+            url.searchParams.delete('p');
+            // Navigate to new URL (GET request, not POST)
+            window.location.href = url.toString();
+        }
+    </script>
+{% endblock %}
+

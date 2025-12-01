@@ -1,0 +1,86 @@
+"""
+Business configuration utilities for accessing system configuration.
+This module provides easy access to business-related configuration values.
+Values are read from SystemConfig model (set in AdminWebApp), with fallback to environment variables.
+"""
+
+from decimal import Decimal
+from django.conf import settings
+
+
+class BusinessConfig:
+    """Business configuration helper class."""
+    
+    @staticmethod
+    def _get_system_config():
+        """Get SystemConfig instance, with fallback to None if not available."""
+        try:
+            from CoreAdmin.models import SystemConfig
+            return SystemConfig.get_config()
+        except Exception:
+            # Fallback if SystemConfig is not available (e.g., during migrations)
+            return None
+    
+    @staticmethod
+    def get_commission_rate():
+        """Get the platform commission rate as a percentage.
+        Reads from SystemConfig, falls back to environment variable if not set.
+        """
+        config = BusinessConfig._get_system_config()
+        if config and config.commission_rate is not None:
+            return float(config.commission_rate)
+        # Fallback to environment variable
+        return getattr(settings, 'COMMISSION_RATE', 10.0)
+    
+    @staticmethod
+    def get_gst_percentage():
+        """Get the GST percentage.
+        Reads from SystemConfig, falls back to environment variable if not set.
+        """
+        config = BusinessConfig._get_system_config()
+        if config and config.gst_percentage is not None:
+            return float(config.gst_percentage)
+        # Fallback to environment variable
+        return getattr(settings, 'GST_PERCENTAGE', 18.0)
+    
+    @staticmethod
+    def get_custom_order_time_slot_hours():
+        """Get the custom order time slot in hours.
+        Reads from SystemConfig, falls back to environment variable if not set.
+        """
+        config = BusinessConfig._get_system_config()
+        if config and config.custom_order_time_slot_hours is not None:
+            return int(config.custom_order_time_slot_hours)
+        # Fallback to environment variable
+        return getattr(settings, 'CUSTOM_ORDER_TIME_SLOT_HOURS', 1)
+    
+    @staticmethod
+    def get_minimum_required_designs_onboard():
+        """Get the minimum required designs for onboarding.
+        Reads from SystemConfig, falls back to environment variable if not set.
+        """
+        config = BusinessConfig._get_system_config()
+        if config and config.minimum_required_designs is not None:
+            return int(config.minimum_required_designs)
+        # Fallback to environment variable
+        return getattr(settings, 'MINIMUM_REQUIRED_DESIGNS_ONBOARD', 50)
+    
+    @staticmethod
+    def calculate_commission_amount(amount):
+        """Calculate commission amount from a given amount."""
+        # Convert to Decimal to avoid mixing Decimal and float
+        commission_rate = Decimal(str(BusinessConfig.get_commission_rate()))
+        return amount * (commission_rate / Decimal('100'))
+    
+    @staticmethod
+    def calculate_gst_amount(amount):
+        """Calculate GST amount from a given amount."""
+        # Convert to Decimal to avoid mixing Decimal and float
+        gst_percentage = Decimal(str(BusinessConfig.get_gst_percentage()))
+        return amount * (gst_percentage / Decimal('100'))
+    
+    @staticmethod
+    def get_delivery_promise_text():
+        """Get formatted delivery promise text."""
+        hours = BusinessConfig.get_custom_order_time_slot_hours()
+        return f"{hours} hour{'s' if hours != 1 else ''}"

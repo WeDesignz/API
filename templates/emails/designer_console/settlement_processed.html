@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Settlement Processed - WeDesignz</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; 
+            line-height: 1.6;
+            color: #2d3748; 
+            background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%);
+            padding: 30px 20px;
+            min-height: 100vh;
+        }
+        .email-wrapper {
+            max-width: 680px; 
+            margin: 0 auto;
+            background-color: #ffffff;
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.15);
+        }
+        .header {
+            background: linear-gradient(135deg, #059669 0%, #10b981 50%, #34d399 100%); 
+            color: #ffffff; 
+            padding: 50px 40px; 
+            text-align: center;
+            position: relative;
+            overflow: hidden;
+        }
+        .header::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            right: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle, rgba(255,255,255,0.15) 0%, transparent 70%);
+            animation: pulse 20s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); opacity: 0.5; }
+            50% { transform: scale(1.1); opacity: 0.8; }
+        }
+        .logo-container {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            margin-bottom: 25px;
+            position: relative;
+            z-index: 1;
+        }
+        .logo-container img {
+            height: 45px;
+            width: auto;
+            filter: brightness(0) invert(1);
+        }
+        .logo-text {
+            height: 32px;
+            width: auto;
+            filter: brightness(0) invert(1);
+        }
+        .header h1 { 
+            font-size: 32px; 
+            font-weight: 700;
+            margin-bottom: 10px;
+            position: relative;
+            z-index: 1;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .header p { 
+            font-size: 17px;
+            opacity: 0.95;
+            position: relative;
+            z-index: 1;
+        }
+        .content { 
+            padding: 45px 40px; 
+            background: #ffffff;
+        }
+        .greeting {
+            font-size: 24px;
+            font-weight: 700;
+            color: #1e293b;
+            margin-bottom: 20px;
+            background: linear-gradient(135deg, #059669 0%, #10b981 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .intro-text {
+            font-size: 17px;
+            color: #475569;
+            margin-bottom: 35px;
+            line-height: 1.8;
+        }
+        .amount-box {
+            background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%);
+            padding: 40px;
+            border-radius: 12px;
+            text-align: center;
+            margin: 30px 0;
+            border: 3px solid #10b981;
+            box-shadow: 0 6px 20px rgba(5, 150, 105, 0.3);
+        }
+        .amount-label {
+            font-size: 16px;
+            color: #047857;
+            font-weight: 600;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .amount-value {
+            font-size: 48px;
+            font-weight: 800;
+            color: #059669;
+        }
+        .settlement-details {
+            background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%); 
+            padding: 30px; 
+            border-radius: 12px; 
+            margin: 30px 0;
+            border: 2px solid #a7f3d0;
+            box-shadow: 0 4px 6px rgba(5, 150, 105, 0.15);
+        }
+        .settlement-details h3 {
+            font-size: 22px;
+            font-weight: 700;
+            color: #065f46;
+            margin-bottom: 25px;
+            padding-bottom: 15px;
+            border-bottom: 3px solid #10b981;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .settlement-details h3::before {
+            content: '💰';
+            font-size: 24px;
+        }
+        .detail-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 14px 0;
+            border-bottom: 1px solid #a7f3d0;
+            transition: background-color 0.2s;
+            width: 100%;
+        }
+        .detail-row:hover {
+            background-color: rgba(16, 185, 129, 0.1);
+            padding-left: 10px;
+            padding-right: 10px;
+            border-radius: 6px;
+        }
+        .detail-row:last-child {
+            border-bottom: none;
+        }
+        .detail-label {
+            font-weight: 600;
+            color: #047857;
+            font-size: 15px;
+            flex: 0 0 auto;
+            min-width: 180px;
+            text-align: left;
+        }
+        .detail-value {
+            color: #065f46;
+            font-weight: 600;
+            font-size: 15px;
+            flex: 0 0 auto;
+            text-align: right;
+            margin-left: auto;
+        }
+        .breakdown-box { 
+            background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%); 
+            padding: 30px; 
+            border-radius: 12px; 
+            margin: 30px 0; 
+            border-left: 5px solid #0ea5e9;
+            box-shadow: 0 6px 12px rgba(14, 165, 233, 0.25);
+        }
+        .breakdown-box h3 {
+            font-size: 22px;
+            font-weight: 700;
+            color: #0c4a6e;
+            margin-bottom: 20px;
+            margin-top: 0;
+        }
+        .breakdown-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 0;
+            border-bottom: 1px solid rgba(14, 165, 233, 0.2);
+            width: 100%;
+        }
+        .breakdown-row:last-child {
+            border-bottom: none;
+            font-weight: 700;
+            font-size: 18px;
+            color: #0c4a6e;
+            margin-top: 10px;
+            padding-top: 15px;
+            border-top: 2px solid #0ea5e9;
+        }
+        .breakdown-label {
+            flex: 0 0 auto;
+            min-width: 180px;
+            text-align: left;
+            color: #075985;
+            font-weight: 600;
+        }
+        .breakdown-value {
+            flex: 0 0 auto;
+            text-align: right;
+            margin-left: auto;
+            color: #0c4a6e;
+            font-weight: 600;
+        }
+        .info-box { 
+            background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%); 
+            padding: 25px; 
+            border-radius: 12px; 
+            margin: 30px 0; 
+            border-left: 5px solid #3b82f6;
+            box-shadow: 0 4px 6px rgba(59, 130, 246, 0.2);
+        }
+        .info-box strong {
+            display: block;
+            font-size: 18px;
+            color: #1e40af;
+            margin-bottom: 10px;
+            font-weight: 700;
+        }
+        .info-box ul {
+            margin: 10px 0 0 0;
+            padding-left: 20px;
+        }
+        .info-box li {
+            color: #1e40af;
+            margin: 8px 0;
+            font-size: 15px;
+            line-height: 1.7;
+        }
+        .button-container {
+            text-align: center;
+            margin: 40px 0;
+        }
+        .button { 
+            display: inline-block;
+            background: linear-gradient(135deg, #059669 0%, #10b981 100%); 
+            color: #ffffff !important; 
+            padding: 18px 50px; 
+            text-decoration: none;
+            border-radius: 10px; 
+            font-weight: 700;
+            font-size: 17px;
+            box-shadow: 0 6px 20px rgba(5, 150, 105, 0.4);
+            transition: all 0.3s ease;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+            border: none;
+        }
+        .button:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 10px 30px rgba(5, 150, 105, 0.5);
+            background: linear-gradient(135deg, #047857 0%, #059669 100%);
+        }
+        .closing {
+            margin-top: 40px;
+            padding-top: 30px;
+            border-top: 2px solid #a7f3d0;
+            background: linear-gradient(135deg, #ecfdf5 0%, #ffffff 100%);
+            padding: 25px;
+            border-radius: 10px;
+        }
+        .closing p {
+            color: #475569;
+            margin-bottom: 15px;
+            line-height: 1.8;
+            font-size: 16px;
+        }
+        .signature {
+            color: #059669;
+            font-weight: 700;
+            margin-top: 12px;
+            font-size: 17px;
+        }
+        .footer {
+            background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
+            text-align: center;
+            padding: 30px 40px; 
+            color: #cbd5e1; 
+            font-size: 14px;
+        }
+        .footer p {
+            margin: 8px 0;
+        }
+        .footer p:first-child {
+            color: #ffffff;
+            font-weight: 600;
+        }
+        @media only screen and (max-width: 600px) {
+            body { padding: 15px 10px; }
+            .content { padding: 30px 20px; }
+            .header { padding: 35px 25px; }
+            .header h1 { font-size: 26px; }
+            .detail-row, .breakdown-row { flex-direction: column; gap: 8px; align-items: flex-start; }
+            .amount-value { font-size: 36px; }
+            .button { padding: 16px 35px; font-size: 15px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="email-wrapper">
+        <div class="header">
+            <div class="logo-container">
+                {% if logo_url %}
+                <img src="{{ logo_url }}" alt="WeDesignz Logo" style="height: 45px; width: auto;">
+                {% endif %}
+                {% if text_url %}
+                <img src="{{ text_url }}" alt="WeDesignz" class="logo-text" style="height: 32px; width: auto;">
+                {% endif %}
+            </div>
+            <h1>Settlement Processed! 💰</h1>
+            <p>Your earnings have been credited</p>
+        </div>
+        
+        <div class="content">
+            <div class="greeting">Hi {{ user.first_name|default:user.username }}!</div>
+            <p class="intro-text">Great news! Your settlement has been successfully processed and the amount has been credited to your account.</p>
+            
+            <div class="amount-box">
+                <div class="amount-label">Settlement Amount</div>
+                <div class="amount-value">₹{{ settlement.amount|floatformat:2 }}</div>
+            </div>
+            
+                <div class="settlement-details">
+                <h3>Transaction Details</h3>
+                <div class="detail-row">
+                    <span class="detail-label">Transaction ID:</span>
+                    <span class="detail-value">{{ settlement.transaction_id }}</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">Processed On:</span>
+                    <span class="detail-value">{{ settlement.processed_at|date:"F d, Y" }}</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">Payment Method:</span>
+                    <span class="detail-value">{{ settlement.payment_method }}</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">Status:</span>
+                    <span class="detail-value" style="color: #10b981; font-weight: 700;">Completed</span>
+                </div>
+            </div>
+            
+            {% if settlement.total_earnings %}
+            <div class="breakdown-box">
+                <h3>📊 Settlement Breakdown</h3>
+                <div class="breakdown-row">
+                    <span class="breakdown-label">Total Earnings:</span>
+                    <span class="breakdown-value">₹{{ settlement.total_earnings|floatformat:2 }}</span>
+                </div>
+                {% if settlement.platform_fee %}
+                <div class="breakdown-row">
+                    <span class="breakdown-label">Platform Fee (30%):</span>
+                    <span class="breakdown-value">-₹{{ settlement.platform_fee|floatformat:2 }}</span>
+                </div>
+                {% endif %}
+                {% if settlement.tax_deduction %}
+                <div class="breakdown-row">
+                    <span class="breakdown-label">Tax Deduction:</span>
+                    <span class="breakdown-value">-₹{{ settlement.tax_deduction|floatformat:2 }}</span>
+                </div>
+                {% endif %}
+                <div class="breakdown-row">
+                    <span class="breakdown-label">Net Settlement:</span>
+                    <span class="breakdown-value">₹{{ settlement.amount|floatformat:2 }}</span>
+                </div>
+            </div>
+            {% endif %}
+            
+            <div class="info-box">
+                <strong>📋 What's Next?</strong>
+            <ul>
+                    <li>Funds will be transferred to your registered bank account within 2-3 business days</li>
+                    <li>You'll receive a confirmation email once the transfer is complete</li>
+                    <li>Track your earnings in the Designer Console</li>
+                    <li>Keep uploading amazing designs to increase your earnings</li>
+            </ul>
+            </div>
+            
+            <div class="info-box">
+                <strong>⚠️ Important Notes</strong>
+            <ul>
+                <li>Bank transfer may take 2-3 business days to reflect in your account</li>
+                <li>Keep your bank details updated in your profile</li>
+                <li>Next settlement window: 5th-10th of next month</li>
+                <li>Minimum settlement amount: ₹500</li>
+            </ul>
+            </div>
+            
+            <div class="button-container">
+                <a href="{{ site_url }}/designer-console/earnings" class="button" style="color: #ffffff !important;">View Earnings Dashboard</a>
+            </div>
+            
+            <div class="closing">
+                <p>Thank you for being a valued WeDesignz designer!</p>
+                <p class="signature">Best regards,<br>The WeDesignz Team</p>
+            </div>
+        </div>
+        
+        <div class="footer">
+            <p>© {% now "Y" %} WeDesignz. All rights reserved.</p>
+            <p>This email was sent to {{ user.email }}</p>
+        </div>
+    </div>
+</body>
+</html>

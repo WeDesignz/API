@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>New Comment Added - WeDesignz</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; 
+            line-height: 1.6;
+            color: #2d3748; 
+            background: linear-gradient(135deg, #eef2ff 0%, #e0e7ff 100%);
+            padding: 30px 20px;
+            min-height: 100vh;
+        }
+        .email-wrapper {
+            max-width: 680px; 
+            margin: 0 auto;
+            background-color: #ffffff;
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.15);
+        }
+        .header {
+            background: linear-gradient(135deg, #4f46e5 0%, #6366f1 50%, #818cf8 100%); 
+            color: #ffffff; 
+            padding: 50px 40px; 
+            text-align: center;
+            position: relative;
+            overflow: hidden;
+        }
+        .header::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            right: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle, rgba(255,255,255,0.15) 0%, transparent 70%);
+            animation: pulse 20s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); opacity: 0.5; }
+            50% { transform: scale(1.1); opacity: 0.8; }
+        }
+        .logo-container {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            margin-bottom: 25px;
+            position: relative;
+            z-index: 1;
+        }
+        .logo-container img {
+            height: 45px;
+            width: auto;
+            filter: brightness(0) invert(1);
+        }
+        .logo-text {
+            height: 32px;
+            width: auto;
+            filter: brightness(0) invert(1);
+        }
+        .header h1 { 
+            font-size: 32px; 
+            font-weight: 700;
+            margin-bottom: 10px;
+            position: relative;
+            z-index: 1;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .header p { 
+            font-size: 17px;
+            opacity: 0.95;
+            position: relative;
+            z-index: 1;
+        }
+        .content { 
+            padding: 45px 40px; 
+            background: #ffffff;
+        }
+        .greeting {
+            font-size: 24px;
+            font-weight: 700;
+            color: #1e293b;
+            margin-bottom: 20px;
+            background: linear-gradient(135deg, #4f46e5 0%, #6366f1 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .intro-text {
+            font-size: 17px;
+            color: #475569;
+            margin-bottom: 35px;
+            line-height: 1.8;
+        }
+        .comment-info {
+            background: linear-gradient(135deg, #eef2ff 0%, #e0e7ff 100%); 
+            padding: 30px; 
+            border-radius: 12px; 
+            margin: 30px 0;
+            border: 2px solid #818cf8;
+            box-shadow: 0 4px 6px rgba(79, 70, 229, 0.15);
+        }
+        .comment-info h3 {
+            font-size: 22px;
+            font-weight: 700;
+            color: #4338ca;
+            margin-bottom: 20px;
+            margin-top: 0;
+        }
+        .detail-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 14px 0;
+            border-bottom: 1px solid #818cf8;
+            width: 100%;
+        }
+        .detail-row:last-child {
+            border-bottom: none;
+        }
+        .detail-label {
+            font-weight: 600;
+            color: #6366f1;
+            font-size: 15px;
+            flex: 0 0 auto;
+            min-width: 140px;
+            text-align: left;
+        }
+        .detail-value {
+            color: #4338ca;
+            font-weight: 600;
+            font-size: 15px;
+            flex: 0 0 auto;
+            text-align: right;
+            margin-left: auto;
+        }
+        .comment-message {
+            background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%); 
+            padding: 30px; 
+            border-radius: 12px; 
+            margin: 30px 0; 
+            border-left: 5px solid #0ea5e9;
+            box-shadow: 0 6px 12px rgba(14, 165, 233, 0.25);
+        }
+        .comment-message h4 {
+            font-size: 20px;
+            font-weight: 700;
+            color: #0c4a6e;
+            margin-bottom: 15px;
+            margin-top: 0;
+        }
+        .comment-message p {
+            color: #075985;
+            line-height: 1.7;
+            font-size: 16px;
+            margin: 0;
+        }
+        .comment-meta {
+            color: #0c4a6e;
+            font-size: 14px;
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid rgba(14, 165, 233, 0.2);
+        }
+        .info-box { 
+            background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%); 
+            padding: 25px; 
+            border-radius: 12px; 
+            margin: 30px 0; 
+            border-left: 5px solid #f59e0b;
+            box-shadow: 0 4px 6px rgba(245, 158, 11, 0.2);
+        }
+        .info-box strong {
+            display: block;
+            font-size: 18px;
+            color: #92400e;
+            margin-bottom: 15px;
+            font-weight: 700;
+        }
+        .info-box ul {
+            margin: 0;
+            padding-left: 20px;
+        }
+        .info-box li {
+            color: #78350f;
+            margin: 8px 0;
+            font-size: 15px;
+            line-height: 1.7;
+        }
+        .button-container {
+            text-align: center;
+            margin: 40px 0;
+        }
+        .button { 
+            display: inline-block;
+            background: linear-gradient(135deg, #4f46e5 0%, #6366f1 100%); 
+            color: #ffffff !important; 
+            padding: 18px 50px; 
+            text-decoration: none;
+            border-radius: 10px; 
+            font-weight: 700;
+            font-size: 17px;
+            box-shadow: 0 6px 20px rgba(79, 70, 229, 0.4);
+            transition: all 0.3s ease;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+            border: none;
+        }
+        .button:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 10px 30px rgba(79, 70, 229, 0.5);
+            background: linear-gradient(135deg, #4338ca 0%, #4f46e5 100%);
+        }
+        .closing {
+            margin-top: 40px;
+            padding-top: 30px;
+            border-top: 2px solid #e0e7ff;
+            background: linear-gradient(135deg, #eef2ff 0%, #ffffff 100%);
+            padding: 25px;
+            border-radius: 10px;
+        }
+        .closing p {
+            color: #475569;
+            margin-bottom: 15px;
+            line-height: 1.8;
+            font-size: 16px;
+        }
+        .signature {
+            color: #4f46e5;
+            font-weight: 700;
+            margin-top: 12px;
+            font-size: 17px;
+        }
+        .footer {
+            background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
+            text-align: center;
+            padding: 30px 40px; 
+            color: #cbd5e1; 
+            font-size: 14px;
+        }
+        .footer p {
+            margin: 8px 0;
+        }
+        .footer p:first-child {
+            color: #ffffff;
+            font-weight: 600;
+        }
+        @media only screen and (max-width: 600px) {
+            body { padding: 15px 10px; }
+            .content { padding: 30px 20px; }
+            .header { padding: 35px 25px; }
+            .header h1 { font-size: 26px; }
+            .detail-row { flex-direction: column; gap: 8px; align-items: flex-start; }
+            .button { padding: 16px 35px; font-size: 15px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="email-wrapper">
+        <div class="header">
+            <div class="logo-container">
+                {% if logo_url %}
+                <img src="{{ logo_url }}" alt="WeDesignz Logo" style="height: 45px; width: auto;">
+                {% endif %}
+                {% if text_url %}
+                <img src="{{ text_url }}" alt="WeDesignz" class="logo-text" style="height: 32px; width: auto;">
+                {% endif %}
+            </div>
+            <h1>New Comment Added 💬</h1>
+            <p>A customer has added a new comment</p>
+        </div>
+        
+        <div class="content">
+            <div class="greeting">Hi Admin,</div>
+            <p class="intro-text">A customer has added a new comment to their custom order request.</p>
+            
+            <div class="comment-info">
+                <h3>Custom Order Details</h3>
+                <div class="detail-row">
+                    <span class="detail-label">Order ID:</span>
+                    <span class="detail-value">#{{ comment.custom_order_request.id }}</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">Title:</span>
+                    <span class="detail-value">{{ comment.custom_order_request.title }}</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">Customer:</span>
+                    <span class="detail-value">{{ comment.created_by.first_name }} {{ comment.created_by.last_name }}</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">Status:</span>
+                    <span class="detail-value">{{ comment.custom_order_request.get_status_display }}</span>
+                </div>
+            </div>
+            
+            <div class="comment-message">
+                <h4>Customer Comment:</h4>
+                <p>{{ comment.message }}</p>
+                <div class="comment-meta">
+                    <p><strong>Posted:</strong> {{ comment.created_at|date:"F d, Y \a\t g:i A" }}</p>
+                </div>
+            </div>
+            
+            <div class="info-box">
+                <strong>📋 Next Steps</strong>
+            <ul>
+                    <li>Review the customer's comment</li>
+                    <li>Respond if clarification is needed</li>
+                    <li>Respond within 2 hours for best customer experience</li>
+                    <li>Update order status if needed</li>
+            </ul>
+            </div>
+            
+            <div class="button-container">
+                <a href="{{ site_url }}/admin/custom-orders/{{ comment.custom_order_request.id }}" class="button" style="color: #ffffff !important;">View Order & Respond</a>
+            </div>
+            
+            <div class="closing">
+            <p><strong>Customer Contact:</strong></p>
+                <p>📧 Email: {{ comment.created_by.email }}</p>
+                <p>👤 Username: {{ comment.created_by.username }}</p>
+                <p style="margin-top: 15px;">Please respond to customer comments promptly to maintain excellent service.</p>
+            </div>
+        </div>
+        
+        <div class="footer">
+            <p>© {% now "Y" %} WeDesignz. All rights reserved.</p>
+            <p>This email was sent to admin</p>
+        </div>
+    </div>
+</body>
+</html>
