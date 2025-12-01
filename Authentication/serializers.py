@@ -647,9 +647,12 @@ class CustomerListSerializer(serializers.ModelSerializer):
     """
     Serializer for customer list view with basic information.
     """
+    name = serializers.SerializerMethodField()
+    phone_number = serializers.SerializerMethodField()
     account_status = serializers.SerializerMethodField()
     account_status_display = serializers.SerializerMethodField()
     plan_status = serializers.SerializerMethodField()
+    plan_status_display = serializers.SerializerMethodField()
     total_orders = serializers.SerializerMethodField()
     total_spent = serializers.SerializerMethodField()
     last_activity = serializers.SerializerMethodField()
@@ -657,17 +660,41 @@ class CustomerListSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = [
-            'id', 'username', 'email', 'first_name', 'last_name',
+            'id', 'username', 'email', 'first_name', 'last_name', 'name',
+            'phone_number',
             'is_active', 'date_joined', 'last_login',
-            'account_status', 'account_status_display', 'plan_status',
+            'account_status', 'account_status_display', 'plan_status', 'plan_status_display',
             'total_orders', 'total_spent', 'last_activity'
         ]
         read_only_fields = [
-            'id', 'username', 'email', 'first_name', 'last_name',
+            'id', 'username', 'email', 'first_name', 'last_name', 'name',
+            'phone_number',
             'is_active', 'date_joined', 'last_login',
-            'account_status', 'account_status_display', 'plan_status',
+            'account_status', 'account_status_display', 'plan_status', 'plan_status_display',
             'total_orders', 'total_spent', 'last_activity'
         ]
+    
+    def get_name(self, obj):
+        """Get full name"""
+        if obj.first_name or obj.last_name:
+            return f"{obj.first_name or ''} {obj.last_name or ''}".strip()
+        return obj.username or obj.email
+    
+    def get_phone_number(self, obj):
+        """Get primary phone number"""
+        try:
+            from .models import MobileNumber
+            primary_mobile = MobileNumber.objects.filter(
+                created_by=obj,
+                is_primary=True
+            ).first()
+            if primary_mobile:
+                return primary_mobile.mobile_number
+            # Fallback to any mobile number
+            any_mobile = MobileNumber.objects.filter(created_by=obj).first()
+            return any_mobile.mobile_number if any_mobile else None
+        except:
+            return None
     
     def get_account_status(self, obj):
         """Get account status"""
@@ -717,6 +744,13 @@ class CustomerListSerializer(serializers.ModelSerializer):
         except:
             return {'status': 'none'}
     
+    def get_plan_status_display(self, obj):
+        """Get plan status as string for frontend"""
+        plan_status = self.get_plan_status(obj)
+        if isinstance(plan_status, dict):
+            return plan_status.get('status', 'none')
+        return 'none'
+    
     def get_total_orders(self, obj):
         """Get total number of orders"""
         return Order.objects.filter(created_by=obj).count()
@@ -736,9 +770,6 @@ class CustomerListSerializer(serializers.ModelSerializer):
         last_order = Order.objects.filter(created_by=obj).order_by('-created_at').first()
         
         # Get last download using relation system
-        from .models import CustomerDownloadHistory
-        from common.relations import get_related
-        
         download_history = get_related(obj, 'User:CustomerDownloadHistory', CustomerDownloadHistory)
         last_download = download_history.order_by('-downloaded_at').first()
         
@@ -972,9 +1003,6 @@ class CustomerHistorySerializer(serializers.Serializer):
     
     def get_download_history(self, obj):
         """Get download history"""
-        from .models import CustomerDownloadHistory
-        from common.relations import get_related
-        
         downloads = get_related(obj, 'User:CustomerDownloadHistory', CustomerDownloadHistory).order_by('-downloaded_at')
         return [
             {

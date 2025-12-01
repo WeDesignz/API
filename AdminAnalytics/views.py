@@ -27,10 +27,10 @@ from CoreAdmin.models import AdminUserProfile, AdminActivityLog
 @swagger_auto_schema(
     method='get',
     operation_summary="Dashboard Summary",
-    operation_description="Get dashboard summary with key metrics (SuperAdmin access only).",
+    operation_description="Get dashboard summary with key metrics. Returns different data for SuperAdmin and Moderator roles.",
     responses={
         200: openapi.Response(description="Dashboard summary retrieved successfully"),
-        403: openapi.Response(description="Access denied - SuperAdmin privileges required")
+        403: openapi.Response(description="Access denied - Admin privileges required")
     },
     tags=['Admin Analytics Dashboard']
 )
@@ -39,12 +39,16 @@ from CoreAdmin.models import AdminUserProfile, AdminActivityLog
 def dashboard_summary(request):
     """
     Get dashboard summary with key metrics.
+    Returns different data based on admin role (SuperAdmin vs Moderator).
     """
     try:
         admin_profile = AdminUserProfile.objects.get(user=request.user)
-        if admin_profile.admin_group != 'superadmin':
+        is_superadmin = admin_profile.admin_group == 'superadmin'
+        is_moderator = admin_profile.admin_group == 'moderator'
+        
+        if not (is_superadmin or is_moderator):
             return Response({
-                'error': 'SuperAdmin privileges required'
+                'error': 'Admin privileges required'
             }, status=status.HTTP_403_FORBIDDEN)
     except AdminUserProfile.DoesNotExist:
         return Response({
@@ -59,18 +63,354 @@ def dashboard_summary(request):
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
     try:
-        # TODO: Implement actual data aggregation
-        # This is a placeholder implementation
-        summary_data = {
-            'total_revenue': 0.00,
-            'total_users': 0,
-            'total_designs': 0,
-            'total_downloads': 0,
-            'active_subscriptions': 0,
-            'growth_rate': 0.00,
-            'top_design': {},
-            'top_designer': {},
-            'recent_activity': []
+        from django.contrib.auth.models import User
+        from datetime import datetime, timedelta
+        from django.db.models import Q, Sum, Count, Avg
+        from Orders.models import Order
+        from Plans.models import Subscription
+        from Catalog.models import Product
+        from CoreAdmin.models import DesignApproval, DesignerOnboardingStatus
+        from CustomRequests.models import CustomOrderRequest
+        from Feedback.models import SupportThread, ReportIssue
+        from Wallet.models import Wallet
+        
+        now = timezone.now()
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        today_end = now
+        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        year_start = now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+        last_month_start = (month_start - timedelta(days=1)).replace(day=1)
+        last_month_end = month_start - timedelta(microseconds=1)
+        
+        if is_superadmin:
+            # ========== SUPER ADMIN DASHBOARD ==========
+            
+            # Financial Metrics
+            # Total Revenue - Today
+            revenue_today = Order.objects.filter(
+                status='success',
+                created_at__gte=today_start,
+                created_at__lte=today_end
+            ).aggregate(total=Sum('total_amount'))['total'] or 0
+            
+            # Total Revenue - This Month
+            revenue_month = Order.objects.filter(
+                status='success',
+                created_at__gte=month_start,
+                created_at__lte=now
+            ).aggregate(total=Sum('total_amount'))['total'] or 0
+            
+            # Total Revenue - Last Month (for growth calculation)
+            revenue_last_month = Order.objects.filter(
+                status='success',
+                created_at__gte=last_month_start,
+                created_at__lte=last_month_end
+            ).aggregate(total=Sum('total_amount'))['total'] or 0
+            
+            # Total Revenue - This Year
+            revenue_year = Order.objects.filter(
+                status='success',
+                created_at__gte=year_start,
+                created_at__lte=now
+            ).aggregate(total=Sum('total_amount'))['total'] or 0
+            
+            # Calculate growth rate
+            revenue_growth = 0.0
+            if revenue_last_month > 0:
+                revenue_growth = ((float(revenue_month) - float(revenue_last_month)) / float(revenue_last_month)) * 100
+            
+            # Revenue by Source
+            plan_revenue = Order.objects.filter(
+                status='success',
+                order_type='cart',
+                subscription__isnull=False,
+                created_at__gte=month_start
+            ).aggregate(total=Sum('total_amount'))['total'] or 0
+            
+            design_revenue = Order.objects.filter(
+                status='success',
+                order_type__in=['cart', 'subscription'],
+                product_ids__isnull=False,
+                subscription__isnull=True,
+                created_at__gte=month_start
+            ).aggregate(total=Sum('total_amount'))['total'] or 0
+            
+            custom_order_revenue = Order.objects.filter(
+                status='success',
+                order_type='custom',
+                created_at__gte=month_start
+            ).aggregate(total=Sum('total_amount'))['total'] or 0
+            
+            # Refunds
+            from CoreAdmin.models import Refund
+            total_refunds = Refund.objects.filter(
+                created_at__gte=month_start
+            ).aggregate(total=Sum('refund_amount'))['total'] or 0
+            
+            # Refund count
+            refund_count = Refund.objects.filter(
+                created_at__gte=month_start
+            ).count()
+            
+            net_revenue = float(revenue_month) - float(total_refunds)
+            
+            # Transactions
+            total_transactions = Order.objects.filter(created_at__gte=month_start).count()
+            successful_transactions = Order.objects.filter(
+                status='success',
+                created_at__gte=month_start
+            ).count()
+            failed_transactions = Order.objects.filter(
+                status='failed',
+                created_at__gte=month_start
+            ).count()
+            
+            # Average Order Value
+            avg_order_value = float(revenue_month) / successful_transactions if successful_transactions > 0 else 0
+            
+            # User Metrics
+            total_customers = User.objects.filter(
+                is_staff=False,
+                is_superuser=False
+            ).exclude(
+                created_designer_profiles__isnull=False
+            ).count()
+            
+            total_designers = User.objects.filter(
+                created_designer_profiles__isnull=False,
+                created_designer_profiles__onboarding_completed=True
+            ).distinct().count()
+            
+            # Active Subscriptions
+            active_subscriptions = Subscription.objects.filter(status='active').count()
+            
+            # New Signups - Last 7 days
+            seven_days_ago = now - timedelta(days=7)
+            new_customers = User.objects.filter(
+                is_staff=False,
+                is_superuser=False,
+                date_joined__gte=seven_days_ago
+            ).exclude(
+                created_designer_profiles__isnull=False
+            ).count()
+            
+            new_designers = User.objects.filter(
+                created_designer_profiles__isnull=False,
+                created_designer_profiles__onboarding_completed=True,
+                date_joined__gte=seven_days_ago
+            ).distinct().count()
+            
+            # Pending Tasks
+            pending_designer_approvals = DesignerOnboardingStatus.objects.filter(
+                status='pending'
+            ).count()
+            
+            pending_design_reviews = Product.objects.filter(
+                status='draft'
+            ).count()
+            
+            # Custom Orders requiring attention (pending or delayed)
+            custom_orders_pending = CustomOrderRequest.objects.filter(
+                status__in=['pending', 'in_progress']
+            ).count()
+            
+            custom_orders_delayed = CustomOrderRequest.objects.filter(
+                status='delayed'
+            ).count()
+            
+            # Support Tickets
+            open_support_tickets = SupportThread.objects.filter(
+                status__in=['open', 'in_progress']
+            ).count()
+            
+            open_report_issues = ReportIssue.objects.filter(
+                status__in=['open', 'in_progress']
+            ).count()
+            
+            # Pending Payouts
+            from Wallet.models import WalletWithdrawalRequest
+            pending_payouts = WalletWithdrawalRequest.objects.filter(
+                status='pending'
+            ).aggregate(total=Sum('amount'))['total'] or 0
+            
+            pending_payout_count = WalletWithdrawalRequest.objects.filter(
+                status='pending'
+            ).count()
+            
+            # Top Customers (by spending this month)
+            top_customers = []
+            customer_orders = Order.objects.filter(
+                status='success',
+                created_at__gte=month_start
+            ).values('created_by').annotate(
+                total_spent=Sum('total_amount'),
+                order_count=Count('id')
+            ).order_by('-total_spent')[:5]
+            
+            for order_data in customer_orders:
+                try:
+                    customer = User.objects.get(pk=order_data['created_by'])
+                    top_customers.append({
+                        'id': customer.id,
+                        'name': customer.get_full_name() or customer.username,
+                        'email': customer.email,
+                        'total_spent': float(order_data['total_spent']),
+                        'order_count': order_data['order_count']
+                    })
+                except User.DoesNotExist:
+                    continue
+            
+            # Revenue trend (last 7 days)
+            revenue_trend = []
+            for i in range(6, -1, -1):
+                day_date = (now - timedelta(days=i)).date()
+                day_start = timezone.make_aware(datetime.combine(day_date, datetime.min.time()))
+                day_end = day_start + timedelta(days=1) - timedelta(microseconds=1)
+                day_revenue = Order.objects.filter(
+                    status='success',
+                    created_at__gte=day_start,
+                    created_at__lte=day_end
+                ).aggregate(total=Sum('total_amount'))['total'] or 0
+                revenue_trend.append({
+                    'date': day_date.strftime('%Y-%m-%d'),
+                    'label': day_start.strftime('%a'),
+                    'revenue': float(day_revenue)
+                })
+            
+            summary_data = {
+                'role': 'superadmin',
+                'financial': {
+                    'revenue_today': float(revenue_today),
+                    'revenue_month': float(revenue_month),
+                    'revenue_year': float(revenue_year),
+                    'revenue_growth': round(revenue_growth, 2),
+                    'net_revenue': float(net_revenue),
+                    'total_refunds': float(total_refunds),
+                    'avg_order_value': round(avg_order_value, 2),
+                    'revenue_by_source': {
+                        'plans': float(plan_revenue),
+                        'designs': float(design_revenue),
+                        'custom_orders': float(custom_order_revenue)
+                    }
+                },
+                'transactions': {
+                    'total': total_transactions,
+                    'successful': successful_transactions,
+                    'failed': failed_transactions,
+                    'success_rate': round((successful_transactions / total_transactions * 100) if total_transactions > 0 else 0, 2)
+                },
+                'users': {
+                    'total_customers': total_customers,
+                    'total_designers': total_designers,
+                    'new_customers_7d': new_customers,
+                    'new_designers_7d': new_designers,
+                    'active_subscriptions': active_subscriptions
+                },
+                'pending_tasks': {
+                    'designer_approvals': pending_designer_approvals,
+                    'design_reviews': pending_design_reviews,
+                    'custom_orders': custom_orders_pending,
+                    'custom_orders_delayed': custom_orders_delayed,
+                    'support_tickets': open_support_tickets + open_report_issues
+                },
+                'payouts': {
+                    'pending_amount': float(pending_payouts),
+                    'pending_count': pending_payout_count
+                },
+                'top_customers': top_customers,
+                'revenue_trend': revenue_trend
+            }
+        else:
+            # ========== MODERATOR DASHBOARD ==========
+            moderator_id = request.user.id
+            today = now.date()
+            
+            # Today's Activity
+            designers_approved_today = DesignerOnboardingStatus.objects.filter(
+                approved_by_id=moderator_id,
+                approved_at__gte=today_start,
+                approved_at__lte=today_end
+            ).count()
+            
+            designers_rejected_today = DesignerOnboardingStatus.objects.filter(
+                rejected_by_id=moderator_id,
+                rejected_at__gte=today_start,
+                rejected_at__lte=today_end
+            ).count()
+            
+            designs_approved_today = DesignApproval.objects.filter(
+                approved_by_id=moderator_id,
+                action='approved',
+                approved_at__gte=today_start,
+                approved_at__lte=today_end
+            ).count()
+            
+            designs_rejected_today = DesignApproval.objects.filter(
+                approved_by_id=moderator_id,
+                action='rejected',
+                approved_at__gte=today_start,
+                approved_at__lte=today_end
+            ).count()
+            
+            custom_orders_completed_today = CustomOrderRequest.objects.filter(
+                Q(assigned_to_id=moderator_id) | Q(updated_by_id=moderator_id),
+                status='completed',
+                completed_at__gte=today_start,
+                completed_at__lte=today_end
+            ).count()
+            
+            support_resolved_today = SupportThread.objects.filter(
+                Q(assigned_to_id=moderator_id) | Q(resolved_by_id=moderator_id),
+                status__in=['resolved', 'closed'],
+                resolved_at__gte=today_start,
+                resolved_at__lte=today_end
+            ).count()
+            
+            # Pending Tasks
+            pending_designer_approvals = DesignerOnboardingStatus.objects.filter(
+                status='pending',
+                moderator_verified=False
+            ).count()
+            
+            pending_design_reviews = Product.objects.filter(
+                status='draft'
+            ).count()
+            
+            custom_orders_assigned = CustomOrderRequest.objects.filter(
+                assigned_to_id=moderator_id,
+                status__in=['pending', 'in_progress']
+            ).count()
+            
+            support_tickets_assigned = SupportThread.objects.filter(
+                assigned_to_id=moderator_id,
+                status__in=['open', 'in_progress']
+            ).count()
+            
+            # Activity Summary
+            total_activity_today = (
+                designers_approved_today + designers_rejected_today +
+                designs_approved_today + designs_rejected_today +
+                custom_orders_completed_today + support_resolved_today
+            )
+            
+            summary_data = {
+                'role': 'moderator',
+                'today_activity': {
+                    'total': total_activity_today,
+                    'designers_approved': designers_approved_today,
+                    'designers_rejected': designers_rejected_today,
+                    'designs_approved': designs_approved_today,
+                    'designs_rejected': designs_rejected_today,
+                    'custom_orders_completed': custom_orders_completed_today,
+                    'support_resolved': support_resolved_today
+                },
+                'pending_tasks': {
+                    'designer_approvals': pending_designer_approvals,
+                    'design_reviews': pending_design_reviews,
+                    'custom_orders': custom_orders_assigned,
+                    'support_tickets': support_tickets_assigned,
+                    'total': pending_designer_approvals + pending_design_reviews + custom_orders_assigned + support_tickets_assigned
+                }
         }
         
         # Log activity
@@ -80,7 +420,10 @@ def dashboard_summary(request):
                 activity_type='other',
                 description='Dashboard summary viewed',
                 request=request,
-                metadata={'action': 'dashboard_viewed'}
+                metadata={
+                    'action': 'dashboard_viewed',
+                    'role': admin_profile.admin_group
+                }
             )
         except Exception as e:
             # Log error but don't fail the request
@@ -906,3 +1249,314 @@ def export_status(request, export_id):
         'message': 'Export status retrieved successfully',
         'data': serializer.data
     })
+
+
+@swagger_auto_schema(
+    method='get',
+    operation_summary="Moderator Daily Report",
+    operation_description="Get daily activity report for a specific moderator (SuperAdmin access only).",
+    manual_parameters=[
+        openapi.Parameter(
+            'date',
+            openapi.IN_QUERY,
+            description='Date for the report (YYYY-MM-DD). Defaults to today.',
+            type=openapi.TYPE_STRING
+        ),
+    ],
+    responses={
+        200: openapi.Response(description="Moderator daily report retrieved successfully"),
+        403: openapi.Response(description="Access denied - SuperAdmin privileges required"),
+        404: openapi.Response(description="Moderator not found")
+    },
+    tags=['Admin Analytics Reports']
+)
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def moderator_daily_report(request, moderator_id):
+    """
+    Get daily activity report for a specific moderator.
+    """
+    try:
+        admin_profile = AdminUserProfile.objects.get(user=request.user)
+        if admin_profile.admin_group != 'superadmin':
+            return Response({
+                'error': 'SuperAdmin privileges required'
+            }, status=status.HTTP_403_FORBIDDEN)
+    except AdminUserProfile.DoesNotExist:
+        return Response({
+            'error': 'Admin profile required'
+        }, status=status.HTTP_403_FORBIDDEN)
+    
+    try:
+        from django.contrib.auth.models import User
+        from datetime import datetime, timedelta
+        from django.db.models import Q, Count
+        from CoreAdmin.models import DesignApproval, DesignerOnboardingStatus
+        from CustomRequests.models import CustomOrderRequest
+        from Feedback.models import SupportThread, ReportIssue
+        from Coupons.models import Coupon, CouponUsage
+        
+        # Get moderator
+        try:
+            moderator = User.objects.get(pk=moderator_id)
+            moderator_profile = AdminUserProfile.objects.get(user=moderator)
+            if moderator_profile.admin_group != 'moderator':
+                return Response({
+                    'error': 'User is not a moderator'
+                }, status=status.HTTP_404_NOT_FOUND)
+        except User.DoesNotExist:
+            return Response({
+                'error': 'Moderator not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+        except AdminUserProfile.DoesNotExist:
+            return Response({
+                'error': 'Moderator profile not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+        
+        # Get date from query params or use today
+        date_str = request.GET.get('date')
+        if date_str:
+            try:
+                report_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+            except ValueError:
+                return Response({
+                    'error': 'Invalid date format. Use YYYY-MM-DD'
+                }, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            report_date = timezone.now().date()
+        
+        # Calculate date range for the day
+        start_datetime = timezone.make_aware(datetime.combine(report_date, datetime.min.time()))
+        end_datetime = start_datetime + timedelta(days=1) - timedelta(microseconds=1)
+        
+        # 1. Designers Approved/Rejected
+        designers_approved = DesignerOnboardingStatus.objects.filter(
+            approved_by_id=moderator_id,
+            approved_at__gte=start_datetime,
+            approved_at__lte=end_datetime
+        ).count()
+        
+        designers_rejected = DesignerOnboardingStatus.objects.filter(
+            rejected_by_id=moderator_id,
+            rejected_at__gte=start_datetime,
+            rejected_at__lte=end_datetime
+        ).count()
+        
+        # Get detailed list
+        designers_approved_list = DesignerOnboardingStatus.objects.filter(
+            approved_by_id=moderator_id,
+            approved_at__gte=start_datetime,
+            approved_at__lte=end_datetime
+        ).select_related('designer').values(
+            'id', 'designer_id', 'approved_at'
+        )[:50]  # Limit to 50 for performance
+        
+        designers_rejected_list = DesignerOnboardingStatus.objects.filter(
+            rejected_by_id=moderator_id,
+            rejected_at__gte=start_datetime,
+            rejected_at__lte=end_datetime
+        ).select_related('designer').values(
+            'id', 'designer_id', 'rejected_at', 'rejection_reason'
+        )[:50]
+        
+        # 2. Designs Approved/Rejected
+        designs_approved = DesignApproval.objects.filter(
+            approved_by_id=moderator_id,
+            action='approved',
+            approved_at__gte=start_datetime,
+            approved_at__lte=end_datetime
+        ).count()
+        
+        designs_rejected = DesignApproval.objects.filter(
+            approved_by_id=moderator_id,
+            action='rejected',
+            approved_at__gte=start_datetime,
+            approved_at__lte=end_datetime
+        ).count()
+        
+        # Get detailed list
+        designs_approved_list = DesignApproval.objects.filter(
+            approved_by_id=moderator_id,
+            action='approved',
+            approved_at__gte=start_datetime,
+            approved_at__lte=end_datetime
+        ).values(
+            'id', 'product_id', 'approved_at', 'admin_notes'
+        )[:50]
+        
+        designs_rejected_list = DesignApproval.objects.filter(
+            approved_by_id=moderator_id,
+            action='rejected',
+            approved_at__gte=start_datetime,
+            approved_at__lte=end_datetime
+        ).values(
+            'id', 'product_id', 'approved_at', 'rejection_reason', 'admin_notes'
+        )[:50]
+        
+        # 3. Custom Orders
+        # Orders assigned to or updated by this moderator
+        custom_orders_completed = CustomOrderRequest.objects.filter(
+            Q(assigned_to_id=moderator_id) | Q(updated_by_id=moderator_id),
+            status='completed',
+            completed_at__gte=start_datetime,
+            completed_at__lte=end_datetime
+        ).count()
+        
+        custom_orders_interacted = CustomOrderRequest.objects.filter(
+            Q(assigned_to_id=moderator_id) | Q(updated_by_id=moderator_id),
+            updated_at__gte=start_datetime,
+            updated_at__lte=end_datetime
+        ).exclude(status='pending').count()
+        
+        # Get detailed list with rejection reasons
+        custom_orders_list = CustomOrderRequest.objects.filter(
+            Q(assigned_to_id=moderator_id) | Q(updated_by_id=moderator_id),
+            updated_at__gte=start_datetime,
+            updated_at__lte=end_datetime
+        ).values(
+            'id', 'title', 'status', 'updated_at', 'cancellation_reason', 'refund_reason'
+        )[:50]
+        
+        # 4. Support Tickets
+        support_resolved = SupportThread.objects.filter(
+            Q(assigned_to_id=moderator_id) | Q(resolved_by_id=moderator_id),
+            status__in=['resolved', 'closed'],
+            resolved_at__gte=start_datetime,
+            resolved_at__lte=end_datetime
+        ).count()
+        
+        support_rejected = SupportThread.objects.filter(
+            assigned_to_id=moderator_id,
+            status='closed',
+            resolved_at__gte=start_datetime,
+            resolved_at__lte=end_datetime
+        ).exclude(resolution__isnull=False).count()
+        
+        support_interacted = SupportThread.objects.filter(
+            Q(assigned_to_id=moderator_id) | Q(resolved_by_id=moderator_id),
+            updated_at__gte=start_datetime,
+            updated_at__lte=end_datetime
+        ).count()
+        
+        # Get detailed list
+        support_tickets_list = SupportThread.objects.filter(
+            Q(assigned_to_id=moderator_id) | Q(resolved_by_id=moderator_id),
+            updated_at__gte=start_datetime,
+            updated_at__lte=end_datetime
+        ).values(
+            'id', 'subject', 'status', 'priority', 'updated_at', 'resolution'
+        )[:50]
+        
+        # Report Issues
+        report_issues_resolved = ReportIssue.objects.filter(
+            resolved_by_id=moderator_id,
+            status__in=['resolved', 'closed'],
+            resolved_at__gte=start_datetime,
+            resolved_at__lte=end_datetime
+        ).count()
+        
+        report_issues_list = ReportIssue.objects.filter(
+            resolved_by_id=moderator_id,
+            resolved_at__gte=start_datetime,
+            resolved_at__lte=end_datetime
+        ).values(
+            'id', 'title', 'status', 'priority', 'resolved_at', 'resolution'
+        )[:50]
+        
+        # 5. Coupons
+        coupons_added = Coupon.objects.filter(
+            created_by_id=moderator_id,
+            created_at__gte=start_datetime,
+            created_at__lte=end_datetime
+        ).count()
+        
+        # Get coupon usage count for coupons created by this moderator
+        coupons_created_today = Coupon.objects.filter(
+            created_by_id=moderator_id,
+            created_at__gte=start_datetime,
+            created_at__lte=end_datetime
+        )
+        coupon_usage_count = CouponUsage.objects.filter(
+            coupon_id__in=coupons_created_today.values_list('id', flat=True)
+        ).count()
+        
+        # Get detailed list
+        coupons_list = Coupon.objects.filter(
+            created_by_id=moderator_id,
+            created_at__gte=start_datetime,
+            created_at__lte=end_datetime
+        ).values(
+            'id', 'name', 'code', 'created_at'
+        )[:50]
+        
+        # Log activity
+        try:
+            AdminActivityLog.log_activity(
+                user=request.user,
+                activity_type='other',
+                description=f'Viewed daily report for moderator {moderator.username}',
+                request=request,
+                metadata={
+                    'action': 'moderator_daily_report_viewed',
+                    'moderator_id': moderator_id,
+                    'report_date': report_date.isoformat()
+                }
+            )
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f'Failed to log activity: {e}')
+        
+        return Response({
+            'message': 'Moderator daily report retrieved successfully',
+            'data': {
+                'moderator': {
+                    'id': moderator.id,
+                    'username': moderator.username,
+                    'email': moderator.email,
+                    'first_name': moderator.first_name,
+                    'last_name': moderator.last_name,
+                },
+                'report_date': report_date.isoformat(),
+                'designers': {
+                    'approved': designers_approved,
+                    'rejected': designers_rejected,
+                    'approved_list': list(designers_approved_list),
+                    'rejected_list': list(designers_rejected_list),
+                },
+                'designs': {
+                    'approved': designs_approved,
+                    'rejected': designs_rejected,
+                    'approved_list': list(designs_approved_list),
+                    'rejected_list': list(designs_rejected_list),
+                },
+                'custom_orders': {
+                    'completed': custom_orders_completed,
+                    'interacted': custom_orders_interacted,
+                    'list': list(custom_orders_list),
+                },
+                'support': {
+                    'resolved': support_resolved + report_issues_resolved,
+                    'rejected': support_rejected,
+                    'interacted': support_interacted + report_issues_resolved,
+                    'support_threads': list(support_tickets_list),
+                    'report_issues': list(report_issues_list),
+                },
+                'coupons': {
+                    'added': coupons_added,
+                    'usage_count': coupon_usage_count,
+                    'list': list(coupons_list),
+                },
+            }
+        })
+        
+    except Exception as e:
+        import logging
+        import traceback
+        logger = logging.getLogger(__name__)
+        logger.error(f'Error in moderator_daily_report: {e}')
+        logger.error(traceback.format_exc())
+        return Response({
+            'error': 'An error occurred while retrieving moderator daily report',
+            'details': str(e) if settings.DEBUG else None
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

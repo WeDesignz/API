@@ -21,4 +21,7 @@ urlpatterns = [
     # Export Reports
     path('export/', views.export_report, name='export_report'),
     path('export/<int:export_id>/status/', views.export_status, name='export_status'),
+    
+    # Moderator Reports
+    path('moderator-daily-report/<int:moderator_id>/', views.moderator_daily_report, name='moderator_daily_report'),
 ]
