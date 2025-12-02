@@ -570,21 +570,69 @@ def pinterest_oauth_callback(request):
         except Exception as e:
             logger.warning(f"Could not queue retry for failed posts: {str(e)}")
         
-        # Try to get boards to help user select board
+        # Try to get boards and auto-select or create one
         boards_info = ""
+        auto_selected_board = None
         try:
             from .pinterest_service import PinterestService
-            service = PinterestService()
-            boards = service.get_boards()
-            if boards:
-                boards_info = "<h3>Your Pinterest Boards:</h3><ul>"
+            
+            # Fetch existing boards
+            boards = PinterestService.get_boards_with_token(integration.access_token)
+            
+            if boards and len(boards) > 0:
+                # Boards exist: auto-select the first one
+                first_board = boards[0]
+                board_id = str(first_board.get('id', ''))
+                board_name = first_board.get('name', 'Unknown')
+                
+                # Auto-select the first board
+                integration.board_id = board_id
+                integration.board_name = board_name
+                integration.save()
+                
+                auto_selected_board = first_board
+                logger.info(f"Auto-selected Pinterest board: {board_name} (ID: {board_id})")
+                
+                boards_info = f"<h3>Your Pinterest Boards:</h3><ul>"
                 for board in boards[:10]:  # Show first 10 boards
-                    board_id = board.get('id', '')
-                    board_name = board.get('name', 'Unknown')
-                    boards_info += f"<li><strong>{board_name}</strong> - ID: <code>{board_id}</code></li>"
+                    b_id = board.get('id', '')
+                    b_name = board.get('name', 'Unknown')
+                    selected = "✅ (Auto-selected)" if str(b_id) == str(board_id) else ""
+                    boards_info += f"<li><strong>{b_name}</strong> {selected} - ID: <code>{b_id}</code></li>"
                 boards_info += "</ul>"
+            else:
+                # No boards exist: create a default one in sandbox mode
+                use_sandbox = getattr(settings, 'PINTEREST_USE_SANDBOX', True)
+                if use_sandbox:
+                    # Create a default board in sandbox
+                    new_board = PinterestService.create_board_with_token(
+                        integration.access_token,
+                        name="Design Gallery",
+                        description="WeDesignz designs"
+                    )
+                    
+                    if new_board:
+                        board_id = str(new_board.get('id', ''))
+                        board_name = new_board.get('name', 'Design Gallery')
+                        
+                        # Auto-select the newly created board
+                        integration.board_id = board_id
+                        integration.board_name = board_name
+                        integration.save()
+                        
+                        auto_selected_board = new_board
+                        logger.info(f"Created and auto-selected Pinterest board: {board_name} (ID: {board_id})")
+                        
+                        boards_info = f"<h3>Created New Board:</h3><ul>"
+                        boards_info += f"<li><strong>{board_name}</strong> ✅ (Auto-selected) - ID: <code>{board_id}</code></li>"
+                        boards_info += "</ul><p><em>Note: In sandbox mode, boards may not appear in the list but can still be used.</em></p>"
+                    else:
+                        boards_info = "<p><em>Could not create board automatically. Please create a board manually in Pinterest and set it in Settings.</em></p>"
+                else:
+                    boards_info = "<p><em>No boards found. Please create a board in Pinterest and select it in Settings.</em></p>"
+                    
         except Exception as e:
-            logger.warning(f"Could not fetch boards: {str(e)}")
+            logger.warning(f"Could not fetch/create boards: {str(e)}", exc_info=True)
             boards_info = "<p><em>Could not fetch boards. You can get your board ID from Pinterest API later.</em></p>"
         
         # Get admin webapp URL
@@ -1011,12 +1059,35 @@ def pinterest_boards(request):
     
     try:
         from .pinterest_service import PinterestService
+        from django.conf import settings
+        
         boards = PinterestService.get_boards_with_token(integration.access_token)
         
         if boards is None:
             return JsonResponse({
                 'error': 'Failed to fetch boards. Check server logs for details.'
             }, status=500)
+        
+        # If no boards exist and we're in sandbox mode, optionally create one
+        # Check if create_if_empty parameter is passed
+        create_if_empty = request.GET.get('create_if_empty', 'false').lower() == 'true'
+        use_sandbox = getattr(settings, 'PINTEREST_USE_SANDBOX', True)
+        
+        if len(boards) == 0 and create_if_empty and use_sandbox:
+            # Create a default board
+            new_board = PinterestService.create_board_with_token(
+                integration.access_token,
+                name="Design Gallery",
+                description="WeDesignz designs"
+            )
+            
+            if new_board:
+                boards = [new_board]
+                # Auto-select it
+                integration.board_id = str(new_board.get('id', ''))
+                integration.board_name = new_board.get('name', 'Design Gallery')
+                integration.save()
+                logger.info(f"Created and auto-selected board: {integration.board_name} (ID: {integration.board_id})")
         
         return JsonResponse({
             'success': True,
@@ -1052,43 +1123,84 @@ def pinterest_set_board(request):
         }, status=400)
     
     try:
-        # Verify board exists by fetching boards
         from .pinterest_service import PinterestService
-        boards = PinterestService.get_boards_with_token(integration.access_token)
+        from django.conf import settings
         
-        if boards is None:
+        # Check if we're in sandbox mode
+        use_sandbox = getattr(settings, 'PINTEREST_USE_SANDBOX', True)
+        
+        # Validate board_id is numeric (Pinterest requirement)
+        if not str(board_id).isdigit():
             return JsonResponse({
-                'error': 'Could not verify board. Please check your access token.'
-            }, status=500)
-        
-        # Find the board
-        board_found = None
-        for board in boards:
-            if str(board.get('id')) == str(board_id):
-                board_found = board
-                break
-        
-        if not board_found:
-            return JsonResponse({
-                'error': f'Board ID "{board_id}" not found in your boards.'
+                'error': 'Board ID must be numeric (Pinterest requirement).'
             }, status=400)
         
-        # Set the board
-        integration.board_id = str(board_id)
-        if board_name:
-            integration.board_name = board_name
-        elif board_found.get('name'):
-            integration.board_name = board_found.get('name')
-        integration.save()
-        
-        logger.info(f"Pinterest board set: {integration.board_name} (ID: {integration.board_id})")
-        
-        return JsonResponse({
-            'success': True,
-            'message': 'Board set successfully',
-            'board_id': integration.board_id,
-            'board_name': integration.board_name
-        })
+        # In sandbox mode, skip validation since boards API may return empty
+        if use_sandbox:
+            # Sandbox mode: Allow setting board ID directly
+            integration.board_id = str(board_id)
+            if board_name:
+                integration.board_name = board_name
+            else:
+                # Try to get board name from API if not provided
+                try:
+                    boards = PinterestService.get_boards_with_token(integration.access_token)
+                    if boards:
+                        for board in boards:
+                            if str(board.get('id')) == str(board_id):
+                                integration.board_name = board.get('name', '')
+                                break
+                    if not integration.board_name:
+                        integration.board_name = board_name or f"Board {board_id}"
+                except:
+                    integration.board_name = board_name or f"Board {board_id}"
+            integration.save()
+            
+            logger.info(f"Pinterest board set (sandbox): {integration.board_name} (ID: {integration.board_id})")
+            
+            return JsonResponse({
+                'success': True,
+                'message': 'Board set successfully',
+                'board_id': integration.board_id,
+                'board_name': integration.board_name
+            })
+        else:
+            # Production mode: Validate board exists
+            boards = PinterestService.get_boards_with_token(integration.access_token)
+            
+            if boards is None:
+                return JsonResponse({
+                    'error': 'Could not verify board. Please check your access token.'
+                }, status=500)
+            
+            # Find the board
+            board_found = None
+            for board in boards:
+                if str(board.get('id')) == str(board_id):
+                    board_found = board
+                    break
+            
+            if not board_found:
+                return JsonResponse({
+                    'error': f'Board ID "{board_id}" not found in your boards.'
+                }, status=400)
+            
+            # Set the board
+            integration.board_id = str(board_id)
+            if board_name:
+                integration.board_name = board_name
+            elif board_found.get('name'):
+                integration.board_name = board_found.get('name')
+            integration.save()
+            
+            logger.info(f"Pinterest board set: {integration.board_name} (ID: {integration.board_id})")
+            
+            return JsonResponse({
+                'success': True,
+                'message': 'Board set successfully',
+                'board_id': integration.board_id,
+                'board_name': integration.board_name
+            })
         
     except Exception as e:
         logger.error(f"Error setting Pinterest board: {str(e)}", exc_info=True)
