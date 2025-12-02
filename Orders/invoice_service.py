@@ -522,7 +522,7 @@ def get_user_address(user: User) -> Dict[str, str]:
     # Try to get from user profile if available
     try:
         from Profiles.models import DesignerProfile
-        profile = DesignerProfile.objects.filter(user=user).first()
+        profile = DesignerProfile.objects.filter(created_by=user).first()
         if profile:
             return {
                 "client_company": user.get_full_name() or user.username,

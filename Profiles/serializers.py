@@ -790,9 +790,9 @@ class DesignerManagementSerializer(serializers.ModelSerializer):
     """
     Serializer for designer management list view.
     """
-    designer_status = serializers.CharField(source='designerprofile.status', read_only=True)
-    designer_bio = serializers.CharField(source='designerprofile.bio', read_only=True)
-    skill_tags = serializers.JSONField(source='designerprofile.skill_tags', read_only=True)
+    designer_status = serializers.SerializerMethodField()
+    designer_bio = serializers.SerializerMethodField()
+    skill_tags = serializers.SerializerMethodField()
     joined_date = serializers.DateTimeField(source='date_joined', read_only=True)
     last_login = serializers.DateTimeField(read_only=True)
     total_earnings = serializers.SerializerMethodField()
@@ -806,6 +806,21 @@ class DesignerManagementSerializer(serializers.ModelSerializer):
             'is_active', 'designer_status', 'designer_bio', 'skill_tags',
             'joined_date', 'last_login', 'total_earnings', 'pending_withdrawals', 'wallet_balance'
         ]
+    
+    def get_designer_status(self, obj):
+        """Get designer profile status"""
+        profile = obj.created_designer_profiles.first()
+        return profile.status if profile else None
+    
+    def get_designer_bio(self, obj):
+        """Get designer profile bio"""
+        profile = obj.created_designer_profiles.first()
+        return profile.bio if profile else None
+    
+    def get_skill_tags(self, obj):
+        """Get designer profile skill tags"""
+        profile = obj.created_designer_profiles.first()
+        return profile.skill_tags if profile else []
     
     def get_total_earnings(self, obj):
         """Calculate total lifetime earnings for the designer"""
@@ -865,7 +880,11 @@ class DesignerDetailSerializer(serializers.ModelSerializer):
     def get_designer_profile(self, obj):
         """Get designer profile information"""
         try:
-            profile = obj.designerprofile
+            # Use the correct reverse relation name from DesignerProfile model
+            # DesignerProfile has related_name='created_designer_profiles'
+            profile = obj.created_designer_profiles.first()
+            if not profile:
+                return None
             return {
                 'id': profile.id,
                 'bio': profile.bio,
@@ -876,7 +895,7 @@ class DesignerDetailSerializer(serializers.ModelSerializer):
                 'updated_at': profile.updated_at,
                 'media_count': len(profile.get_media())
             }
-        except DesignerProfile.DoesNotExist:
+        except (DesignerProfile.DoesNotExist, AttributeError):
             return None
     
     def get_wallet_info(self, obj):

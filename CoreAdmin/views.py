@@ -1127,7 +1127,8 @@ def designer_detail(request, designer_id):
             'error': 'Designer not found'
         }, status=status.HTTP_404_NOT_FOUND)
     
-    if not hasattr(designer, 'designerprofile'):
+    # Check if user has a designer profile using the correct relation name
+    if not designer.created_designer_profiles.exists():
         return Response({
             'error': 'User is not a designer'
         }, status=status.HTTP_404_NOT_FOUND)

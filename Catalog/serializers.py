@@ -1455,7 +1455,7 @@ class DesignDetailSerializer(serializers.ModelSerializer):
             if obj.created_by:
                 from Profiles.models import DesignerProfile
                 try:
-                    designer_profile = DesignerProfile.objects.filter(user=obj.created_by).first()
+                    designer_profile = DesignerProfile.objects.filter(created_by=obj.created_by).first()
                     return {
                         'id': obj.created_by.id,
                         'name': obj.created_by.get_full_name() or obj.created_by.username,
