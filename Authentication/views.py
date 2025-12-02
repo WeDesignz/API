@@ -57,10 +57,22 @@ def send_otp_email(email, otp, purpose):
 
 
 def send_otp_sms(mobile_number, otp, purpose):
-    """Send OTP via SMS (placeholder for SMS service integration)"""
-    # This is a placeholder. In production, integrate with SMS service like Twilio
-    print(f"SMS to {mobile_number}: Your OTP for {purpose} is: {otp}")
-    return True
+    """Send OTP via WhatsApp"""
+    from common.whatsapp_service import WhatsAppService
+    import logging
+    
+    logger = logging.getLogger(__name__)
+    
+    try:
+        success = WhatsAppService.send_otp_message(
+            phone_number=mobile_number,
+            otp_code=otp,
+            purpose=purpose
+        )
+        return success
+    except Exception as e:
+        logger.error(f"Failed to send OTP via WhatsApp: {str(e)}")
+        return False
 
 
 @swagger_auto_schema(
@@ -1036,6 +1048,12 @@ def resend_otp(request):
                     'error': 'Mobile number not found'
                 }, status=status.HTTP_400_BAD_REQUEST)
             
+            # Only send WhatsApp for mobile verification, not password reset
+            if otp_for != 'mobile_verification':
+                return Response({
+                    'error': 'WhatsApp OTP is only available for mobile verification. Please use email for other verifications.'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
             # Generate and send OTP
             otp = generate_otp()
             expires_at = timezone.now() + timedelta(minutes=10)
@@ -1048,7 +1066,8 @@ def resend_otp(request):
                 created_by=mobile_obj.created_by
             )
             
-            send_otp_sms(mobile_number, otp, otp_for.replace('_', ' ').title())
+            # Send OTP via WhatsApp (only for mobile verification)
+            send_otp_sms(mobile_number, otp, "Mobile Verification")
             
             return Response({
                 'message': f'OTP sent to {mobile_number}'
