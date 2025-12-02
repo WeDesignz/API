@@ -175,7 +175,7 @@ def pinterest_oauth_callback(request):
                     </p>
                     <div class="actions">
                         <a href="/api/pinterest/authorize/" class="btn btn-primary">Try Again</a>
-                        <a href="{admin_webapp_url}/settings?tab=pinterest" class="btn btn-secondary">Go to Settings</a>
+                        <a href="{admin_webapp_url}/settings" class="btn btn-secondary">Go to Settings</a>
                     </div>
                 </div>
             </body>
@@ -284,7 +284,7 @@ def pinterest_oauth_callback(request):
                     </p>
                     <div class="actions">
                         <a href="/api/pinterest/authorize/" class="btn btn-primary">Try Again</a>
-                        <a href="{admin_webapp_url}/settings?tab=pinterest" class="btn btn-secondary">Go to Settings</a>
+                        <a href="{admin_webapp_url}/settings" class="btn btn-secondary">Go to Settings</a>
                     </div>
                 </div>
             </body>
@@ -531,7 +531,7 @@ def pinterest_oauth_callback(request):
                         </div>
                         <div class="actions">
                             <a href="/api/pinterest/authorize/" class="btn btn-primary">Try Again</a>
-                            <a href="{admin_webapp_url}/settings?tab=pinterest" class="btn btn-secondary">Go to Settings</a>
+                            <a href="{admin_webapp_url}/settings" class="btn btn-secondary">Go to Settings</a>
                         </div>
                     </div>
                 </body>
@@ -814,7 +814,7 @@ def pinterest_oauth_callback(request):
                     </div>
                     
                     <div class="actions">
-                        <a href="{admin_webapp_url}/settings?tab=pinterest" class="btn btn-primary">
+                        <a href="{admin_webapp_url}/settings" class="btn btn-primary">
                             🎛️ Go to Settings
                         </a>
                         <a href="{admin_webapp_url}/designs" class="btn btn-success">
@@ -825,6 +825,12 @@ def pinterest_oauth_callback(request):
                         </a>
                     </div>
                 </div>
+                <script>
+                    // Automatically redirect to settings after 3 seconds
+                    setTimeout(function() {{
+                        window.location.href = '{admin_webapp_url}/settings';
+                    }}, 3000);
+                </script>
             </body>
             </html>
             """
@@ -951,7 +957,7 @@ def pinterest_oauth_callback(request):
                     </p>
                     <div class="actions">
                         <a href="/api/pinterest/authorize/" class="btn btn-primary">Try Again</a>
-                        <a href="{admin_webapp_url}/settings?tab=pinterest" class="btn btn-secondary">Go to Settings</a>
+                        <a href="{admin_webapp_url}/settings" class="btn btn-secondary">Go to Settings</a>
                     </div>
                 </div>
             </body>

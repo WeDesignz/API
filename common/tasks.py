@@ -1205,8 +1205,52 @@ def post_design_to_pinterest(self, pinterest_post_id, base_url=None):
             pinterest_post.mark_failed("No image media found for product")
             return
         
-        # Use the first image (or you can choose based on priority)
-        image_media = media_files.first()
+        # Prioritize: JPG > PNG > other images (skip mockup)
+        image_media = None
+
+        for media in media_files:
+            if not media.file:
+                continue
+            
+            file_name = media.file.name.lower()
+            base_name = os.path.splitext(os.path.basename(file_name))[0]
+            
+            # Skip mockup files
+            if base_name == 'mockup':
+                continue
+            
+            # Prefer JPG first
+            if file_name.endswith(('.jpg', '.jpeg')):
+                image_media = media
+                break
+
+        # If no JPG, try PNG
+        if not image_media:
+            for media in media_files:
+                if not media.file:
+                    continue
+                file_name = media.file.name.lower()
+                base_name = os.path.splitext(os.path.basename(file_name))[0]
+                if base_name == 'mockup':
+                    continue
+                if file_name.endswith('.png'):
+                    image_media = media
+                    break
+
+        # Fallback to any non-mockup image
+        if not image_media:
+            for media in media_files:
+                if not media.file:
+                    continue
+                file_name = media.file.name.lower()
+                base_name = os.path.splitext(os.path.basename(file_name))[0]
+                if base_name != 'mockup':
+                    image_media = media
+                    break
+
+        # Last resort: use first image
+        if not image_media:
+            image_media = media_files.first()
         
         # Build absolute image URL
         # Pinterest requires HTTPS and publicly accessible URLs (no localhost)
