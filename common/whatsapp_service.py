@@ -1,7 +1,6 @@
 import requests
 import logging
 from django.conf import settings
-from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
@@ -122,26 +121,12 @@ class WhatsAppService:
             # Use approved template instead of free-form message
             template_name = getattr(settings, 'WHATSAPP_OTP_TEMPLATE_NAME', 'otp_template')
             
-            # Pass OTP code as the first parameter ({{1}} in template)
+            # Pass OTP code as the first parameter ({{1}} in template body)
             parameters = [otp_code]
             
-            # Template requires URL button - provide button parameter if needed
-            # Check if button requires dynamic URL parameter (vs static URL in template)
-            button_requires_param = getattr(settings, 'WHATSAPP_BUTTON_REQUIRES_PARAM', True)
-            
-            if button_requires_param:
-                # Button needs dynamic URL parameter
-                button_url = getattr(settings, 'WHATSAPP_BUTTON_URL', 'wedesignz.com')
-                
-                # Remove protocol if present and ensure it's under 15 characters
-                short_url = button_url.replace('https://', '').replace('http://', '')
-                if len(short_url) > 15:
-                    short_url = 'wedesignz.com'  # 14 characters - under limit
-                
-                button_parameters = [short_url]
-            else:
-                # Button URL is static in template - no parameter needed
-                button_parameters = None
+            # Button also requires OTP as text parameter (not URL)
+            # Template has button at index 0 that expects OTP as text
+            button_parameters = [otp_code]
             
             return WhatsAppService.send_template_message(
                 phone_number=phone_number,
@@ -220,12 +205,12 @@ class WhatsAppService:
                     button_param_str = str(button_param)
                     
                     # URL button format (required by template)
-                    # Parameter type must be "text" with URL in "text" field
-                    # URL should be domain only (no protocol) to fit 15-char limit
+                    # Index should be string (as per WhatsApp API)
+                    # Parameter type must be "text" with text value in "text" field
                     components.append({
                         "type": "button",
                         "sub_type": "url",
-                        "index": index,
+                        "index": str(index),  # Index as string per WhatsApp API
                         "parameters": [
                             {
                                 "type": "text",

@@ -578,11 +578,6 @@ ADMIN_EMAIL = config('ADMIN_EMAIL', default='admin@wedesignz.com')
 # Site Configuration
 SITE_URL = config('SITE_URL', default='http://localhost:8000')
 
-# WhatsApp Button URL (for template buttons - must be publicly accessible)
-# Use production URL even in development since WhatsApp users need to access it
-# Domain only, max 15 characters (WhatsApp limit)
-WHATSAPP_BUTTON_URL = config('WHATSAPP_BUTTON_URL', default='wedesignz.com')
-
 # Razorpay Configuration
 RAZORPAY_KEY_ID = config('RAZORPAY_KEY_ID', default='')
 RAZORPAY_KEY_SECRET = config('RAZORPAY_KEY_SECRET', default='')
@@ -591,10 +586,7 @@ RAZORPAY_WEBHOOK_SECRET = config('RAZORPAY_WEBHOOK_SECRET', default='')
 # WhatsApp Business API Configuration
 WHATSAPP_PHONE_NUMBER_ID = config('WHATSAPP_PHONE_NUMBER_ID', default='')
 WHATSAPP_ACCESS_TOKEN = config('WHATSAPP_ACCESS_TOKEN', default='')
-WHATSAPP_BUSINESS_ACCOUNT_ID = config('WHATSAPP_BUSINESS_ACCOUNT_ID', default='')
 WHATSAPP_OTP_TEMPLATE_NAME = config('WHATSAPP_OTP_TEMPLATE_NAME', default='otp_template')
-# Set to False if template button URL is static (doesn't need dynamic parameter)
-WHATSAPP_BUTTON_REQUIRES_PARAM = config('WHATSAPP_BUTTON_REQUIRES_PARAM', default=True, cast=bool)
 
 # Celery Configuration
 CELERY_BROKER_URL = config('CELERY_BROKER_URL', default='redis://localhost:6379/0')
