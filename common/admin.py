@@ -179,8 +179,8 @@ class PinterestIntegrationAdmin(admin.ModelAdmin):
         return not PinterestIntegration.objects.exists()
     
     def has_delete_permission(self, request, obj=None):
-        # Prevent deletion of the singleton
-        return False
+        # Allow deletion for re-authorization
+        return True
 
 
 @admin.register(PinterestPost)
