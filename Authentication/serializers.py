@@ -340,10 +340,18 @@ class PasswordResetRequestSerializer(serializers.Serializer):
     """
     Serializer for password reset request.
     """
-    email = serializers.EmailField(required=True)
+    email = serializers.EmailField(required=False, allow_blank=True)
+    delivery_method = serializers.ChoiceField(
+        choices=[('email', 'Email'), ('whatsapp', 'WhatsApp')],
+        required=False,
+        default='email'
+    )
+    phone_number = serializers.CharField(required=False, max_length=15, allow_blank=True)
     
     def validate_email(self, value):
-        """Validate email exists and is verified"""
+        """Validate email exists and is verified (only for email delivery)"""
+        if not value:
+            return value
         try:
             user = User.objects.get(email=value)
             # Check if email is verified
@@ -354,13 +362,72 @@ class PasswordResetRequestSerializer(serializers.Serializer):
             raise serializers.ValidationError("Email is not verified.")
         
         return value
+    
+    def validate_phone_number(self, value):
+        """Validate phone number format (10 digits)"""
+        if not value:
+            return value
+        
+        # Remove non-digit characters
+        digits_only = ''.join(filter(str.isdigit, value))
+        
+        # Check if it's 10 digits
+        if len(digits_only) != 10:
+            raise serializers.ValidationError("Phone number must be exactly 10 digits.")
+        
+        return digits_only
+    
+    def validate(self, attrs):
+        """Validate delivery method and required fields"""
+        delivery_method = attrs.get('delivery_method', 'email')
+        email = attrs.get('email')
+        phone_number = attrs.get('phone_number')
+        
+        if delivery_method == 'email':
+            if not email:
+                raise serializers.ValidationError({
+                    'email': 'Email is required for email delivery.'
+                })
+        elif delivery_method == 'whatsapp':
+            if not phone_number:
+                raise serializers.ValidationError({
+                    'phone_number': 'Phone number is required for WhatsApp delivery.'
+                })
+            
+            # Look up user by phone number (no email needed)
+            phone_digits = phone_number  # Already validated as 10 digits
+            
+            # Find mobile number matching last 10 digits
+            verified_mobiles = MobileNumber.objects.filter(
+                is_verified=True
+            )
+            
+            mobile_obj = None
+            for mobile in verified_mobiles:
+                # Extract last 10 digits from stored mobile number
+                stored_digits = ''.join(filter(str.isdigit, mobile.mobile_number))
+                if len(stored_digits) >= 10 and stored_digits[-10:] == phone_digits:
+                    mobile_obj = mobile
+                    break
+            
+            if not mobile_obj:
+                raise serializers.ValidationError({
+                    'phone_number': 'This phone number is not linked to any account or is not verified.'
+                })
+            
+            # Set user and mobile_number in attrs
+            attrs['user'] = mobile_obj.created_by
+            attrs['mobile_number'] = mobile_obj.mobile_number
+        
+        return attrs
 
 
 class PasswordResetConfirmSerializer(serializers.Serializer):
     """
     Serializer for password reset confirmation with OTP.
     """
-    email = serializers.EmailField(required=True)
+    email = serializers.EmailField(required=False, allow_blank=True)
+    phone_number = serializers.CharField(required=False, max_length=15, allow_blank=True)
     otp = serializers.CharField(max_length=10, required=True)
     new_password = serializers.CharField(required=True)
     confirm_password = serializers.CharField(required=True)
@@ -368,6 +435,7 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
     def validate(self, attrs):
         """Validate OTP and password"""
         email = attrs.get('email')
+        phone_number = attrs.get('phone_number')
         otp = attrs.get('otp')
         new_password = attrs.get('new_password')
         confirm_password = attrs.get('confirm_password')
@@ -381,25 +449,65 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
         except ValidationError as e:
             raise serializers.ValidationError({'new_password': e.messages})
         
-        try:
-            user = User.objects.get(email=email)
-        except User.DoesNotExist:
-            raise serializers.ValidationError("User with this email does not exist.")
+        user = None
+        otp_obj = None
         
+        # Find user by email or phone number
+        if email:
+            try:
+                user = User.objects.get(email=email)
+            except User.DoesNotExist:
+                raise serializers.ValidationError("User with this email does not exist.")
+        elif phone_number:
+            # Look up user by phone number
+            phone_digits = ''.join(filter(str.isdigit, phone_number))
+            if len(phone_digits) != 10:
+                raise serializers.ValidationError("Phone number must be exactly 10 digits.")
+            
+            # Find mobile number matching last 10 digits
+            verified_mobiles = MobileNumber.objects.filter(
+                is_verified=True
+            )
+            
+            mobile_obj = None
+            for mobile in verified_mobiles:
+                stored_digits = ''.join(filter(str.isdigit, mobile.mobile_number))
+                if len(stored_digits) >= 10 and stored_digits[-10:] == phone_digits:
+                    mobile_obj = mobile
+                    break
+            
+            if not mobile_obj:
+                raise serializers.ValidationError("User with this phone number does not exist.")
+            
+            user = mobile_obj.created_by
+        else:
+            raise serializers.ValidationError("Either email or phone number is required.")
+        
+        # Try to find OTP from either email or mobile (must be verified from previous step)
         try:
+            # First try email OTP (must be verified)
             otp_obj = OTP.objects.get(
                 otp=otp,
                 otp_type='E',
                 otp_for='password_reset',
                 created_by=user,
-                is_verified=False
+                is_verified=True
             )
-            
-            if otp_obj.is_expired():
-                raise serializers.ValidationError("OTP has expired.")
-                
         except OTP.DoesNotExist:
-            raise serializers.ValidationError("Invalid OTP.")
+            # If not found, try mobile OTP (must be verified)
+            try:
+                otp_obj = OTP.objects.get(
+                    otp=otp,
+                    otp_type='M',
+                    otp_for='password_reset',
+                    created_by=user,
+                    is_verified=True
+                )
+            except OTP.DoesNotExist:
+                raise serializers.ValidationError("Invalid or unverified OTP. Please verify OTP first.")
+        
+        if otp_obj and otp_obj.is_expired():
+            raise serializers.ValidationError("OTP has expired.")
         
         attrs['user'] = user
         attrs['otp_obj'] = otp_obj
