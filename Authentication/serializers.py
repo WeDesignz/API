@@ -315,12 +315,7 @@ class EmailVerificationSerializer(serializers.Serializer):
         except User.DoesNotExist:
             raise serializers.ValidationError("User with this email does not exist.")
         
-        # DUMMY MODE: Accept sample OTP 123456 for now
-        if otp == '123456' and len(otp) == 6:
-            attrs['user'] = user
-            attrs['otp_obj'] = None  # No OTP object needed in dummy mode
-            return attrs
-        
+        # Validate real OTP - no demo mode
         try:
             otp_obj = OTP.objects.get(
                 otp=otp,
@@ -428,12 +423,7 @@ class MobileVerificationSerializer(serializers.Serializer):
         except MobileNumber.DoesNotExist:
             raise serializers.ValidationError("Mobile number not found.")
         
-        # DUMMY MODE: Accept sample OTP 123456 for now
-        if otp == '123456' and len(otp) == 6:
-            attrs['mobile_obj'] = mobile_obj
-            attrs['otp_obj'] = None  # No OTP object needed in dummy mode
-            return attrs
-        
+        # Validate real OTP - no demo mode
         try:
             otp_obj = OTP.objects.get(
                 otp=otp,

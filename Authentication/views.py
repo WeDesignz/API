@@ -399,8 +399,7 @@ def logout(request):
 @permission_classes([AllowAny])
 def verify_email(request):
     """
-    Verify email with OTP.
-    DUMMY MODE: Accepts sample OTP 123456 for email verification (for testing).
+    Verify email with OTP sent via email.
     """
     serializer = EmailVerificationSerializer(data=request.data)
     
@@ -635,7 +634,7 @@ def add_mobile_number(request):
                 created_by=request.user
             )
             
-            # Send OTP SMS (demo mode - just prints to console)
+            # Send OTP via WhatsApp
             send_otp_sms(mobile_number, otp, "Mobile Verification")
             
             return Response({
@@ -674,7 +673,7 @@ def add_mobile_number(request):
 @swagger_auto_schema(
     method='post',
     operation_summary="Verify Mobile Number",
-    operation_description="Verify mobile number using OTP sent via SMS.",
+    operation_description="Verify mobile number using OTP sent via WhatsApp.",
     request_body=openapi.Schema(
         type=openapi.TYPE_OBJECT,
         properties={
@@ -685,7 +684,7 @@ def add_mobile_number(request):
             ),
             'otp': openapi.Schema(
                 type=openapi.TYPE_STRING,
-                description='6-digit OTP received via SMS',
+                description='6-digit OTP received via WhatsApp',
                 example='123456'
             )
         },
@@ -708,86 +707,19 @@ def add_mobile_number(request):
 @permission_classes([IsAuthenticated])
 def verify_mobile_number(request):
     """
-    Verify mobile number with OTP.
-    DUMMY MODE: Accepts any 6-digit OTP for mobile verification (SMS API not available).
+    Verify mobile number with OTP sent via WhatsApp.
     """
-    mobile_number = request.data.get('mobile_number')
-    otp = request.data.get('otp')
-    
-    if not mobile_number or not otp:
-        return Response({
-            'error': 'Mobile number and OTP are required'
-        }, status=status.HTTP_400_BAD_REQUEST)
-    
-    # DUMMY MODE: Accept demo OTP 123456 for mobile verification
-    if otp == '123456':
-        try:
-            mobile_obj = MobileNumber.objects.get(
-                mobile_number=mobile_number,
-                created_by=request.user
-            )
-            
-            # Mark mobile number as verified (dummy mode - demo OTP)
-            mobile_obj.is_verified = True
-            mobile_obj.save()
-            
-            # Delete any pending OTP records for this mobile verification
-            try:
-                OTP.objects.filter(
-                    otp_type='M',
-                    otp_for='mobile_verification',
-                    created_by=request.user
-                ).delete()
-            except:
-                pass  # OTP might not exist, that's okay in dummy mode
-            
-            return Response({
-                'message': 'Mobile number verified successfully'
-            }, status=status.HTTP_200_OK)
-        except MobileNumber.DoesNotExist:
-            return Response({
-                'error': 'Mobile number not found for this user'
-            }, status=status.HTTP_400_BAD_REQUEST)
-    
-    # If not demo OTP, check for any 6-digit OTP (fallback)
-    if len(otp) == 6 and otp.isdigit():
-        try:
-            mobile_obj = MobileNumber.objects.get(
-                mobile_number=mobile_number,
-                created_by=request.user
-            )
-            
-            # Mark mobile number as verified (dummy mode - no actual OTP validation)
-            mobile_obj.is_verified = True
-            mobile_obj.save()
-            
-            # Delete any pending OTP records for this mobile verification
-            try:
-                OTP.objects.filter(
-                    otp_type='M',
-                    otp_for='mobile_verification',
-                    created_by=request.user
-                ).delete()
-            except:
-                pass  # OTP might not exist, that's okay in dummy mode
-            
-            return Response({
-                'message': 'Mobile number verified successfully (dummy mode)'
-            }, status=status.HTTP_200_OK)
-        except MobileNumber.DoesNotExist:
-            return Response({
-                'error': 'Mobile number not found for this user'
-            }, status=status.HTTP_400_BAD_REQUEST)
-    
-    # Fallback to real validation if dummy mode fails
     serializer = MobileVerificationSerializer(data=request.data)
     
     if serializer.is_valid():
         mobile_obj = serializer.validated_data['mobile_obj']
         otp_obj = serializer.validated_data.get('otp_obj')
         
-        # Delete OTP record after successful verification
+        # Mark OTP as verified
         if otp_obj:
+            otp_obj.is_verified = True
+            otp_obj.save()
+            # Delete OTP record after successful verification
             otp_obj.delete()
         
         # Mark mobile number as verified
