@@ -1288,7 +1288,8 @@ def post_design_to_pinterest(self, pinterest_post_id, base_url=None):
         
         # Validate domain - must be HTTPS and not localhost
         if domain.startswith('https://') and 'localhost' not in domain.lower() and '127.0.0.1' not in domain:
-            link = f"{domain}/designs/{product.id}"
+            # Link to customer dashboard with product ID to auto-open product modal
+            link = f"{domain}/customer-dashboard?product={product.id}"
             logger.info(f"Using Pinterest link: {link}")
         else:
             # Invalid domain (localhost), skip link - Pinterest allows pins without links
