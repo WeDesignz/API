@@ -598,7 +598,7 @@ def pinterest_oauth_callback(request):
                     b_id = board.get('id', '')
                     b_name = board.get('name', 'Unknown')
                     selected = "✅ (Auto-selected)" if str(b_id) == str(board_id) else ""
-                    boards_info += f"<li><strong>{b_name}</strong> {selected} - ID: <code>{b_id}</code></li>"
+                    boards_info += f"<li><strong>{b_name}</strong>{selected}<br><code>{b_id}</code></li>"
                 boards_info += "</ul>"
             else:
                 # No boards exist: create a default one in sandbox mode
@@ -624,7 +624,7 @@ def pinterest_oauth_callback(request):
                         logger.info(f"Created and auto-selected Pinterest board: {board_name} (ID: {board_id})")
                         
                         boards_info = f"<h3>Created New Board:</h3><ul>"
-                        boards_info += f"<li><strong>{board_name}</strong> ✅ (Auto-selected) - ID: <code>{board_id}</code></li>"
+                        boards_info += f"<li><strong>{board_name}</strong> ✅ (Auto-selected)<br><code>{board_id}</code></li>"
                         boards_info += "</ul><p><em>Note: In sandbox mode, boards may not appear in the list but can still be used.</em></p>"
                     else:
                         boards_info = "<p><em>Could not create board automatically. Please create a board manually in Pinterest and set it in Settings.</em></p>"
@@ -638,18 +638,28 @@ def pinterest_oauth_callback(request):
         # Get admin webapp URL
         admin_webapp_url = getattr(settings, 'ADMIN_WEBAPP_URL', 'https://admin.wedesignz.com')
         
-        # Format boards info with better styling
+        # Format boards info with minimal styling
         boards_html = ""
         if boards_info and "<h3>" in boards_info:
-            # Extract boards from the HTML
-            boards_html = boards_info.replace("<h3>Your Pinterest Boards:</h3>", "<h3 style='margin-top: 24px; color: #495057;'>Your Pinterest Boards:</h3>")
-            boards_html = boards_html.replace("<ul>", "<ul style='list-style: none; padding: 0; margin: 16px 0;'>")
-            boards_html = boards_html.replace("<li>", "<li style='background: #f8f9fa; padding: 12px; margin: 8px 0; border-radius: 6px; border-left: 3px solid #667eea;'>")
-            boards_html = boards_html.replace("<code>", "<code style='background: #e9ecef; padding: 4px 8px; border-radius: 4px; font-size: 12px; font-family: 'Courier New', monospace;'>")
+            # Extract boards from the HTML and format for minimal design
+            boards_html = boards_info
+            boards_html = boards_html.replace("<h3>Your Pinterest Boards:</h3>", "<div class='boards-section'><h3>Your Boards</h3><ul class='board-list'>")
+            boards_html = boards_html.replace("<h3>Created New Board:</h3>", "<div class='boards-section'><h3>Created Board</h3><ul class='board-list'>")
+            # Remove the first <ul> tag (we already added it above)
+            boards_html = boards_html.replace("<ul>", "", 1)
+            boards_html = boards_html.replace("</ul>", "</ul></div>", 1)
+            boards_html = boards_html.replace("<li>", "<li class='board-item'>")
+            boards_html = boards_html.replace("✅ (Auto-selected)", "<span style='color: #0a7c0a; font-size: 11px; margin-left: 8px;'>• Selected</span>")
+            # Handle any remaining </ul> tags
+            boards_html = boards_html.replace("</ul>", "")
+            # Handle any <p> tags that might be in the message
+            if "<p>" in boards_html:
+                boards_html = boards_html.replace("<p><em>", "<p style='color: #666; font-size: 13px; margin-top: 12px;'>")
+                boards_html = boards_html.replace("</em></p>", "</p>")
         elif boards_info:
-            boards_html = f"<div style='background: #fff3cd; border: 1px solid #ffc107; padding: 16px; border-radius: 8px; margin: 24px 0;'>{boards_info}</div>"
+            boards_html = f"<div class='boards-section'><p style='color: #666; font-size: 13px; line-height: 1.5;'>{boards_info.replace('<p>', '').replace('</p>', '').replace('<em>', '').replace('</em>', '')}</p></div>"
         
-        # Display success message with modern UI
+        # Display success message with minimal professional UI
         return HttpResponse(
             f"""
             <!DOCTYPE html>
@@ -657,227 +667,202 @@ def pinterest_oauth_callback(request):
             <head>
                 <meta charset="UTF-8">
                 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <title>Pinterest Authorization Successful</title>
+                <title>Pinterest Connected</title>
                 <style>
                     * {{ margin: 0; padding: 0; box-sizing: border-box; }}
                     body {{
                         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-                        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                        background: #f5f5f5;
                         min-height: 100vh;
                         display: flex;
                         align-items: center;
                         justify-content: center;
                         padding: 20px;
+                        color: #333;
                     }}
                     .container {{
                         background: white;
-                        border-radius: 16px;
-                        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-                        max-width: 700px;
+                        border-radius: 8px;
+                        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+                        max-width: 500px;
                         width: 100%;
-                        padding: 40px;
-                    }}
-                    .success-header {{
-                        text-align: center;
-                        margin-bottom: 32px;
+                        padding: 48px 40px;
                     }}
                     .success-icon {{
-                        width: 100px;
-                        height: 100px;
+                        width: 64px;
+                        height: 64px;
                         margin: 0 auto 24px;
-                        background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+                        background: #BD081C;
                         border-radius: 50%;
                         display: flex;
                         align-items: center;
                         justify-content: center;
-                        font-size: 50px;
-                        animation: scaleIn 0.5s ease;
-                    }}
-                    @keyframes scaleIn {{
-                        from {{ transform: scale(0); }}
-                        to {{ transform: scale(1); }}
+                        color: white;
+                        font-size: 32px;
+                        font-weight: 300;
                     }}
                     h1 {{
-                        color: #28a745;
-                        font-size: 32px;
+                        color: #1a1a1a;
+                        font-size: 24px;
+                        font-weight: 600;
+                        text-align: center;
                         margin-bottom: 8px;
-                        font-weight: 700;
+                        letter-spacing: -0.3px;
                     }}
                     .subtitle {{
-                        color: #6c757d;
-                        font-size: 16px;
+                        color: #666;
+                        font-size: 14px;
+                        text-align: center;
+                        margin-bottom: 32px;
+                        line-height: 1.5;
                     }}
-                    .info-card {{
-                        background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%);
-                        border: 2px solid #4caf50;
-                        border-radius: 12px;
-                        padding: 20px;
+                    .info-section {{
+                        border-top: 1px solid #e5e5e5;
+                        border-bottom: 1px solid #e5e5e5;
+                        padding: 20px 0;
                         margin: 24px 0;
-                    }}
-                    .info-card h2 {{
-                        color: #2e7d32;
-                        font-size: 20px;
-                        margin-bottom: 12px;
-                        display: flex;
-                        align-items: center;
-                        gap: 8px;
                     }}
                     .info-item {{
                         display: flex;
                         justify-content: space-between;
                         align-items: center;
-                        padding: 12px 0;
-                        border-bottom: 1px solid rgba(46, 125, 50, 0.2);
-                    }}
-                    .info-item:last-child {{
-                        border-bottom: none;
+                        padding: 8px 0;
+                        font-size: 14px;
                     }}
                     .info-label {{
-                        color: #2e7d32;
-                        font-weight: 600;
-                        font-size: 14px;
+                        color: #666;
+                        font-weight: 400;
                     }}
                     .info-value {{
-                        color: #1b5e20;
-                        font-size: 14px;
+                        color: #1a1a1a;
+                        font-weight: 500;
+                    }}
+                    .status-badge {{
+                        display: inline-flex;
+                        align-items: center;
+                        gap: 6px;
+                        color: #0a7c0a;
+                        font-size: 13px;
+                        font-weight: 500;
+                    }}
+                    .status-badge::before {{
+                        content: '';
+                        width: 8px;
+                        height: 8px;
+                        background: #0a7c0a;
+                        border-radius: 50%;
                     }}
                     .boards-section {{
-                        background: #f8f9fa;
-                        border-radius: 12px;
-                        padding: 20px;
                         margin: 24px 0;
+                        padding: 20px 0;
                     }}
                     .boards-section h3 {{
-                        color: #495057;
-                        font-size: 18px;
-                        margin-bottom: 16px;
+                        color: #1a1a1a;
+                        font-size: 14px;
+                        font-weight: 600;
+                        margin-bottom: 12px;
+                        text-transform: uppercase;
+                        letter-spacing: 0.5px;
                     }}
-                    .next-steps {{
-                        background: #e3f2fd;
-                        border: 2px solid #2196f3;
-                        border-radius: 12px;
-                        padding: 20px;
-                        margin: 24px 0;
+                    .board-list {{
+                        list-style: none;
+                        margin: 0;
+                        padding: 0;
                     }}
-                    .next-steps h2 {{
-                        color: #1565c0;
-                        font-size: 20px;
-                        margin-bottom: 16px;
-                        display: flex;
-                        align-items: center;
-                        gap: 8px;
-                    }}
-                    .next-steps ol {{
-                        margin-left: 20px;
-                        line-height: 2;
-                        color: #1976d2;
-                    }}
-                    .next-steps li {{
-                        margin-bottom: 8px;
-                    }}
-                    .next-steps code {{
-                        background: #bbdefb;
-                        padding: 4px 8px;
+                    .board-item {{
+                        background: #f9f9f9;
+                        border: 1px solid #e5e5e5;
                         border-radius: 4px;
+                        padding: 12px;
+                        margin-bottom: 8px;
                         font-size: 13px;
-                        font-family: 'Courier New', monospace;
-                        color: #0d47a1;
+                    }}
+                    .board-item strong {{
+                        color: #1a1a1a;
+                        font-weight: 500;
+                        display: block;
+                        margin-bottom: 4px;
+                    }}
+                    .board-item code {{
+                        background: #fff;
+                        padding: 2px 6px;
+                        border-radius: 3px;
+                        font-size: 11px;
+                        font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', monospace;
+                        color: #666;
+                        border: 1px solid #e5e5e5;
                     }}
                     .actions {{
+                        margin-top: 32px;
                         display: flex;
                         flex-direction: column;
-                        gap: 12px;
-                        margin-top: 32px;
+                        gap: 10px;
                     }}
                     .btn {{
-                        display: inline-block;
-                        padding: 16px 32px;
-                        border-radius: 8px;
+                        display: block;
+                        padding: 12px 24px;
+                        border-radius: 4px;
                         text-decoration: none;
-                        font-weight: 600;
-                        font-size: 16px;
-                        transition: all 0.3s ease;
+                        font-weight: 500;
+                        font-size: 14px;
                         text-align: center;
+                        transition: all 0.2s ease;
                         border: none;
                         cursor: pointer;
                     }}
                     .btn-primary {{
-                        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                        background: #BD081C;
                         color: white;
-                        box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
                     }}
                     .btn-primary:hover {{
-                        transform: translateY(-2px);
-                        box-shadow: 0 8px 25px rgba(102, 126, 234, 0.5);
+                        background: #a00716;
                     }}
                     .btn-secondary {{
-                        background: white;
-                        color: #667eea;
-                        border: 2px solid #667eea;
+                        background: transparent;
+                        color: #666;
+                        border: 1px solid #e5e5e5;
                     }}
                     .btn-secondary:hover {{
-                        background: #f8f9ff;
-                        transform: translateY(-2px);
-                    }}
-                    .btn-success {{
-                        background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
-                        color: white;
-                        box-shadow: 0 4px 15px rgba(40, 167, 69, 0.4);
-                    }}
-                    .btn-success:hover {{
-                        transform: translateY(-2px);
-                        box-shadow: 0 8px 25px rgba(40, 167, 69, 0.5);
+                        background: #f9f9f9;
+                        border-color: #d5d5d5;
                     }}
                 </style>
             </head>
             <body>
                 <div class="container">
-                    <div class="success-header">
-                        <div class="success-icon">✅</div>
-                        <h1>Authorization Successful!</h1>
-                        <p class="subtitle">Your Pinterest account has been connected</p>
-                    </div>
+                    <div class="success-icon">✓</div>
+                    <h1>Pinterest Connected</h1>
+                    <p class="subtitle">Your account has been successfully authorized</p>
                     
-                    <div class="info-card">
-                        <h2>📋 Connection Details</h2>
+                    <div class="info-section">
                         <div class="info-item">
                             <span class="info-label">Status</span>
-                            <span class="info-value" style="color: #28a745; font-weight: 600;">✓ Connected</span>
+                            <span class="info-value">
+                                <span class="status-badge">Connected</span>
+                            </span>
                         </div>
                         <div class="info-item">
                             <span class="info-label">Token Expires</span>
-                            <span class="info-value">{token_expires_at.strftime('%B %d, %Y at %I:%M %p') if token_expires_at else 'Not specified'}</span>
+                            <span class="info-value">{token_expires_at.strftime('%b %d, %Y') if token_expires_at else 'Not specified'}</span>
                         </div>
                     </div>
                     
                     {boards_html}
                     
-                    <div class="next-steps">
-                        <h2>🚀 Next Steps</h2>
-                        <ol>
-                            <li>If you see boards above, copy the <strong>Board ID</strong> of the board where you want to post designs</li>
-                            <li>Go to Settings in your Admin Panel and select your Pinterest board</li>
-                            <li>Test by approving a design - it will automatically post to Pinterest!</li>
-                        </ol>
-                    </div>
-                    
                     <div class="actions">
                         <a href="{admin_webapp_url}/settings" class="btn btn-primary">
-                            🎛️ Go to Settings
-                        </a>
-                        <a href="{admin_webapp_url}/designs" class="btn btn-success">
-                            🎨 View Designs
+                            Continue to Settings
                         </a>
                         <a href="{admin_webapp_url}" class="btn btn-secondary">
-                            🏠 Go to Dashboard
+                            Go to Dashboard
                         </a>
                     </div>
                 </div>
                 <script>
-                    // Automatically redirect to settings after 3 seconds
+                    // Automatically redirect to settings after 5 seconds
                     setTimeout(function() {{
                         window.location.href = '{admin_webapp_url}/settings';
-                    }}, 3000);
+                    }}, 5000);
                 </script>
             </body>
             </html>
@@ -1206,5 +1191,214 @@ def pinterest_set_board(request):
         logger.error(f"Error setting Pinterest board: {str(e)}", exc_info=True)
         return JsonResponse({
             'error': f'Error setting board: {str(e)}'
+        }, status=500)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def pinterest_create_board(request):
+    """
+    Create a new Pinterest board.
+    """
+    name = request.data.get('name')
+    description = request.data.get('description', '')
+    privacy = request.data.get('privacy', 'PUBLIC')
+    
+    if not name:
+        return JsonResponse({
+            'error': 'Board name is required'
+        }, status=400)
+    
+    if privacy not in ['PUBLIC', 'SECRET']:
+        return JsonResponse({
+            'error': 'Privacy must be PUBLIC or SECRET'
+        }, status=400)
+    
+    integration = PinterestIntegration.get_instance()
+    
+    if not integration.access_token:
+        return JsonResponse({
+            'error': 'Pinterest access token not configured. Please authorize first.'
+        }, status=400)
+    
+    if not integration.is_token_valid():
+        return JsonResponse({
+            'error': 'Pinterest access token expired. Please re-authorize.'
+        }, status=400)
+    
+    try:
+        from .pinterest_service import PinterestService
+        
+        new_board = PinterestService.create_board_with_token(
+            integration.access_token,
+            name=name,
+            description=description,
+            privacy=privacy
+        )
+        
+        if not new_board:
+            return JsonResponse({
+                'error': 'Failed to create board. Check server logs for details.'
+            }, status=500)
+        
+        logger.info(f"Pinterest board created: {new_board.get('name')} (ID: {new_board.get('id')})")
+        
+        return JsonResponse({
+            'success': True,
+            'message': 'Board created successfully',
+            'board': {
+                'id': str(new_board.get('id')),
+                'name': new_board.get('name'),
+                'description': new_board.get('description', ''),
+                'privacy': new_board.get('privacy', 'PUBLIC'),
+                'pin_count': new_board.get('pin_count', 0)
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"Error creating Pinterest board: {str(e)}", exc_info=True)
+        return JsonResponse({
+            'error': f'Error creating board: {str(e)}'
+        }, status=500)
+
+
+@api_view(['PATCH'])
+@permission_classes([AllowAny])
+def pinterest_update_board(request):
+    """
+    Update a Pinterest board.
+    """
+    board_id = request.data.get('board_id')
+    name = request.data.get('name')
+    description = request.data.get('description')
+    privacy = request.data.get('privacy')
+    
+    if not board_id:
+        return JsonResponse({
+            'error': 'board_id is required'
+        }, status=400)
+    
+    if not any([name, description, privacy]):
+        return JsonResponse({
+            'error': 'At least one field (name, description, privacy) must be provided'
+        }, status=400)
+    
+    if privacy and privacy not in ['PUBLIC', 'SECRET']:
+        return JsonResponse({
+            'error': 'Privacy must be PUBLIC or SECRET'
+        }, status=400)
+    
+    integration = PinterestIntegration.get_instance()
+    
+    if not integration.access_token:
+        return JsonResponse({
+            'error': 'Pinterest access token not configured. Please authorize first.'
+        }, status=400)
+    
+    if not integration.is_token_valid():
+        return JsonResponse({
+            'error': 'Pinterest access token expired. Please re-authorize.'
+        }, status=400)
+    
+    try:
+        from .pinterest_service import PinterestService
+        
+        updated_board = PinterestService.update_board_with_token(
+            integration.access_token,
+            board_id,
+            name=name,
+            description=description,
+            privacy=privacy
+        )
+        
+        if not updated_board:
+            return JsonResponse({
+                'error': 'Failed to update board. Check server logs for details.'
+            }, status=500)
+        
+        # If this is the currently selected board, update the integration
+        if str(integration.board_id) == str(board_id):
+            if name:
+                integration.board_name = name
+                integration.save(update_fields=['board_name'])
+        
+        logger.info(f"Pinterest board updated: {updated_board.get('name')} (ID: {updated_board.get('id')})")
+        
+        return JsonResponse({
+            'success': True,
+            'message': 'Board updated successfully',
+            'board': {
+                'id': str(updated_board.get('id')),
+                'name': updated_board.get('name'),
+                'description': updated_board.get('description', ''),
+                'privacy': updated_board.get('privacy', 'PUBLIC'),
+                'pin_count': updated_board.get('pin_count', 0)
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"Error updating Pinterest board: {str(e)}", exc_info=True)
+        return JsonResponse({
+            'error': f'Error updating board: {str(e)}'
+        }, status=500)
+
+
+@api_view(['DELETE'])
+@permission_classes([AllowAny])
+def pinterest_delete_board(request, board_id=None):
+    """
+    Delete a Pinterest board.
+    """
+    # Support both URL parameter and body parameter
+    if not board_id:
+        board_id = request.data.get('board_id')
+    
+    if not board_id:
+        return JsonResponse({
+            'error': 'board_id is required'
+        }, status=400)
+    
+    integration = PinterestIntegration.get_instance()
+    
+    if not integration.access_token:
+        return JsonResponse({
+            'error': 'Pinterest access token not configured. Please authorize first.'
+        }, status=400)
+    
+    if not integration.is_token_valid():
+        return JsonResponse({
+            'error': 'Pinterest access token expired. Please re-authorize.'
+        }, status=400)
+    
+    # Prevent deleting the currently selected board
+    if str(integration.board_id) == str(board_id):
+        return JsonResponse({
+            'error': 'Cannot delete the currently selected board. Please select a different board first.'
+        }, status=400)
+    
+    try:
+        from .pinterest_service import PinterestService
+        
+        success = PinterestService.delete_board_with_token(
+            integration.access_token,
+            board_id
+        )
+        
+        if not success:
+            return JsonResponse({
+                'error': 'Failed to delete board. Check server logs for details.'
+            }, status=500)
+        
+        logger.info(f"Pinterest board deleted: {board_id}")
+        
+        return JsonResponse({
+            'success': True,
+            'message': 'Board deleted successfully'
+        })
+        
+    except Exception as e:
+        logger.error(f"Error deleting Pinterest board: {str(e)}", exc_info=True)
+        return JsonResponse({
+            'error': f'Error deleting board: {str(e)}'
         }, status=500)
 
