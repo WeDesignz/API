@@ -1355,7 +1355,35 @@ def post_to_instagram(self, instagram_post_id, base_url=None):
             instagram_post.mark_failed(f"Invalid image URL format (must be HTTPS)")
             return
         
-        logger.info(f"Using image URL: {image_url[:100]}...")  # Log first 100 chars for debugging
+        logger.info(f"Using image URL: {image_url}")  # Log full URL for debugging
+        logger.info(f"Image URL length: {len(image_url)}")
+        
+        # Validate URL is accessible before sending to Instagram
+        try:
+            import requests
+            logger.info("Validating image URL accessibility...")
+            validation_response = requests.head(image_url, timeout=10, allow_redirects=True)
+            if validation_response.status_code != 200:
+                error_msg = f"Image URL returned status {validation_response.status_code}. URL may not be accessible: {image_url[:100]}"
+                logger.error(error_msg)
+                instagram_post.mark_failed(error_msg)
+                return
+            
+            content_type = validation_response.headers.get('Content-Type', '')
+            if not content_type.startswith('image/'):
+                error_msg = f"URL does not point to an image. Content-Type: {content_type}. URL: {image_url[:100]}"
+                logger.error(error_msg)
+                instagram_post.mark_failed(error_msg)
+                return
+            
+            logger.info(f"Image URL validated successfully. Content-Type: {content_type}, Status: {validation_response.status_code}")
+        except requests.exceptions.RequestException as e:
+            error_msg = f"Image URL is not accessible: {str(e)}. URL: {image_url[:100]}"
+            logger.error(error_msg)
+            instagram_post.mark_failed(error_msg)
+            return
+        except Exception as e:
+            logger.warning(f"Could not validate image URL (continuing anyway): {e}")
         
         # Post to Instagram
         is_story = instagram_post.post_type == 'story'

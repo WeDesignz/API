@@ -255,13 +255,14 @@ class InstagramPost(models.Model):
         """Mark the post as successful."""
         self.status = 'success'
         self.posted_at = timezone.now()
+        self.error_message = None  # Clear any previous error
         if media_id:
             self.media_id = media_id
         if post_id:
             self.post_id = post_id
         if post_url:
             self.post_url = post_url
-        self.save(update_fields=['status', 'posted_at', 'media_id', 'post_id', 'post_url'])
+        self.save(update_fields=['status', 'posted_at', 'error_message', 'media_id', 'post_id', 'post_url'])
     
     def mark_failed(self, error_message):
         """Mark the post as failed."""
