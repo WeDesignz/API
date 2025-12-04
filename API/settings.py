@@ -694,3 +694,80 @@ CORS_ALLOW_HEADERS = [
     'x-csrftoken',
     'x-requested-with',
 ]
+
+# Logging Configuration
+# Create logs directory if it doesn't exist (do this before LOGGING config)
+LOGS_DIR = os.path.join(BASE_DIR, 'logs')
+try:
+    if not os.path.exists(LOGS_DIR):
+        os.makedirs(LOGS_DIR, mode=0o755)
+except (OSError, PermissionError) as e:
+    # If we can't create the directory, just log to console
+    pass
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {
+            'format': '[{levelname}] {asctime} {name} {module} {process:d} {thread:d} {message}',
+            'style': '{',
+        },
+        'simple': {
+            'format': '[{levelname}] {asctime} {name} {message}',
+            'style': '{',
+        },
+    },
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+            'formatter': 'verbose',
+            'stream': 'ext://sys.stderr',  # Output to stderr so Gunicorn/journalctl can capture it reliably
+        },
+    },
+    'root': {
+        'handlers': ['console'],
+        'level': 'INFO',  # Show INFO and above in console
+    },
+    'loggers': {
+        'django': {
+            'handlers': ['console'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'common': {
+            'handlers': ['console'],
+            'level': 'INFO',  # Show INFO level logs for common app
+            'propagate': False,
+        },
+        'common.views': {
+            'handlers': ['console'],
+            'level': 'INFO',  # Show INFO level logs for views
+            'propagate': False,
+        },
+        'common.tasks': {
+            'handlers': ['console'],
+            'level': 'INFO',  # Show INFO level logs for tasks
+            'propagate': False,
+        },
+        'common.instagram_service': {
+            'handlers': ['console'],
+            'level': 'INFO',  # Show INFO level logs for Instagram service
+            'propagate': False,
+        },
+    },
+}
+
+# Add file handler only if logs directory exists and is writable
+if os.path.exists(LOGS_DIR) and os.access(LOGS_DIR, os.W_OK):
+    LOGGING['handlers']['file'] = {
+        'class': 'logging.handlers.RotatingFileHandler',
+        'filename': os.path.join(LOGS_DIR, 'django.log'),
+        'maxBytes': 1024 * 1024 * 10,  # 10 MB
+        'backupCount': 5,
+        'formatter': 'verbose',
+    }
+    # Add file handler to all loggers
+    for logger_name in ['django', 'common', 'common.views', 'common.tasks', 'common.instagram_service']:
+        if 'file' not in LOGGING['loggers'][logger_name]['handlers']:
+            LOGGING['loggers'][logger_name]['handlers'].append('file')
