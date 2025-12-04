@@ -1802,23 +1802,60 @@ def instagram_oauth_callback(request):
         pages_response.raise_for_status()
         pages_data = pages_response.json()
         
+        # Add detailed logging to debug what's being returned
+        logger.info(f"Pages API response received. Number of pages: {len(pages_data.get('data', []))}")
+        if pages_data.get('data'):
+            logger.info(f"First page sample keys: {list(pages_data['data'][0].keys())}")
+        
         instagram_account_id = None
         instagram_username = None
         page_access_token = None  # This is the token we need for Instagram API
+        page_id = None  # Store the page ID for fallback
         
         # Find the Instagram Business Account
         for page in pages_data.get('data', []):
+            logger.info(f"Processing page: ID={page.get('id')}, name={page.get('name')}")
+            logger.info(f"Page has 'access_token' field: {'access_token' in page}")
+            logger.info(f"Page has 'instagram_business_account': {'instagram_business_account' in page}")
+            
             if 'instagram_business_account' in page:
                 instagram_account = page['instagram_business_account']
                 instagram_account_id = instagram_account.get('id')
+                page_id = page.get('id')
+                
+                logger.info(f"Found Instagram Business Account ID: {instagram_account_id} for page: {page_id}")
                 
                 # CRITICAL: Get the page access token (required for Instagram Graph API)
                 # The page access token is different from the user's long-lived token
                 page_access_token = page.get('access_token')
                 
                 if not page_access_token:
-                    logger.warning(f"Page {page.get('id')} has Instagram Business Account but no access_token")
-                    continue
+                    logger.warning(f"Page {page_id} has Instagram Business Account but no access_token in response")
+                    logger.warning(f"Trying fallback method to get page access token...")
+                    
+                    # FALLBACK: Try to get page access token by querying the page directly
+                    try:
+                        page_token_url = f"https://graph.facebook.com/v18.0/{page_id}"
+                        page_token_params = {
+                            'fields': 'access_token',
+                            'access_token': long_lived_token
+                        }
+                        page_token_response = requests.get(page_token_url, params=page_token_params, timeout=30)
+                        if page_token_response.status_code == 200:
+                            page_token_data = page_token_response.json()
+                            page_access_token = page_token_data.get('access_token')
+                            if page_access_token:
+                                logger.info(f"Successfully retrieved page access token via fallback method")
+                            else:
+                                logger.warning(f"Fallback method returned no access_token")
+                        else:
+                            logger.warning(f"Fallback method failed with status {page_token_response.status_code}: {page_token_response.text[:200]}")
+                    except Exception as e:
+                        logger.warning(f"Fallback method exception: {e}")
+                    
+                    if not page_access_token:
+                        logger.warning(f"Could not get access token for page {page_id}, trying next page...")
+                        continue
                 
                 # Get Instagram account details using the page access token
                 # Note: 'username' field is deprecated in Instagram Graph API v2.0+
@@ -1835,12 +1872,25 @@ def instagram_oauth_callback(request):
                         instagram_data = instagram_response.json()
                         # Username is deprecated, so we can't get it from API
                         instagram_username = None
+                        logger.info(f"Instagram Business Account ID verified successfully")
+                    else:
+                        logger.warning(f"Could not verify Instagram Business Account ID: {instagram_response.text[:200]}")
                     break
         
         # Validate that we have the required page access token
         if not page_access_token:
-            error_msg = "No page access token found. Make sure your Instagram Business account is linked to a Facebook Page and you have granted the necessary permissions."
+            # Provide more detailed error message
+            pages_list = [p.get('id') for p in pages_data.get('data', [])]
+            error_msg = (
+                f"No page access token found. "
+                f"Pages returned: {pages_list}. "
+                f"Make sure your Instagram Business account is linked to a Facebook Page "
+                f"and you have granted 'pages_show_list' and 'pages_read_engagement' permissions."
+            )
             logger.error(error_msg)
+            logger.error(f"Full pages response structure: {list(pages_data.keys())}")
+            if pages_data.get('data'):
+                logger.error(f"Sample page structure: {list(pages_data['data'][0].keys()) if pages_data['data'] else 'No pages'}")
             raise ValueError(error_msg)
         
         if not instagram_account_id:
