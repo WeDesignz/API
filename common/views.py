@@ -2313,10 +2313,17 @@ def instagram_post(request):
     Create a single Instagram post.
     Accepts a single post object and queues it for async processing.
     """
+    logger.info(f"=== INSTAGRAM POST REQUEST RECEIVED ===")
+    logger.info(f"Request method: {request.method}, Content-Type: {request.content_type}")
+    logger.info(f"Request data: {request.data}")
+    
     # Get single post data (support both direct object and wrapped in 'post' key)
     post_data = request.data.get('post') or request.data
     
+    logger.info(f"Extracted post_data: {post_data}")
+    
     if not post_data:
+        logger.error("No post data provided in request")
         return JsonResponse({
             'error': 'Post data is required'
         }, status=400)
@@ -2325,16 +2332,19 @@ def instagram_post(request):
     integration = InstagramIntegration.get_instance()
     
     if not integration.is_enabled:
+        logger.warning("Instagram integration is disabled")
         return JsonResponse({
             'error': 'Instagram integration is disabled'
         }, status=400)
     
     if not integration.access_token:
+        logger.warning("Instagram access token not configured")
         return JsonResponse({
             'error': 'Instagram access token not configured. Please authorize first.'
         }, status=400)
     
     if not integration.is_token_valid():
+        logger.warning("Instagram access token expired")
         return JsonResponse({
             'error': 'Instagram access token expired. Please re-authorize.'
         }, status=400)
@@ -2343,13 +2353,15 @@ def instagram_post(request):
         from Catalog.models import Product
         from .tasks import post_to_instagram
         
+        logger.info(f"Successfully imported Product and post_to_instagram task")
+        
         # Extract post data
         product_id = post_data.get('productId')
         media_type = post_data.get('mediaType')
         caption = post_data.get('caption', '')
         post_type = post_data.get('postType', 'post')
         
-        logger.info(f"=== Processing Instagram post: product_id={product_id}, media_type={media_type}, post_type={post_type} ===")
+        logger.info(f"=== Processing Instagram post: product_id={product_id}, media_type={media_type}, post_type={post_type}, caption_length={len(caption)} ===")
         
         # Validate required fields
         if not product_id:
@@ -2405,11 +2417,17 @@ def instagram_post(request):
         
         # Queue Celery task for async posting
         try:
+            logger.info(f"=== ATTEMPTING TO QUEUE TASK for post {instagram_post.id}, type: {post_type}, media_type: {media_type} ===")
+            logger.info(f"Post details: product_id={product_id}, caption_length={len(caption)}, status={instagram_post.status}")
+            
             task_result = post_to_instagram.delay(instagram_post.id)
             
+            logger.info(f"=== TASK QUEUED: task_result={task_result}, task_id={task_result.id if task_result else 'None'} ===")
+            logger.info(f"Task result type: {type(task_result)}, has id: {hasattr(task_result, 'id') if task_result else False}")
+            
             # Verify task was queued
-            if not task_result or not task_result.id:
-                error_msg = "Task queuing returned no task ID"
+            if not task_result:
+                error_msg = "Task queuing returned None (no task result)"
                 logger.error(f"Post {instagram_post.id} failed: {error_msg}")
                 instagram_post.status = 'failed'
                 instagram_post.error_message = error_msg
@@ -2418,25 +2436,38 @@ def instagram_post(request):
                     'error': error_msg
                 }, status=500)
             
-            logger.info(f"Queued task {task_result.id} for post {instagram_post.id}, product {product_id}")
+            if not hasattr(task_result, 'id') or not task_result.id:
+                error_msg = f"Task queuing returned no task ID. Task result: {task_result}, type: {type(task_result)}"
+                logger.error(f"Post {instagram_post.id} failed: {error_msg}")
+                instagram_post.status = 'failed'
+                instagram_post.error_message = error_msg
+                instagram_post.save(update_fields=['status', 'error_message'])
+                return JsonResponse({
+                    'error': error_msg
+                }, status=500)
+            
+            logger.info(f"=== SUCCESS: Queued task {task_result.id} for post {instagram_post.id}, product {product_id}, type: {post_type} ===")
             
             return JsonResponse({
                 'message': 'Post queued for Instagram',
                 'post_id': instagram_post.id,
                 'product_id': product_id,
                 'task_id': task_result.id,
-                'status': 'queued'
+                'status': 'queued',
+                'post_type': post_type  # Add this for debugging
             }, status=200)
             
         except Exception as e:
             error_msg = f"Failed to queue Instagram post task: {str(e)}"
-            logger.error(f"Post {instagram_post.id} failed to queue: {error_msg}", exc_info=True)
+            logger.error(f"=== EXCEPTION QUEUING TASK for post {instagram_post.id}, type: {post_type} ===", exc_info=True)
+            logger.error(f"Exception type: {type(e).__name__}, Message: {str(e)}")
+            logger.error(f"Exception traceback:", exc_info=True)
             try:
                 instagram_post.status = 'failed'
                 instagram_post.error_message = error_msg
                 instagram_post.save(update_fields=['status', 'error_message'])
             except Exception as save_error:
-                logger.error(f"Failed to update InstagramPost {instagram_post.id} status: {save_error}")
+                logger.error(f"Failed to update InstagramPost {instagram_post.id} status: {save_error}", exc_info=True)
             return JsonResponse({
                 'error': error_msg
             }, status=500)
