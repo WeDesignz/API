@@ -1200,7 +1200,7 @@ def post_to_instagram(self, instagram_post_id, base_url=None):
             instagram_post.mark_failed(error_msg)
             return
         
-        # Get media files (images)
+        # Get media files (images only - exclude vectors, documents, etc.)
         media_files = product.get_media().filter(media_type='image')
         
         if not media_files.exists():
@@ -1208,64 +1208,148 @@ def post_to_instagram(self, instagram_post_id, base_url=None):
             instagram_post.mark_failed("No image media found for product")
             return
         
-        # Find the specific media file based on media_type
-        image_media = None
-        media_type = instagram_post.media_type
+        # Collect all valid image media files (exclude CDR and EPS)
+        valid_image_media = []
+        mockup_media = None
+        png_media = None
+        jpg_media = None
         
         for media in media_files:
             if not media.file:
                 continue
             
             file_name = media.file.name.lower() if hasattr(media, 'file') and media.file else ''
+            
+            # NEVER select CDR or EPS files
+            if file_name.endswith(('.cdr', '.eps')):
+                logger.debug(f"Skipping CDR/EPS file: {file_name}")
+                continue
+            
+            # Only process image files (jpg, jpeg, png, gif, webp)
+            if not file_name.endswith(('.jpg', '.jpeg', '.png', '.gif', '.webp')):
+                logger.debug(f"Skipping non-image file: {file_name}")
+                continue
+            
             base_name = os.path.splitext(os.path.basename(file_name))[0] if file_name else ''
             
-            if media_type == 'mockup':
-                # Check if it's a mockup
-                is_mockup = base_name == 'mockup'
-                if not is_mockup:
-                    # Check metadata
-                    try:
-                        from MediaFiles.models import Relation
-                        relation = Relation.objects.filter(
-                            relation_type='Product:Media',
-                            id_1=product.pk,
-                            id_2=media.pk
-                        ).first()
-                        if relation and relation.meta and 'mockup' in str(relation.meta).lower():
-                            is_mockup = True
-                    except Exception:
-                        pass
-                
-                if is_mockup:
-                    image_media = media
-                    break
-            elif media_type == 'jpg':
-                if file_name.endswith(('.jpg', '.jpeg')):
-                    image_media = media
-                    break
-            elif media_type == 'png':
-                if file_name.endswith('.png'):
-                    image_media = media
-                    break
+            # Check if it's a mockup (base name = "mockup")
+            is_mockup = base_name == 'mockup'
+            
+            # Also check metadata if available
+            if not is_mockup:
+                try:
+                    from MediaFiles.models import Relation
+                    relation = Relation.objects.filter(
+                        relation_type='Product:Media',
+                        id_1=product.pk,
+                        id_2=media.pk
+                    ).first()
+                    if relation and relation.meta and 'mockup' in str(relation.meta).lower():
+                        is_mockup = True
+                except Exception:
+                    pass
+            
+            # Categorize the media file
+            if is_mockup:
+                if not mockup_media:  # Store first mockup found
+                    mockup_media = media
+            elif file_name.endswith('.png'):
+                if not png_media:  # Store first PNG found
+                    png_media = media
+            elif file_name.endswith(('.jpg', '.jpeg')):
+                if not jpg_media:  # Store first JPG found
+                    jpg_media = media
+        
+        # Priority selection logic:
+        # 1. ALWAYS check if product has a mockup image first - if yes, use it (regardless of user selection)
+        # 2. If no mockup exists, respect user's selection (mockup/jpg/png) or fallback to any PNG/JPG
+        # 3. Never use CDR or EPS files
+        
+        image_media = None
+        selected_type = None
+        requested_type = instagram_post.media_type  # What user selected in UI
+        
+        # Always prioritize mockup if it exists
+        if mockup_media:
+            image_media = mockup_media
+            selected_type = 'mockup'
+            logger.info(f"Selected mockup image for product {product.id} (requested: {requested_type})")
+        else:
+            # No mockup available - respect user's selection or fallback
+            if requested_type == 'png' and png_media:
+                image_media = png_media
+                selected_type = 'png'
+                logger.info(f"Selected PNG image for product {product.id} (as requested)")
+            elif requested_type == 'jpg' and jpg_media:
+                image_media = jpg_media
+                selected_type = 'jpg'
+                logger.info(f"Selected JPG image for product {product.id} (as requested)")
+            elif requested_type == 'mockup':
+                # User requested mockup but it doesn't exist - fallback to PNG or JPG
+                if png_media:
+                    image_media = png_media
+                    selected_type = 'png'
+                    logger.info(f"Mockup not found for product {product.id}, using PNG as fallback")
+                elif jpg_media:
+                    image_media = jpg_media
+                    selected_type = 'jpg'
+                    logger.info(f"Mockup not found for product {product.id}, using JPG as fallback")
+            else:
+                # User selected PNG/JPG but specific type not available - use any available
+                if png_media:
+                    image_media = png_media
+                    selected_type = 'png'
+                    logger.info(f"Selected PNG image for product {product.id} (fallback)")
+                elif jpg_media:
+                    image_media = jpg_media
+                    selected_type = 'jpg'
+                    logger.info(f"Selected JPG image for product {product.id} (fallback)")
         
         if not image_media:
-            logger.warning(f"No {media_type} image found for product {product.id}")
-            instagram_post.mark_failed(f"No {media_type} image found for product")
+            logger.warning(f"No valid image (mockup/PNG/JPG) found for product {product.id}")
+            instagram_post.mark_failed("No valid image found for product. Product must have at least one mockup, PNG, or JPG image file.")
             return
         
+        logger.info(f"Selected {selected_type} image (media ID: {image_media.id}) for Instagram post")
+        
         # Get image URL
-        image_url = image_media.file.url if hasattr(image_media, 'file') and image_media.file else None
+        try:
+            image_url = image_media.file.url if hasattr(image_media, 'file') and image_media.file else None
+        except Exception as e:
+            logger.error(f"Error getting URL for media {image_media.id}: {e}")
+            instagram_post.mark_failed(f"Error getting image URL: {str(e)}")
+            return
         
         if not image_url:
             logger.warning(f"Image URL not available for media {image_media.id}")
             instagram_post.mark_failed("Image URL not available")
             return
         
+        # Clean the URL (remove any trailing whitespace or invalid characters)
+        image_url = str(image_url).strip()
+        
         # Make image URL absolute if it's relative
         if image_url.startswith('/'):
             site_domain = getattr(settings, 'SITE_DOMAIN', 'wedesignz.com')
             protocol = 'https' if not settings.DEBUG else 'http'
-            image_url = f"{protocol}://{site_domain}{image_url}"
+            # Ensure no double slashes
+            site_domain = site_domain.rstrip('/')
+            image_url = image_url.lstrip('/')
+            image_url = f"{protocol}://{site_domain}/{image_url}"
+        elif not image_url.startswith(('http://', 'https://')):
+            # If it's not a relative path and not absolute, make it absolute
+            site_domain = getattr(settings, 'SITE_DOMAIN', 'wedesignz.com')
+            protocol = 'https' if not settings.DEBUG else 'http'
+            site_domain = site_domain.rstrip('/')
+            image_url = f"{protocol}://{site_domain}/{image_url.lstrip('/')}"
+        
+        # Final validation: ensure URL is properly formatted
+        if not image_url.startswith(('http://', 'https://')):
+            logger.error(f"Invalid image URL format: {image_url}")
+            instagram_post.mark_failed(f"Invalid image URL format")
+            return
+        
+        logger.info(f"Using image URL: {image_url[:100]}...")  # Log first 100 chars for debugging
         
         # Post to Instagram
         is_story = instagram_post.post_type == 'story'
