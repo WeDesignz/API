@@ -1152,8 +1152,8 @@ def send_notification_email(self, user_type, user_id, notification_id):
 @shared_task(
     bind=True, 
     max_retries=3,
-    name='common.tasks.post_to_instagram',  # Explicit task name for better tracking
-    rate_limit='10/m'  # Limit to 10 posts per minute to avoid Instagram rate limits
+    name='common.tasks.post_to_instagram'  # Explicit task name for better tracking
+    # Removed rate_limit - we add delays in task execution and between queuing
 )
 def post_to_instagram(self, instagram_post_id, base_url=None):
     """
@@ -1162,7 +1162,12 @@ def post_to_instagram(self, instagram_post_id, base_url=None):
     """
     import logging
     import os
+    import time
     logger = logging.getLogger(__name__)
+    
+    # Add small delay to space out Instagram API calls (2 seconds between posts)
+    # This helps avoid rate limiting while allowing bulk posting
+    time.sleep(2)
     
     try:
         from django.conf import settings
