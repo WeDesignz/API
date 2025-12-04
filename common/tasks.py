@@ -1149,7 +1149,12 @@ def send_notification_email(self, user_type, user_id, notification_id):
 
 # ==================== INSTAGRAM TASKS ====================
 
-@shared_task(bind=True, max_retries=3)
+@shared_task(
+    bind=True, 
+    max_retries=3,
+    name='common.tasks.post_to_instagram',  # Explicit task name for better tracking
+    rate_limit='10/m'  # Limit to 10 posts per minute to avoid Instagram rate limits
+)
 def post_to_instagram(self, instagram_post_id, base_url=None):
     """
     Post to Instagram asynchronously.

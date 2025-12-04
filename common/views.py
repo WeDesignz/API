@@ -8,6 +8,7 @@ from django.utils import timezone
 from datetime import timedelta
 import requests
 import logging
+import time
 
 from .models import PinterestIntegration, InstagramIntegration, InstagramPost
 
@@ -2349,8 +2350,9 @@ def instagram_post(request):
         
         created_posts = []
         errors = []
+        total_posts = len(posts_data)
         
-        for post_data in posts_data:
+        for index, post_data in enumerate(posts_data):
             product_id = post_data.get('productId')
             media_type = post_data.get('mediaType')
             caption = post_data.get('caption', '')
@@ -2457,6 +2459,12 @@ def instagram_post(request):
                     'product_id': product_id,
                     'status': 'queued'
                 })
+                
+                # Add small delay between queuing tasks to avoid overwhelming the worker
+                # and to respect Instagram rate limits. Only delay if there are more posts to process.
+                if index < total_posts - 1:
+                    time.sleep(0.5)  # 500ms delay between queuing tasks
+                    
             except Exception as e:
                 # If task queuing fails, mark the post as failed
                 error_msg = f"Failed to queue Instagram post task: {str(e)}"
