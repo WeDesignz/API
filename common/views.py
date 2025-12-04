@@ -9,7 +9,7 @@ from datetime import timedelta
 import requests
 import logging
 
-from .models import PinterestIntegration
+from .models import PinterestIntegration, InstagramIntegration, InstagramPost
 
 logger = logging.getLogger(__name__)
 
@@ -1401,4 +1401,900 @@ def pinterest_delete_board(request, board_id=None):
         return JsonResponse({
             'error': f'Error deleting board: {str(e)}'
         }, status=500)
+
+
+# ==================== INSTAGRAM VIEWS ====================
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def instagram_oauth_initiate(request):
+    """
+    Initiate Instagram OAuth flow through Facebook.
+    Redirects user to Facebook authorization page.
+    Note: Instagram uses Facebook's OAuth system.
+    """
+    app_id = getattr(settings, 'FACEBOOK_APP_ID', None) or getattr(settings, 'INSTAGRAM_APP_ID', None)
+    redirect_uri = getattr(settings, 'INSTAGRAM_REDIRECT_URI', None)
+    
+    if not app_id:
+        return JsonResponse({'error': 'Facebook/Instagram App ID not configured'}, status=500)
+    if not redirect_uri:
+        return JsonResponse({'error': 'Instagram Redirect URI not configured'}, status=500)
+    
+    # Build authorization URL for Facebook (Instagram uses Facebook OAuth)
+    from urllib.parse import quote_plus
+    redirect_uri_clean = redirect_uri.rstrip('/')
+    redirect_uri_encoded = quote_plus(redirect_uri_clean)
+    
+    # Instagram requires these permissions:
+    # - instagram_basic: Basic Instagram account info
+    # - instagram_content_publish: Post to Instagram
+    # - pages_show_list: List Facebook pages (needed for Instagram Business accounts)
+    # - pages_read_engagement: Read page engagement
+    auth_url = (
+        f"https://www.facebook.com/v18.0/dialog/oauth"
+        f"?client_id={app_id}"
+        f"&redirect_uri={redirect_uri_encoded}"
+        f"&response_type=code"
+        f"&scope=instagram_basic,instagram_content_publish,pages_show_list,pages_read_engagement"
+        f"&state=instagram_auth"
+    )
+    
+    logger.info(f"Instagram OAuth authorization URL: client_id={app_id}, redirect_uri={redirect_uri_clean}")
+    logger.info(f"Redirecting to Facebook OAuth for Instagram: {auth_url}")
+    return redirect(auth_url)
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+@csrf_exempt
+def instagram_oauth_callback(request):
+    """
+    Handle Instagram OAuth callback from Facebook.
+    Exchanges authorization code for access token and saves to database.
+    """
+    code = request.GET.get('code')
+    error = request.GET.get('error')
+    error_reason = request.GET.get('error_reason', '')
+    error_description = request.GET.get('error_description', '')
+    
+    # Get admin webapp URL from settings
+    admin_webapp_url = getattr(settings, 'ADMIN_WEBAPP_URL', 'https://admin.wedesignz.com')
+    
+    if error:
+        error_msg = error
+        if error_description:
+            error_msg += f": {error_description}"
+        logger.error(f"Instagram OAuth error: {error_msg}")
+        return HttpResponse(
+            f"""
+            <!DOCTYPE html>
+            <html lang="en">
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>Instagram Authorization Failed</title>
+                <style>
+                    * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+                    body {{
+                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+                        background: linear-gradient(135deg, #E1306C 0%, #C13584 50%, #833AB4 100%);
+                        min-height: 100vh;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        padding: 20px;
+                    }}
+                    .container {{
+                        background: white;
+                        border-radius: 16px;
+                        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+                        max-width: 600px;
+                        width: 100%;
+                        padding: 40px;
+                        text-align: center;
+                    }}
+                    .icon {{
+                        width: 80px;
+                        height: 80px;
+                        margin: 0 auto 24px;
+                        background: #fee;
+                        border-radius: 50%;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        font-size: 40px;
+                    }}
+                    h1 {{
+                        color: #dc3545;
+                        font-size: 28px;
+                        margin-bottom: 16px;
+                        font-weight: 600;
+                    }}
+                    .error-box {{
+                        background: #fee;
+                        border: 2px solid #fcc;
+                        border-radius: 8px;
+                        padding: 16px;
+                        margin: 24px 0;
+                        color: #721c24;
+                    }}
+                    .error-box strong {{
+                        display: block;
+                        margin-bottom: 8px;
+                        font-size: 14px;
+                        text-transform: uppercase;
+                        letter-spacing: 0.5px;
+                    }}
+                    .actions {{
+                        margin-top: 32px;
+                        display: flex;
+                        flex-direction: column;
+                        gap: 12px;
+                    }}
+                    .btn {{
+                        display: inline-block;
+                        padding: 14px 28px;
+                        border-radius: 8px;
+                        text-decoration: none;
+                        font-weight: 600;
+                        font-size: 16px;
+                        transition: all 0.3s ease;
+                        border: none;
+                        cursor: pointer;
+                    }}
+                    .btn-primary {{
+                        background: linear-gradient(135deg, #E1306C 0%, #C13584 50%, #833AB4 100%);
+                        color: white;
+                    }}
+                    .btn-primary:hover {{
+                        transform: translateY(-2px);
+                        box-shadow: 0 8px 20px rgba(225, 48, 108, 0.4);
+                    }}
+                    .btn-secondary {{
+                        background: #f8f9fa;
+                        color: #495057;
+                        border: 2px solid #dee2e6;
+                    }}
+                    .btn-secondary:hover {{
+                        background: #e9ecef;
+                        border-color: #adb5bd;
+                    }}
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <div class="icon">❌</div>
+                    <h1>Authorization Failed</h1>
+                    <div class="error-box">
+                        <strong>Error Details</strong>
+                        {error_msg}
+                    </div>
+                    <p style="color: #6c757d; margin-top: 16px;">
+                        There was an issue authorizing your Instagram account. Please try again.
+                    </p>
+                    <div class="actions">
+                        <a href="/api/common/instagram/authorize/" class="btn btn-primary">Try Again</a>
+                        <a href="{admin_webapp_url}/settings?tab=instagram" class="btn btn-secondary">Go to Settings</a>
+                    </div>
+                </div>
+            </body>
+            </html>
+            """,
+            status=400
+        )
+    
+    if not code:
+        return HttpResponse(
+            f"""
+            <!DOCTYPE html>
+            <html lang="en">
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>Instagram Authorization Failed</title>
+                <style>
+                    * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+                    body {{
+                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+                        background: linear-gradient(135deg, #E1306C 0%, #C13584 50%, #833AB4 100%);
+                        min-height: 100vh;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        padding: 20px;
+                    }}
+                    .container {{
+                        background: white;
+                        border-radius: 16px;
+                        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+                        max-width: 600px;
+                        width: 100%;
+                        padding: 40px;
+                        text-align: center;
+                    }}
+                    .icon {{
+                        width: 80px;
+                        height: 80px;
+                        margin: 0 auto 24px;
+                        background: #fee;
+                        border-radius: 50%;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        font-size: 40px;
+                    }}
+                    h1 {{
+                        color: #dc3545;
+                        font-size: 28px;
+                        margin-bottom: 16px;
+                        font-weight: 600;
+                    }}
+                    .actions {{
+                        margin-top: 32px;
+                        display: flex;
+                        flex-direction: column;
+                        gap: 12px;
+                    }}
+                    .btn {{
+                        display: inline-block;
+                        padding: 14px 28px;
+                        border-radius: 8px;
+                        text-decoration: none;
+                        font-weight: 600;
+                        font-size: 16px;
+                        transition: all 0.3s ease;
+                    }}
+                    .btn-primary {{
+                        background: linear-gradient(135deg, #E1306C 0%, #C13584 50%, #833AB4 100%);
+                        color: white;
+                    }}
+                    .btn-primary:hover {{
+                        transform: translateY(-2px);
+                        box-shadow: 0 8px 20px rgba(225, 48, 108, 0.4);
+                    }}
+                    .btn-secondary {{
+                        background: #f8f9fa;
+                        color: #495057;
+                        border: 2px solid #dee2e6;
+                    }}
+                    .btn-secondary:hover {{
+                        background: #e9ecef;
+                        border-color: #adb5bd;
+                    }}
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <div class="icon">❌</div>
+                    <h1>Authorization Failed</h1>
+                    <p style="color: #6c757d; margin-top: 16px;">
+                        No authorization code received. Please try again.
+                    </p>
+                    <div class="actions">
+                        <a href="/api/common/instagram/authorize/" class="btn btn-primary">Try Again</a>
+                        <a href="{admin_webapp_url}/settings?tab=instagram" class="btn btn-secondary">Go to Settings</a>
+                    </div>
+                </div>
+            </body>
+            </html>
+            """,
+            status=400
+        )
+    
+    # Exchange code for access token
+    app_id = getattr(settings, 'FACEBOOK_APP_ID', None) or getattr(settings, 'INSTAGRAM_APP_ID', None)
+    app_secret = getattr(settings, 'FACEBOOK_APP_SECRET', None) or getattr(settings, 'INSTAGRAM_APP_SECRET', None)
+    redirect_uri = getattr(settings, 'INSTAGRAM_REDIRECT_URI', None)
+    
+    if not app_id or not app_secret:
+        logger.error("Facebook/Instagram App ID or Secret not configured")
+        return HttpResponse(
+            f"""
+            <!DOCTYPE html>
+            <html lang="en">
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>Instagram Configuration Error</title>
+                <style>
+                    body {{
+                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                        background: linear-gradient(135deg, #E1306C 0%, #C13584 50%, #833AB4 100%);
+                        min-height: 100vh;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        padding: 20px;
+                    }}
+                    .container {{
+                        background: white;
+                        border-radius: 16px;
+                        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+                        max-width: 600px;
+                        width: 100%;
+                        padding: 40px;
+                        text-align: center;
+                    }}
+                    h1 {{ color: #dc3545; font-size: 28px; margin-bottom: 16px; }}
+                    p {{ color: #6c757d; margin-top: 16px; }}
+                    .btn {{
+                        display: inline-block;
+                        padding: 14px 28px;
+                        border-radius: 8px;
+                        text-decoration: none;
+                        font-weight: 600;
+                        margin-top: 24px;
+                        background: linear-gradient(135deg, #E1306C 0%, #C13584 50%, #833AB4 100%);
+                        color: white;
+                    }}
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <h1>Configuration Error</h1>
+                    <p>Facebook/Instagram App credentials are not configured. Please contact your administrator.</p>
+                    <a href="{admin_webapp_url}/settings?tab=instagram" class="btn">Go to Settings</a>
+                </div>
+            </body>
+            </html>
+            """,
+            status=500
+        )
+    
+    try:
+        # Step 1: Exchange code for short-lived access token
+        token_url = "https://graph.facebook.com/v18.0/oauth/access_token"
+        token_params = {
+            'client_id': app_id,
+            'client_secret': app_secret,
+            'redirect_uri': redirect_uri.rstrip('/'),
+            'code': code
+        }
+        
+        token_response = requests.get(token_url, params=token_params, timeout=30)
+        token_response.raise_for_status()
+        token_data = token_response.json()
+        
+        short_lived_token = token_data.get('access_token')
+        if not short_lived_token:
+            raise ValueError("No access token in response")
+        
+        # Step 2: Exchange short-lived token for long-lived token (60 days)
+        long_token_url = "https://graph.facebook.com/v18.0/oauth/access_token"
+        long_token_params = {
+            'grant_type': 'fb_exchange_token',
+            'client_id': app_id,
+            'client_secret': app_secret,
+            'fb_exchange_token': short_lived_token
+        }
+        
+        long_token_response = requests.get(long_token_url, params=long_token_params, timeout=30)
+        long_token_response.raise_for_status()
+        long_token_data = long_token_response.json()
+        
+        long_lived_token = long_token_data.get('access_token', short_lived_token)
+        expires_in = long_token_data.get('expires_in', 5184000)  # Default 60 days
+        
+        # Step 3: Get user info to find Instagram Business Account ID
+        user_info_url = "https://graph.facebook.com/v18.0/me"
+        user_info_params = {
+            'fields': 'id,name',
+            'access_token': long_lived_token
+        }
+        
+        user_info_response = requests.get(user_info_url, params=user_info_params, timeout=30)
+        user_info_response.raise_for_status()
+        user_info = user_info_response.json()
+        
+        # Step 4: Get Instagram Business Account ID
+        # First, get pages (Instagram Business accounts are linked to Facebook Pages)
+        pages_url = "https://graph.facebook.com/v18.0/me/accounts"
+        pages_params = {
+            'access_token': long_lived_token,
+            'fields': 'id,name,instagram_business_account'
+        }
+        
+        pages_response = requests.get(pages_url, params=pages_params, timeout=30)
+        pages_response.raise_for_status()
+        pages_data = pages_response.json()
+        
+        instagram_account_id = None
+        instagram_username = None
+        
+        # Find the Instagram Business Account
+        for page in pages_data.get('data', []):
+            if 'instagram_business_account' in page:
+                instagram_account = page['instagram_business_account']
+                instagram_account_id = instagram_account.get('id')
+                
+                # Get Instagram account details
+                if instagram_account_id:
+                    instagram_url = f"https://graph.facebook.com/v18.0/{instagram_account_id}"
+                    instagram_params = {
+                        'fields': 'username',
+                        'access_token': long_lived_token
+                    }
+                    instagram_response = requests.get(instagram_url, params=instagram_params, timeout=30)
+                    if instagram_response.status_code == 200:
+                        instagram_data = instagram_response.json()
+                        instagram_username = instagram_data.get('username')
+                    break
+        
+        # Save to database
+        integration = InstagramIntegration.get_instance()
+        integration.access_token = long_lived_token
+        integration.user_id = instagram_account_id or user_info.get('id')
+        integration.username = instagram_username
+        integration.is_enabled = True
+        
+        # Calculate expiration date
+        from datetime import timedelta
+        integration.token_expires_at = timezone.now() + timedelta(seconds=expires_in)
+        
+        if request.user and request.user.is_authenticated:
+            integration.created_by = request.user
+        
+        integration.save()
+        
+        logger.info(f"Instagram OAuth successful: user_id={integration.user_id}, username={integration.username}")
+        
+        # Return success page
+        return HttpResponse(
+            f"""
+            <!DOCTYPE html>
+            <html lang="en">
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>Instagram Authorization Successful</title>
+                <style>
+                    * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+                    body {{
+                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+                        background: linear-gradient(135deg, #E1306C 0%, #C13584 50%, #833AB4 100%);
+                        min-height: 100vh;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        padding: 20px;
+                    }}
+                    .container {{
+                        background: white;
+                        border-radius: 16px;
+                        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+                        max-width: 600px;
+                        width: 100%;
+                        padding: 40px;
+                        text-align: center;
+                    }}
+                    .icon {{
+                        width: 80px;
+                        height: 80px;
+                        margin: 0 auto 24px;
+                        background: #d4edda;
+                        border-radius: 50%;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        font-size: 40px;
+                    }}
+                    h1 {{
+                        color: #28a745;
+                        font-size: 28px;
+                        margin-bottom: 16px;
+                        font-weight: 600;
+                    }}
+                    .success-box {{
+                        background: #d4edda;
+                        border: 2px solid #c3e6cb;
+                        border-radius: 8px;
+                        padding: 16px;
+                        margin: 24px 0;
+                        color: #155724;
+                    }}
+                    .btn {{
+                        display: inline-block;
+                        padding: 14px 28px;
+                        border-radius: 8px;
+                        text-decoration: none;
+                        font-weight: 600;
+                        font-size: 16px;
+                        transition: all 0.3s ease;
+                        background: linear-gradient(135deg, #E1306C 0%, #C13584 50%, #833AB4 100%);
+                        color: white;
+                        margin-top: 24px;
+                    }}
+                    .btn:hover {{
+                        transform: translateY(-2px);
+                        box-shadow: 0 8px 20px rgba(225, 48, 108, 0.4);
+                    }}
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <div class="icon">✅</div>
+                    <h1>Authorization Successful!</h1>
+                    <div class="success-box">
+                        <strong>Instagram Connected</strong>
+                        <p style="margin-top: 8px;">
+                            Your Instagram account has been successfully connected.
+                            {'@' + instagram_username if instagram_username else 'Account ID: ' + str(integration.user_id)}
+                        </p>
+                    </div>
+                    <p style="color: #6c757d; margin-top: 16px;">
+                        You can now post to Instagram from the admin panel.
+                    </p>
+                    <a href="{admin_webapp_url}/settings?tab=instagram" class="btn">Go to Settings</a>
+                </div>
+            </body>
+            </html>
+            """
+        )
+        
+    except requests.exceptions.RequestException as e:
+        error_msg = str(e)
+        if hasattr(e, 'response') and e.response is not None:
+            try:
+                error_data = e.response.json()
+                error_msg = error_data.get('error', {}).get('message', str(e))
+            except:
+                error_msg = e.response.text[:500]
+        
+        logger.error(f"Instagram OAuth token exchange failed: {error_msg}", exc_info=True)
+        return HttpResponse(
+            f"""
+            <!DOCTYPE html>
+            <html lang="en">
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>Instagram Authorization Error</title>
+                <style>
+                    body {{
+                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                        background: linear-gradient(135deg, #E1306C 0%, #C13584 50%, #833AB4 100%);
+                        min-height: 100vh;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        padding: 20px;
+                    }}
+                    .container {{
+                        background: white;
+                        border-radius: 16px;
+                        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+                        max-width: 600px;
+                        width: 100%;
+                        padding: 40px;
+                        text-align: center;
+                    }}
+                    h1 {{ color: #dc3545; font-size: 28px; margin-bottom: 16px; }}
+                    .error-box {{
+                        background: #fee;
+                        border: 2px solid #fcc;
+                        border-radius: 8px;
+                        padding: 16px;
+                        margin: 24px 0;
+                        color: #721c24;
+                    }}
+                    .btn {{
+                        display: inline-block;
+                        padding: 14px 28px;
+                        border-radius: 8px;
+                        text-decoration: none;
+                        font-weight: 600;
+                        margin-top: 24px;
+                        background: linear-gradient(135deg, #E1306C 0%, #C13584 50%, #833AB4 100%);
+                        color: white;
+                    }}
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <h1>Authorization Error</h1>
+                    <div class="error-box">
+                        <strong>Error</strong>
+                        <p style="margin-top: 8px;">{error_msg}</p>
+                    </div>
+                    <a href="{admin_webapp_url}/settings?tab=instagram" class="btn">Go to Settings</a>
+                </div>
+            </body>
+            </html>
+            """,
+            status=500
+        )
+    except Exception as e:
+        logger.error(f"Instagram OAuth error: {str(e)}", exc_info=True)
+        return HttpResponse(
+            f"""
+            <!DOCTYPE html>
+            <html lang="en">
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>Instagram Authorization Error</title>
+                <style>
+                    body {{
+                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                        background: linear-gradient(135deg, #E1306C 0%, #C13584 50%, #833AB4 100%);
+                        min-height: 100vh;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        padding: 20px;
+                    }}
+                    .container {{
+                        background: white;
+                        border-radius: 16px;
+                        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+                        max-width: 600px;
+                        width: 100%;
+                        padding: 40px;
+                        text-align: center;
+                    }}
+                    h1 {{ color: #dc3545; font-size: 28px; margin-bottom: 16px; }}
+                    .error-box {{
+                        background: #fee;
+                        border: 2px solid #fcc;
+                        border-radius: 8px;
+                        padding: 16px;
+                        margin: 24px 0;
+                        color: #721c24;
+                    }}
+                    .btn {{
+                        display: inline-block;
+                        padding: 14px 28px;
+                        border-radius: 8px;
+                        text-decoration: none;
+                        font-weight: 600;
+                        margin-top: 24px;
+                        background: linear-gradient(135deg, #E1306C 0%, #C13584 50%, #833AB4 100%);
+                        color: white;
+                    }}
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <h1>Authorization Error</h1>
+                    <div class="error-box">
+                        <strong>Error</strong>
+                        <p style="margin-top: 8px;">{str(e)}</p>
+                    </div>
+                    <a href="{admin_webapp_url}/settings?tab=instagram" class="btn">Go to Settings</a>
+                </div>
+            </body>
+            </html>
+            """,
+            status=500
+        )
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def instagram_status(request):
+    """
+    Check Instagram integration status.
+    Returns JSON with current status.
+    """
+    integration = InstagramIntegration.get_instance()
+    
+    status_data = {
+        'is_enabled': integration.is_enabled,
+        'is_configured': bool(integration.access_token),
+        'is_token_valid': integration.is_token_valid(),
+        'username': integration.username,
+        'last_successful_post': integration.last_successful_post.isoformat() if integration.last_successful_post else None,
+        'last_error': integration.last_error,
+        'last_error_at': integration.last_error_at.isoformat() if integration.last_error_at else None,
+    }
+    
+    return JsonResponse(status_data)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def instagram_post(request):
+    """
+    Create Instagram posts (supports bulk posting).
+    Accepts array of posts and queues them for async processing.
+    """
+    posts_data = request.data.get('posts', [])
+    
+    if not posts_data or not isinstance(posts_data, list):
+        return JsonResponse({
+            'error': 'posts array is required'
+        }, status=400)
+    
+    if len(posts_data) == 0:
+        return JsonResponse({
+            'error': 'At least one post is required'
+        }, status=400)
+    
+    # Validate integration
+    integration = InstagramIntegration.get_instance()
+    
+    if not integration.is_enabled:
+        return JsonResponse({
+            'error': 'Instagram integration is disabled'
+        }, status=400)
+    
+    if not integration.access_token:
+        return JsonResponse({
+            'error': 'Instagram access token not configured. Please authorize first.'
+        }, status=400)
+    
+    if not integration.is_token_valid():
+        return JsonResponse({
+            'error': 'Instagram access token expired. Please re-authorize.'
+        }, status=400)
+    
+    try:
+        from Catalog.models import Product
+        from .tasks import post_to_instagram
+        
+        created_posts = []
+        errors = []
+        
+        for post_data in posts_data:
+            product_id = post_data.get('productId')
+            media_type = post_data.get('mediaType')
+            caption = post_data.get('caption', '')
+            post_type = post_data.get('postType', 'post')
+            
+            # Validate required fields
+            if not product_id:
+                errors.append({'post': post_data, 'error': 'productId is required'})
+                continue
+            
+            if media_type not in ['mockup', 'jpg', 'png']:
+                errors.append({'post': post_data, 'error': f'Invalid media_type: {media_type}'})
+                continue
+            
+            if post_type not in ['post', 'story']:
+                errors.append({'post': post_data, 'error': f'Invalid post_type: {post_type}'})
+                continue
+            
+            # Get product
+            try:
+                product = Product.objects.get(id=product_id)
+            except Product.DoesNotExist:
+                errors.append({'post': post_data, 'error': f'Product {product_id} not found'})
+                continue
+            
+            # Get media file URL based on media_type
+            media_files = product.get_media().filter(media_type='image')
+            image_url = None
+            
+            for media_file in media_files:
+                file_name = getattr(media_file, 'file_name', '').lower() if hasattr(media_file, 'file_name') else ''
+                
+                if media_type == 'mockup':
+                    # Check if it's a mockup
+                    is_mockup = 'mockup' in file_name
+                    if not is_mockup:
+                        # Check metadata
+                        try:
+                            from MediaFiles.models import Relation
+                            relation = Relation.objects.filter(
+                                relation_type='Product:Media',
+                                id_1=product.pk,
+                                id_2=media_file.pk
+                            ).first()
+                            if relation and relation.meta and 'mockup' in str(relation.meta).lower():
+                                is_mockup = True
+                        except Exception:
+                            pass
+                    
+                    if is_mockup:
+                        image_url = media_file.file.url if hasattr(media_file, 'file') else None
+                        break
+                elif media_type == 'jpg':
+                    if file_name.endswith(('.jpg', '.jpeg')):
+                        image_url = media_file.file.url if hasattr(media_file, 'file') else None
+                        break
+                elif media_type == 'png':
+                    if file_name.endswith('.png'):
+                        image_url = media_file.file.url if hasattr(media_file, 'file') else None
+                        break
+            
+            if not image_url:
+                errors.append({
+                    'post': post_data,
+                    'error': f'No {media_type} image found for product {product_id}'
+                })
+                continue
+            
+            # Make image URL absolute if it's relative
+            if image_url.startswith('/'):
+                from django.conf import settings
+                site_domain = getattr(settings, 'SITE_DOMAIN', 'wedesignz.com')
+                protocol = 'https' if not settings.DEBUG else 'http'
+                image_url = f"{protocol}://{site_domain}{image_url}"
+            
+            # Create InstagramPost record
+            instagram_post = InstagramPost.objects.create(
+                product=product,
+                media_type=media_type,
+                caption=caption,
+                post_type=post_type,
+                status='pending'
+            )
+            
+            # Queue Celery task for async posting
+            post_to_instagram.delay(instagram_post.id)
+            
+            created_posts.append({
+                'id': instagram_post.id,
+                'product_id': product_id,
+                'status': 'queued'
+            })
+        
+        response_data = {
+            'message': f'Queued {len(created_posts)} post(s) for Instagram',
+            'posts_queued': len(created_posts),
+            'post_ids': [p['id'] for p in created_posts],
+            'errors': errors if errors else None
+        }
+        
+        return JsonResponse(response_data, status=200)
+        
+    except Exception as e:
+        logger.error(f"Error creating Instagram posts: {str(e)}", exc_info=True)
+        return JsonResponse({
+            'error': f'Error creating posts: {str(e)}'
+        }, status=500)
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def instagram_posts_list(request):
+    """
+    Get list of Instagram posts with filtering and pagination.
+    """
+    from django.core.paginator import Paginator
+    
+    status_filter = request.GET.get('status')
+    page = int(request.GET.get('page', 1))
+    limit = int(request.GET.get('limit', 20))
+    
+    posts = InstagramPost.objects.all()
+    
+    if status_filter:
+        posts = posts.filter(status=status_filter)
+    
+    posts = posts.order_by('-created_at')
+    
+    paginator = Paginator(posts, limit)
+    page_obj = paginator.get_page(page)
+    
+    posts_data = []
+    for post in page_obj.object_list:
+        posts_data.append({
+            'id': post.id,
+            'product_id': post.product.id,
+            'product_title': post.product.title,
+            'media_type': post.media_type,
+            'caption': post.caption,
+            'post_type': post.post_type,
+            'status': post.status,
+            'post_id': post.post_id,
+            'post_url': post.post_url,
+            'error_message': post.error_message,
+            'retry_count': post.retry_count,
+            'created_at': post.created_at.isoformat(),
+            'posted_at': post.posted_at.isoformat() if post.posted_at else None,
+        })
+    
+    return JsonResponse({
+        'data': posts_data,
+        'pagination': {
+            'page': page,
+            'limit': limit,
+            'total': paginator.count,
+            'total_pages': paginator.num_pages,
+            'has_next': page_obj.has_next(),
+            'has_previous': page_obj.has_previous(),
+        }
+    })
 

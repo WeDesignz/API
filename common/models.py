@@ -132,3 +132,153 @@ class PinterestPost(models.Model):
         self.last_retry_at = timezone.now()
         self.save(update_fields=['status', 'last_retry_at'])
 
+
+class InstagramIntegration(models.Model):
+    """
+    Model to store Instagram OAuth tokens and configuration.
+    Only one instance should exist (singleton pattern).
+    """
+    access_token = models.TextField(help_text="Instagram OAuth access token")
+    refresh_token = models.TextField(null=True, blank=True, help_text="Instagram OAuth refresh token")
+    token_expires_at = models.DateTimeField(null=True, blank=True, help_text="When the access token expires")
+    user_id = models.CharField(max_length=255, null=True, blank=True, help_text="Instagram user ID")
+    username = models.CharField(max_length=255, null=True, blank=True, help_text="Instagram username")
+    is_enabled = models.BooleanField(default=True, help_text="Enable/disable Instagram posting")
+    
+    # Status tracking
+    last_successful_post = models.DateTimeField(null=True, blank=True, help_text="Last successful Instagram post")
+    last_error = models.TextField(null=True, blank=True, help_text="Last error message if any")
+    last_error_at = models.DateTimeField(null=True, blank=True, help_text="When the last error occurred")
+    
+    # Metadata
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='instagram_integrations')
+    
+    class Meta:
+        db_table = 'instagram_integration'
+        verbose_name = 'Instagram Integration'
+        verbose_name_plural = 'Instagram Integrations'
+    
+    def __str__(self):
+        status = "✅ Enabled" if self.is_enabled else "❌ Disabled"
+        return f"Instagram Integration - {status}"
+    
+    @classmethod
+    def get_instance(cls):
+        """Get or create the singleton instance."""
+        instance, created = cls.objects.get_or_create(
+            pk=1,
+            defaults={
+                'access_token': '',
+                'is_enabled': False
+            }
+        )
+        return instance
+    
+    def is_token_valid(self):
+        """Check if the access token is still valid."""
+        if not self.access_token:
+            return False
+        if self.token_expires_at and timezone.now() > self.token_expires_at:
+            return False
+        return True
+    
+    def update_error(self, error_message):
+        """Update error tracking."""
+        self.last_error = error_message
+        self.last_error_at = timezone.now()
+        self.save(update_fields=['last_error', 'last_error_at'])
+    
+    def update_success(self):
+        """Update success tracking."""
+        self.last_successful_post = timezone.now()
+        self.last_error = None
+        self.last_error_at = None
+        self.save(update_fields=['last_successful_post', 'last_error', 'last_error_at'])
+
+
+class InstagramPost(models.Model):
+    """
+    Model to track Instagram post attempts for each design.
+    Supports both regular posts and stories.
+    """
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('processing', 'Processing'),
+        ('success', 'Success'),
+        ('failed', 'Failed'),
+        ('retrying', 'Retrying'),
+    ]
+    
+    POST_TYPE_CHOICES = [
+        ('post', 'Post'),
+        ('story', 'Story'),
+    ]
+    
+    MEDIA_TYPE_CHOICES = [
+        ('mockup', 'Mockup'),
+        ('jpg', 'JPG'),
+        ('png', 'PNG'),
+    ]
+    
+    product = models.ForeignKey('Catalog.Product', on_delete=models.CASCADE, related_name='instagram_posts')
+    media_type = models.CharField(max_length=20, choices=MEDIA_TYPE_CHOICES, help_text="Type of media to post")
+    caption = models.TextField(help_text="Caption for the Instagram post")
+    post_type = models.CharField(max_length=10, choices=POST_TYPE_CHOICES, default='post', help_text="Post or Story")
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    
+    # Instagram post information
+    media_id = models.CharField(max_length=255, null=True, blank=True, help_text="Instagram media ID if successfully posted")
+    post_id = models.CharField(max_length=255, null=True, blank=True, help_text="Instagram post ID if successfully posted")
+    post_url = models.URLField(null=True, blank=True, help_text="URL to the Instagram post")
+    
+    # Error tracking
+    error_message = models.TextField(null=True, blank=True, help_text="Error message if posting failed")
+    retry_count = models.IntegerField(default=0, help_text="Number of retry attempts")
+    
+    # Timestamps
+    created_at = models.DateTimeField(auto_now_add=True)
+    posted_at = models.DateTimeField(null=True, blank=True, help_text="When the post was successfully posted")
+    last_retry_at = models.DateTimeField(null=True, blank=True, help_text="Last retry attempt timestamp")
+    
+    class Meta:
+        db_table = 'instagram_post'
+        verbose_name = 'Instagram Post'
+        verbose_name_plural = 'Instagram Posts'
+        ordering = ['-created_at']
+    
+    def __str__(self):
+        return f"Instagram {self.get_post_type_display()} - {self.product.title} ({self.get_status_display()})"
+    
+    def mark_success(self, media_id=None, post_id=None, post_url=None):
+        """Mark the post as successful."""
+        self.status = 'success'
+        self.posted_at = timezone.now()
+        if media_id:
+            self.media_id = media_id
+        if post_id:
+            self.post_id = post_id
+        if post_url:
+            self.post_url = post_url
+        self.save(update_fields=['status', 'posted_at', 'media_id', 'post_id', 'post_url'])
+    
+    def mark_failed(self, error_message):
+        """Mark the post as failed."""
+        self.status = 'failed'
+        self.error_message = error_message
+        self.last_retry_at = timezone.now()
+        self.retry_count += 1
+        self.save(update_fields=['status', 'error_message', 'last_retry_at', 'retry_count'])
+    
+    def mark_retrying(self):
+        """Mark the post as being retried."""
+        self.status = 'retrying'
+        self.last_retry_at = timezone.now()
+        self.save(update_fields=['status', 'last_retry_at'])
+    
+    def mark_processing(self):
+        """Mark the post as being processed."""
+        self.status = 'processing'
+        self.save(update_fields=['status'])
+

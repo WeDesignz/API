@@ -588,6 +588,16 @@ WHATSAPP_PHONE_NUMBER_ID = config('WHATSAPP_PHONE_NUMBER_ID', default='')
 WHATSAPP_ACCESS_TOKEN = config('WHATSAPP_ACCESS_TOKEN', default='')
 WHATSAPP_OTP_TEMPLATE_NAME = config('WHATSAPP_OTP_TEMPLATE_NAME', default='otp_template')
 
+# Instagram/Facebook Configuration
+INSTAGRAM_APP_ID = config('INSTAGRAM_APP_ID', default='')
+INSTAGRAM_APP_SECRET = config('INSTAGRAM_APP_SECRET', default='')
+INSTAGRAM_ACCESS_TOKEN = config('INSTAGRAM_ACCESS_TOKEN', default='')
+INSTAGRAM_REDIRECT_URI = config('INSTAGRAM_REDIRECT_URI', default='')
+# Also support FACEBOOK_APP_ID and FACEBOOK_APP_SECRET for compatibility
+# If FACEBOOK_APP_ID is not set, fallback to INSTAGRAM_APP_ID
+FACEBOOK_APP_ID = config('FACEBOOK_APP_ID', default='') or INSTAGRAM_APP_ID
+FACEBOOK_APP_SECRET = config('FACEBOOK_APP_SECRET', default='') or INSTAGRAM_APP_SECRET
+
 # Celery Configuration
 CELERY_BROKER_URL = config('CELERY_BROKER_URL', default='redis://localhost:6379/0')
 CELERY_RESULT_BACKEND = config('CELERY_RESULT_BACKEND', default='django-db')

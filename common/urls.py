@@ -2,6 +2,7 @@ from django.urls import path
 from . import views
 
 urlpatterns = [
+    # Pinterest endpoints
     path('authorize/', views.pinterest_oauth_initiate, name='pinterest_oauth_initiate'),
     path('authorize', views.pinterest_oauth_initiate, name='pinterest_oauth_initiate_no_slash'),
     path('callback/', views.pinterest_oauth_callback, name='pinterest_oauth_callback'),
@@ -18,5 +19,17 @@ urlpatterns = [
     path('update-board', views.pinterest_update_board, name='pinterest_update_board_no_slash'),
     path('delete-board/<str:board_id>/', views.pinterest_delete_board, name='pinterest_delete_board'),
     path('delete-board/<str:board_id>', views.pinterest_delete_board, name='pinterest_delete_board_no_slash'),
+    
+    # Instagram endpoints
+    path('instagram/authorize/', views.instagram_oauth_initiate, name='instagram_oauth_initiate'),
+    path('instagram/authorize', views.instagram_oauth_initiate, name='instagram_oauth_initiate_no_slash'),
+    path('instagram/callback/', views.instagram_oauth_callback, name='instagram_oauth_callback'),
+    path('instagram/callback', views.instagram_oauth_callback, name='instagram_oauth_callback_no_slash'),
+    path('instagram/status/', views.instagram_status, name='instagram_status'),
+    path('instagram/status', views.instagram_status, name='instagram_status_no_slash'),
+    path('instagram/post/', views.instagram_post, name='instagram_post'),
+    path('instagram/post', views.instagram_post, name='instagram_post_no_slash'),
+    path('instagram/posts/', views.instagram_posts_list, name='instagram_posts_list'),
+    path('instagram/posts', views.instagram_posts_list, name='instagram_posts_list_no_slash'),
 ]
 

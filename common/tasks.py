@@ -1147,6 +1147,161 @@ def send_notification_email(self, user_type, user_id, notification_id):
         raise self.retry(exc=e, countdown=60, max_retries=3)
 
 
+# ==================== INSTAGRAM TASKS ====================
+
+@shared_task(bind=True, max_retries=3)
+def post_to_instagram(self, instagram_post_id, base_url=None):
+    """
+    Post to Instagram asynchronously.
+    Updates InstagramPost record with result.
+    """
+    import logging
+    import os
+    logger = logging.getLogger(__name__)
+    
+    try:
+        from django.conf import settings
+        from .models import InstagramPost, InstagramIntegration
+        from Catalog.models import Product
+        
+        # Check if Instagram is enabled
+        integration = InstagramIntegration.get_instance()
+        if not integration.is_enabled:
+            logger.debug("Instagram integration is disabled")
+            instagram_post = InstagramPost.objects.get(id=instagram_post_id)
+            instagram_post.mark_failed("Instagram integration is disabled")
+            return
+        
+        # Get the InstagramPost record
+        try:
+            instagram_post = InstagramPost.objects.get(id=instagram_post_id)
+        except InstagramPost.DoesNotExist:
+            logger.error(f"InstagramPost {instagram_post_id} not found")
+            return
+        
+        # Mark as processing
+        instagram_post.mark_processing()
+        
+        # Get the product
+        try:
+            product = instagram_post.product
+        except Product.DoesNotExist:
+            logger.error(f"Product not found for InstagramPost {instagram_post_id}")
+            instagram_post.mark_failed("Product not found")
+            return
+        
+        # Check if Instagram is configured
+        try:
+            from .instagram_service import InstagramService
+            instagram_service = InstagramService()
+        except Exception as e:
+            error_msg = f"Instagram not configured: {str(e)}"
+            logger.warning(error_msg)
+            instagram_post.mark_failed(error_msg)
+            return
+        
+        # Get media files (images)
+        media_files = product.get_media().filter(media_type='image')
+        
+        if not media_files.exists():
+            logger.warning(f"No image media found for product {product.id}")
+            instagram_post.mark_failed("No image media found for product")
+            return
+        
+        # Find the specific media file based on media_type
+        image_media = None
+        media_type = instagram_post.media_type
+        
+        for media in media_files:
+            if not media.file:
+                continue
+            
+            file_name = media.file.name.lower() if hasattr(media, 'file') and media.file else ''
+            base_name = os.path.splitext(os.path.basename(file_name))[0] if file_name else ''
+            
+            if media_type == 'mockup':
+                # Check if it's a mockup
+                is_mockup = base_name == 'mockup'
+                if not is_mockup:
+                    # Check metadata
+                    try:
+                        from MediaFiles.models import Relation
+                        relation = Relation.objects.filter(
+                            relation_type='Product:Media',
+                            id_1=product.pk,
+                            id_2=media.pk
+                        ).first()
+                        if relation and relation.meta and 'mockup' in str(relation.meta).lower():
+                            is_mockup = True
+                    except Exception:
+                        pass
+                
+                if is_mockup:
+                    image_media = media
+                    break
+            elif media_type == 'jpg':
+                if file_name.endswith(('.jpg', '.jpeg')):
+                    image_media = media
+                    break
+            elif media_type == 'png':
+                if file_name.endswith('.png'):
+                    image_media = media
+                    break
+        
+        if not image_media:
+            logger.warning(f"No {media_type} image found for product {product.id}")
+            instagram_post.mark_failed(f"No {media_type} image found for product")
+            return
+        
+        # Get image URL
+        image_url = image_media.file.url if hasattr(image_media, 'file') and image_media.file else None
+        
+        if not image_url:
+            logger.warning(f"Image URL not available for media {image_media.id}")
+            instagram_post.mark_failed("Image URL not available")
+            return
+        
+        # Make image URL absolute if it's relative
+        if image_url.startswith('/'):
+            site_domain = getattr(settings, 'SITE_DOMAIN', 'wedesignz.com')
+            protocol = 'https' if not settings.DEBUG else 'http'
+            image_url = f"{protocol}://{site_domain}{image_url}"
+        
+        # Post to Instagram
+        is_story = instagram_post.post_type == 'story'
+        result = instagram_service.create_and_publish_post(
+            image_url=image_url,
+            caption=instagram_post.caption,
+            is_story=is_story
+        )
+        
+        if result and result.get('id'):
+            # Success
+            instagram_post.mark_success(
+                media_id=result.get('id'),
+                post_id=result.get('id'),
+                post_url=result.get('url')
+            )
+            logger.info(f"Instagram post created successfully: {result.get('id')}")
+        else:
+            # Failed
+            error_msg = "Failed to create Instagram post"
+            instagram_post.mark_failed(error_msg)
+            logger.error(f"Failed to create Instagram post for product {product.id}")
+            
+    except Exception as e:
+        logger.error(f"Error posting to Instagram: {str(e)}", exc_info=True)
+        try:
+            instagram_post = InstagramPost.objects.get(id=instagram_post_id)
+            instagram_post.mark_failed(f"Error: {str(e)}")
+        except Exception:
+            pass
+        
+        # Retry if not exceeded max retries
+        if self.request.retries < self.max_retries:
+            raise self.retry(exc=e, countdown=60 * (self.request.retries + 1))
+
+
 # ==================== PINTEREST TASKS ====================
 
 @shared_task(bind=True, max_retries=3)
