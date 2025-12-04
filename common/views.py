@@ -2442,13 +2442,33 @@ def instagram_post(request):
             )
             
             # Queue Celery task for async posting
-            post_to_instagram.delay(instagram_post.id)
-            
-            created_posts.append({
-                'id': instagram_post.id,
-                'product_id': product_id,
-                'status': 'queued'
-            })
+            try:
+                # Get base_url for consistency (though task can work without it)
+                base_url = getattr(settings, 'SITE_DOMAIN', 'wedesignz.com')
+                if not base_url.startswith('http'):
+                    base_url = f"https://{base_url}"
+                
+                # Queue the task
+                task_result = post_to_instagram.delay(instagram_post.id, base_url)
+                logger.info(f"Queued Instagram post task {task_result.id} for post {instagram_post.id}, product {product_id}")
+                
+                created_posts.append({
+                    'id': instagram_post.id,
+                    'product_id': product_id,
+                    'status': 'queued'
+                })
+            except Exception as e:
+                # If task queuing fails, mark the post as failed
+                error_msg = f"Failed to queue Instagram post task: {str(e)}"
+                logger.error(error_msg, exc_info=True)
+                instagram_post.status = 'failed'
+                instagram_post.error_message = error_msg
+                instagram_post.save(update_fields=['status', 'error_message'])
+                errors.append({
+                    'post': post_data,
+                    'error': error_msg
+                })
+                continue
         
         response_data = {
             'message': f'Queued {len(created_posts)} post(s) for Instagram',
