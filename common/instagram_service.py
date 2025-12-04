@@ -237,6 +237,8 @@ class InstagramService:
                 'step': str indicating which step failed ('container' or 'publish')
             }
         """
+        import time
+        
         # Step 1: Create media container
         container_result = self.create_media_container(image_url, caption, is_story)
         if not container_result or not container_result.get('id'):
@@ -253,8 +255,51 @@ class InstagramService:
         creation_id = container_result['id']
         logger.info(f"Media container created successfully: {creation_id}")
         
-        # Step 2: Publish the media
-        # Note: For stories, publishing might be different or automatic
+        # Step 1.5: Wait for container to be ready (Instagram needs time to process the image)
+        max_wait_time = 60  # Maximum 60 seconds
+        wait_interval = 3  # Check every 3 seconds
+        max_attempts = max_wait_time // wait_interval  # 20 attempts
+        
+        logger.info(f"Waiting for media container {creation_id} to be ready...")
+        container_ready = False
+        
+        for attempt in range(max_attempts):
+            status_result = self.check_container_status(creation_id)
+            
+            if status_result:
+                status_code = status_result.get('status_code')
+                logger.debug(f"Container {creation_id} status: {status_code} (attempt {attempt + 1}/{max_attempts})")
+                
+                if status_code == 'FINISHED':
+                    container_ready = True
+                    logger.info(f"Media container {creation_id} is ready for publishing")
+                    break
+                elif status_code == 'ERROR':
+                    error_msg = f"Media container {creation_id} failed processing"
+                    logger.error(error_msg)
+                    return {
+                        'success': False,
+                        'error': error_msg,
+                        'data': None,
+                        'step': 'container'
+                    }
+                # If status is 'IN_PROGRESS' or None, continue waiting
+            
+            # Wait before next check
+            if attempt < max_attempts - 1:  # Don't wait on last attempt
+                time.sleep(wait_interval)
+        
+        if not container_ready:
+            error_msg = f"Media container {creation_id} did not become ready within {max_wait_time} seconds"
+            logger.error(error_msg)
+            return {
+                'success': False,
+                'error': error_msg,
+                'data': None,
+                'step': 'container'
+            }
+        
+        # Step 2: Publish the media (now that container is ready)
         publish_result = self.publish_media(creation_id, is_story)
         if not publish_result or not publish_result.get('id'):
             error_msg = self.integration.last_error or "Failed to publish media"
