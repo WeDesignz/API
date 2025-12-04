@@ -1821,16 +1821,20 @@ def instagram_oauth_callback(request):
                     continue
                 
                 # Get Instagram account details using the page access token
+                # Note: 'username' field is deprecated in Instagram Graph API v2.0+
+                # We can't retrieve it via API, so we'll leave it as None
                 if instagram_account_id:
+                    # Just verify the account ID is valid by making a simple request
                     instagram_url = f"https://graph.facebook.com/v18.0/{instagram_account_id}"
                     instagram_params = {
-                        'fields': 'username',
+                        'fields': 'id',  # Only request 'id' - username is deprecated
                         'access_token': page_access_token
                     }
                     instagram_response = requests.get(instagram_url, params=instagram_params, timeout=30)
                     if instagram_response.status_code == 200:
                         instagram_data = instagram_response.json()
-                        instagram_username = instagram_data.get('username')
+                        # Username is deprecated, so we can't get it from API
+                        instagram_username = None
                     break
         
         # Validate that we have the required page access token
@@ -1844,12 +1848,37 @@ def instagram_oauth_callback(request):
             logger.error(error_msg)
             raise ValueError(error_msg)
         
+        # Validate that we have the Instagram Business Account ID (not a Page ID)
+        # Instagram Business Account IDs are typically 15-17 digits
+        # Facebook Page IDs are typically shorter (10-12 digits)
+        logger.info(f"Found Instagram Business Account ID: {instagram_account_id}")
+        logger.info(f"Page ID: {page.get('id')}")
+        logger.info(f"Page Access Token (first 20 chars): {page_access_token[:20] if page_access_token else 'None'}...")
+        
+        # Verify the Instagram Business Account ID is valid by testing it
+        try:
+            verify_url = f"https://graph.facebook.com/v18.0/{instagram_account_id}"
+            verify_params = {
+                'fields': 'id',
+                'access_token': page_access_token
+            }
+            verify_response = requests.get(verify_url, params=verify_params, timeout=10)
+            if verify_response.status_code != 200:
+                error_data = verify_response.json() if verify_response.text else {}
+                error_msg = error_data.get('error', {}).get('message', 'Invalid Instagram Business Account ID')
+                logger.error(f"Instagram Business Account ID validation failed: {error_msg}")
+                raise ValueError(f"Invalid Instagram Business Account ID: {error_msg}")
+            logger.info(f"Instagram Business Account ID validated successfully: {instagram_account_id}")
+        except requests.exceptions.RequestException as e:
+            logger.warning(f"Could not verify Instagram Business Account ID: {e}")
+            # Continue anyway, but log the warning
+        
         # Save to database
         integration = InstagramIntegration.get_instance()
         # Store the PAGE ACCESS TOKEN, not the user's long-lived token
         # Instagram Graph API requires the page access token for posting
         integration.access_token = page_access_token
-        integration.user_id = instagram_account_id
+        integration.user_id = instagram_account_id  # This should be the Instagram Business Account ID, not Page ID
         integration.username = instagram_username
         integration.is_enabled = True
         
@@ -1862,7 +1891,11 @@ def instagram_oauth_callback(request):
         
         integration.save()
         
-        logger.info(f"Instagram OAuth successful: user_id={integration.user_id}, username={integration.username}")
+        logger.info(f"Instagram OAuth successful!")
+        logger.info(f"  - Instagram Business Account ID (user_id): {integration.user_id}")
+        logger.info(f"  - Username: {integration.username or 'N/A (deprecated field)'}")
+        logger.info(f"  - Access Token: {integration.access_token[:30] if integration.access_token else 'None'}...")
+        logger.info(f"  - Token Expires: {integration.token_expires_at}")
         
         # Return success page
         token_expires_at = integration.token_expires_at

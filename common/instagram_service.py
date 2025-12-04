@@ -54,10 +54,16 @@ class InstagramService:
         Returns:
             dict: User data if successful, None otherwise
         """
-        url = f"{self.base_url}/me"
+        # Use the user_id endpoint instead of /me
+        # Note: 'username' field is deprecated in Instagram Graph API v2.0+
+        if not self.integration.user_id:
+            logger.error("Cannot get user info: user_id not set")
+            return None
+        
+        url = f"{self.base_url}/{self.integration.user_id}"
         
         params = {
-            'fields': 'id,username',
+            'fields': 'id',  # Only request 'id' - username is deprecated
             'access_token': self.integration.access_token
         }
         
@@ -70,11 +76,11 @@ class InstagramService:
             # Update integration with user info
             if 'id' in user_data:
                 self.integration.user_id = user_data['id']
-            if 'username' in user_data:
-                self.integration.username = user_data['username']
-            self.integration.save(update_fields=['user_id', 'username'])
+            # Username is deprecated, so we can't get it from API
+            # Leave username as is (it might be set from OAuth callback or remain None)
+            self.integration.save(update_fields=['user_id'])
             
-            logger.info(f"Instagram user info retrieved: {user_data.get('username')}")
+            logger.info(f"Instagram user info retrieved: ID {user_data.get('id')}")
             return user_data
             
         except requests.exceptions.RequestException as e:
