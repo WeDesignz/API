@@ -1841,6 +1841,7 @@ def instagram_oauth_callback(request):
         logger.info(f"Instagram OAuth successful: user_id={integration.user_id}, username={integration.username}")
         
         # Return success page
+        token_expires_at = integration.token_expires_at
         return HttpResponse(
             f"""
             <!DOCTYPE html>
@@ -1862,72 +1863,177 @@ def instagram_oauth_callback(request):
                     }}
                     .container {{
                         background: white;
-                        border-radius: 16px;
-                        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-                        max-width: 600px;
+                        border-radius: 12px;
+                        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+                        max-width: 500px;
                         width: 100%;
-                        padding: 40px;
+                        padding: 48px 40px;
                         text-align: center;
                     }}
-                    .icon {{
-                        width: 80px;
-                        height: 80px;
+                    .success-icon {{
+                        width: 64px;
+                        height: 64px;
                         margin: 0 auto 24px;
-                        background: #d4edda;
+                        background: linear-gradient(135deg, #E1306C 0%, #C13584 50%, #833AB4 100%);
                         border-radius: 50%;
                         display: flex;
                         align-items: center;
                         justify-content: center;
-                        font-size: 40px;
+                        color: white;
+                        font-size: 32px;
+                        font-weight: 300;
                     }}
                     h1 {{
-                        color: #28a745;
-                        font-size: 28px;
-                        margin-bottom: 16px;
+                        color: #1a1a1a;
+                        font-size: 24px;
                         font-weight: 600;
+                        text-align: center;
+                        margin-bottom: 8px;
+                        letter-spacing: -0.3px;
                     }}
-                    .success-box {{
-                        background: #d4edda;
-                        border: 2px solid #c3e6cb;
-                        border-radius: 8px;
-                        padding: 16px;
+                    .subtitle {{
+                        color: #666;
+                        font-size: 14px;
+                        text-align: center;
+                        margin-bottom: 32px;
+                        line-height: 1.5;
+                    }}
+                    .info-section {{
+                        border-top: 1px solid #e5e5e5;
+                        border-bottom: 1px solid #e5e5e5;
+                        padding: 20px 0;
                         margin: 24px 0;
-                        color: #155724;
+                    }}
+                    .info-item {{
+                        display: flex;
+                        justify-content: space-between;
+                        align-items: center;
+                        padding: 8px 0;
+                        font-size: 14px;
+                    }}
+                    .info-label {{
+                        color: #666;
+                        font-weight: 400;
+                    }}
+                    .info-value {{
+                        color: #1a1a1a;
+                        font-weight: 500;
+                    }}
+                    .status-badge {{
+                        display: inline-flex;
+                        align-items: center;
+                        gap: 6px;
+                        color: #0a7c0a;
+                        font-size: 13px;
+                        font-weight: 500;
+                    }}
+                    .status-badge::before {{
+                        content: '';
+                        width: 8px;
+                        height: 8px;
+                        background: #0a7c0a;
+                        border-radius: 50%;
+                    }}
+                    .account-info {{
+                        background: #f9f9f9;
+                        border: 1px solid #e5e5e5;
+                        border-radius: 4px;
+                        padding: 12px;
+                        margin: 16px 0;
+                        font-size: 13px;
+                    }}
+                    .account-info strong {{
+                        color: #1a1a1a;
+                        font-weight: 500;
+                        display: block;
+                        margin-bottom: 4px;
+                    }}
+                    .account-info code {{
+                        background: #fff;
+                        padding: 2px 6px;
+                        border-radius: 3px;
+                        font-size: 11px;
+                        font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', monospace;
+                        color: #666;
+                        border: 1px solid #e5e5e5;
+                    }}
+                    .actions {{
+                        margin-top: 32px;
+                        display: flex;
+                        flex-direction: column;
+                        gap: 10px;
                     }}
                     .btn {{
-                        display: inline-block;
-                        padding: 14px 28px;
-                        border-radius: 8px;
+                        display: block;
+                        padding: 12px 24px;
+                        border-radius: 4px;
                         text-decoration: none;
-                        font-weight: 600;
-                        font-size: 16px;
-                        transition: all 0.3s ease;
+                        font-weight: 500;
+                        font-size: 14px;
+                        text-align: center;
+                        transition: all 0.2s ease;
+                        border: none;
+                        cursor: pointer;
+                    }}
+                    .btn-primary {{
                         background: linear-gradient(135deg, #E1306C 0%, #C13584 50%, #833AB4 100%);
                         color: white;
-                        margin-top: 24px;
                     }}
-                    .btn:hover {{
-                        transform: translateY(-2px);
-                        box-shadow: 0 8px 20px rgba(225, 48, 108, 0.4);
+                    .btn-primary:hover {{
+                        opacity: 0.9;
+                        transform: translateY(-1px);
+                        box-shadow: 0 4px 12px rgba(225, 48, 108, 0.3);
+                    }}
+                    .btn-secondary {{
+                        background: transparent;
+                        color: #666;
+                        border: 1px solid #e5e5e5;
+                    }}
+                    .btn-secondary:hover {{
+                        background: #f9f9f9;
+                        border-color: #d5d5d5;
                     }}
                 </style>
             </head>
             <body>
                 <div class="container">
-                    <div class="icon">✅</div>
-                    <h1>Authorization Successful!</h1>
-                    <div class="success-box">
-                        <strong>Instagram Connected</strong>
-                        <p style="margin-top: 8px;">
-                            Your Instagram account has been successfully connected.
-                            {'@' + instagram_username if instagram_username else 'Account ID: ' + str(integration.user_id)}
-                        </p>
+                    <div class="success-icon">✓</div>
+                    <h1>Instagram Connected</h1>
+                    <p class="subtitle">Your account has been successfully authorized</p>
+                    
+                    <div class="info-section">
+                        <div class="info-item">
+                            <span class="info-label">Status</span>
+                            <span class="info-value">
+                                <span class="status-badge">Connected</span>
+                            </span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">Token Expires</span>
+                            <span class="info-value">{token_expires_at.strftime('%b %d, %Y') if token_expires_at else 'Not specified'}</span>
+                        </div>
                     </div>
-                    <p style="color: #6c757d; margin-top: 16px;">
-                        You can now post to Instagram from the admin panel.
-                    </p>
-                    <a href="{admin_webapp_url}/settings?tab=instagram" class="btn">Go to Settings</a>
+                    
+                    <div class="account-info">
+                        <strong>Instagram Account</strong>
+                        <code>{'@' + instagram_username if instagram_username else 'Account ID: ' + str(integration.user_id)}</code>
+                    </div>
+                    
+                    <div class="actions">
+                        <a href="{admin_webapp_url}/settings?tab=instagram" class="btn btn-primary">
+                            Continue to Settings
+                        </a>
+                        <a href="{admin_webapp_url}" class="btn btn-secondary">
+                            Go to Dashboard
+                        </a>
+                    </div>
                 </div>
+                <script>
+                    // Automatically redirect to settings after 5 seconds
+                    setTimeout(function() {{
+                        window.location.href = '{admin_webapp_url}/settings?tab=instagram';
+                    }}, 5000);
+                </script>
             </body>
             </html>
             """
