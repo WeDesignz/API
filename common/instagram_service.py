@@ -18,7 +18,9 @@ class InstagramService:
     3. Instagram Business or Creator account
     """
     
-    API_BASE_URL = "https://graph.instagram.com"
+    # Instagram Graph API uses Facebook Graph API endpoints
+    # Base URL should be graph.facebook.com, not graph.instagram.com
+    API_BASE_URL = "https://graph.facebook.com"
     API_VERSION = "v18.0"
     
     @property

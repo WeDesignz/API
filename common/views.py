@@ -1790,10 +1790,12 @@ def instagram_oauth_callback(request):
         
         # Step 4: Get Instagram Business Account ID
         # First, get pages (Instagram Business accounts are linked to Facebook Pages)
+        # IMPORTANT: We need to request 'access_token' field to get the Page Access Token
+        # The Page Access Token is required for Instagram Graph API calls, not the user's token
         pages_url = "https://graph.facebook.com/v18.0/me/accounts"
         pages_params = {
             'access_token': long_lived_token,
-            'fields': 'id,name,instagram_business_account'
+            'fields': 'id,name,access_token,instagram_business_account'
         }
         
         pages_response = requests.get(pages_url, params=pages_params, timeout=30)
@@ -1802,6 +1804,7 @@ def instagram_oauth_callback(request):
         
         instagram_account_id = None
         instagram_username = None
+        page_access_token = None  # This is the token we need for Instagram API
         
         # Find the Instagram Business Account
         for page in pages_data.get('data', []):
@@ -1809,12 +1812,20 @@ def instagram_oauth_callback(request):
                 instagram_account = page['instagram_business_account']
                 instagram_account_id = instagram_account.get('id')
                 
-                # Get Instagram account details
+                # CRITICAL: Get the page access token (required for Instagram Graph API)
+                # The page access token is different from the user's long-lived token
+                page_access_token = page.get('access_token')
+                
+                if not page_access_token:
+                    logger.warning(f"Page {page.get('id')} has Instagram Business Account but no access_token")
+                    continue
+                
+                # Get Instagram account details using the page access token
                 if instagram_account_id:
                     instagram_url = f"https://graph.facebook.com/v18.0/{instagram_account_id}"
                     instagram_params = {
                         'fields': 'username',
-                        'access_token': long_lived_token
+                        'access_token': page_access_token
                     }
                     instagram_response = requests.get(instagram_url, params=instagram_params, timeout=30)
                     if instagram_response.status_code == 200:
@@ -1822,10 +1833,23 @@ def instagram_oauth_callback(request):
                         instagram_username = instagram_data.get('username')
                     break
         
+        # Validate that we have the required page access token
+        if not page_access_token:
+            error_msg = "No page access token found. Make sure your Instagram Business account is linked to a Facebook Page and you have granted the necessary permissions."
+            logger.error(error_msg)
+            raise ValueError(error_msg)
+        
+        if not instagram_account_id:
+            error_msg = "No Instagram Business Account found. Make sure your Instagram account is a Business or Creator account and is linked to a Facebook Page."
+            logger.error(error_msg)
+            raise ValueError(error_msg)
+        
         # Save to database
         integration = InstagramIntegration.get_instance()
-        integration.access_token = long_lived_token
-        integration.user_id = instagram_account_id or user_info.get('id')
+        # Store the PAGE ACCESS TOKEN, not the user's long-lived token
+        # Instagram Graph API requires the page access token for posting
+        integration.access_token = page_access_token
+        integration.user_id = instagram_account_id
         integration.username = instagram_username
         integration.is_enabled = True
         
