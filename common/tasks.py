@@ -1275,19 +1275,27 @@ def post_to_instagram(self, instagram_post_id, base_url=None):
             is_story=is_story
         )
         
-        if result and result.get('id'):
+        # Handle the improved result format with error information
+        if result and result.get('success') and result.get('data') and result['data'].get('id'):
             # Success
+            post_data = result['data']
             instagram_post.mark_success(
-                media_id=result.get('id'),
-                post_id=result.get('id'),
-                post_url=result.get('url')
+                media_id=post_data.get('media_id'),  # Container ID from step 1
+                post_id=post_data.get('id'),  # Post ID from step 2
+                post_url=post_data.get('url')
             )
-            logger.info(f"Instagram post created successfully: {result.get('id')}")
+            logger.info(f"Instagram post created successfully: Post ID {post_data.get('id')}, Container ID {post_data.get('media_id')}")
         else:
-            # Failed
-            error_msg = "Failed to create Instagram post"
+            # Failed - use actual error message from result
+            if result and result.get('error'):
+                error_msg = f"Failed at {result.get('step', 'unknown')} step: {result.get('error')}"
+            elif result:
+                error_msg = result.get('error', 'Failed to create Instagram post')
+            else:
+                error_msg = 'Instagram service returned no result'
+            
             instagram_post.mark_failed(error_msg)
-            logger.error(f"Failed to create Instagram post for product {product.id}")
+            logger.error(f"Failed to create Instagram post for product {product.id}: {error_msg}")
             
     except Exception as e:
         logger.error(f"Error posting to Instagram: {str(e)}", exc_info=True)

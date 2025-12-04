@@ -230,23 +230,50 @@ class InstagramService:
             is_story: Whether this is a story (True) or regular post (False)
         
         Returns:
-            dict: Post data if successful, None otherwise
+            dict: {
+                'success': bool,
+                'data': dict with post data if successful,
+                'error': str error message if failed,
+                'step': str indicating which step failed ('container' or 'publish')
+            }
         """
         # Step 1: Create media container
         container_result = self.create_media_container(image_url, caption, is_story)
         if not container_result or not container_result.get('id'):
-            return None
+            # Get the error from integration if available
+            error_msg = self.integration.last_error or "Failed to create media container"
+            logger.error(f"create_and_publish_post failed at container creation: {error_msg}")
+            return {
+                'success': False,
+                'error': error_msg,
+                'data': None,
+                'step': 'container'
+            }
         
         creation_id = container_result['id']
+        logger.info(f"Media container created successfully: {creation_id}")
         
         # Step 2: Publish the media
         # Note: For stories, publishing might be different or automatic
-        if is_story:
-            # Stories might be published automatically or require different handling
-            # Check Instagram API docs for current story publishing flow
-            return self.publish_media(creation_id, is_story)
-        else:
-            return self.publish_media(creation_id, is_story)
+        publish_result = self.publish_media(creation_id, is_story)
+        if not publish_result or not publish_result.get('id'):
+            error_msg = self.integration.last_error or "Failed to publish media"
+            logger.error(f"create_and_publish_post failed at publish: {error_msg}")
+            return {
+                'success': False,
+                'error': error_msg,
+                'data': None,
+                'step': 'publish'
+            }
+        
+        # Success - include container_id (media_id) in the result
+        publish_result['media_id'] = creation_id  # Store container ID as media_id
+        return {
+            'success': True,
+            'data': publish_result,
+            'error': None,
+            'step': None
+        }
     
     def check_container_status(self, container_id):
         """
