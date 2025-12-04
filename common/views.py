@@ -8,7 +8,6 @@ from django.utils import timezone
 from datetime import timedelta
 import requests
 import logging
-import time
 
 from .models import PinterestIntegration, InstagramIntegration, InstagramPost
 
@@ -2352,7 +2351,10 @@ def instagram_post(request):
         errors = []
         total_posts = len(posts_data)
         
-        logger.info(f"Processing {total_posts} Instagram posts")
+        logger.info(f"=== Starting Instagram bulk post: {total_posts} posts ===")
+        
+        # Process all posts and create database records first
+        instagram_post_records = []
         
         for index, post_data in enumerate(posts_data):
             try:
@@ -2361,25 +2363,25 @@ def instagram_post(request):
                 caption = post_data.get('caption', '')
                 post_type = post_data.get('postType', 'post')
                 
-                logger.info(f"Processing post {index + 1}/{total_posts}: product_id={product_id}, media_type={media_type}")
+                logger.info(f"[{index + 1}/{total_posts}] Processing: product_id={product_id}, media_type={media_type}, post_type={post_type}")
                 
                 # Validate required fields
                 if not product_id:
                     error_msg = 'productId is required'
-                    logger.warning(f"Post {index + 1} validation failed: {error_msg}")
-                    errors.append({'post': post_data, 'error': error_msg})
+                    logger.warning(f"[{index + 1}/{total_posts}] Validation failed: {error_msg}")
+                    errors.append({'index': index + 1, 'post': post_data, 'error': error_msg})
                     continue
                 
                 if media_type not in ['mockup', 'jpg', 'png']:
-                    error_msg = f'Invalid media_type: {media_type}'
-                    logger.warning(f"Post {index + 1} validation failed: {error_msg}")
-                    errors.append({'post': post_data, 'error': error_msg})
+                    error_msg = f'Invalid media_type: {media_type}. Must be mockup, jpg, or png'
+                    logger.warning(f"[{index + 1}/{total_posts}] Validation failed: {error_msg}")
+                    errors.append({'index': index + 1, 'post': post_data, 'error': error_msg})
                     continue
                 
                 if post_type not in ['post', 'story']:
-                    error_msg = f'Invalid post_type: {post_type}'
-                    logger.warning(f"Post {index + 1} validation failed: {error_msg}")
-                    errors.append({'post': post_data, 'error': error_msg})
+                    error_msg = f'Invalid post_type: {post_type}. Must be post or story'
+                    logger.warning(f"[{index + 1}/{total_posts}] Validation failed: {error_msg}")
+                    errors.append({'index': index + 1, 'post': post_data, 'error': error_msg})
                     continue
                 
                 # Get product
@@ -2387,68 +2389,11 @@ def instagram_post(request):
                     product = Product.objects.get(id=product_id)
                 except Product.DoesNotExist:
                     error_msg = f'Product {product_id} not found'
-                    logger.warning(f"Post {index + 1} failed: {error_msg}")
-                    errors.append({'post': post_data, 'error': error_msg})
+                    logger.warning(f"[{index + 1}/{total_posts}] Failed: {error_msg}")
+                    errors.append({'index': index + 1, 'post': post_data, 'error': error_msg})
                     continue
                 
-                # Get media file URL based on media_type
-                media_files = product.get_media().filter(media_type='image')
-                image_url = None
-                
-                for media_file in media_files:
-                    # Get file name from the file field (same as Celery task)
-                    file_name = ''
-                    if hasattr(media_file, 'file') and media_file.file:
-                        try:
-                            file_name = media_file.file.name.lower()
-                        except (AttributeError, ValueError):
-                            file_name = ''
-                    
-                    if media_type == 'mockup':
-                        # Check if it's a mockup
-                        is_mockup = 'mockup' in file_name
-                        if not is_mockup:
-                            # Check metadata
-                            try:
-                                from MediaFiles.models import Relation
-                                relation = Relation.objects.filter(
-                                    relation_type='Product:Media',
-                                    id_1=product.pk,
-                                    id_2=media_file.pk
-                                ).first()
-                                if relation and relation.meta and 'mockup' in str(relation.meta).lower():
-                                    is_mockup = True
-                            except Exception:
-                                pass
-                        
-                        if is_mockup:
-                            image_url = media_file.file.url if hasattr(media_file, 'file') and media_file.file else None
-                            break
-                    elif media_type == 'jpg':
-                        if file_name.endswith(('.jpg', '.jpeg')):
-                            image_url = media_file.file.url if hasattr(media_file, 'file') and media_file.file else None
-                            break
-                    elif media_type == 'png':
-                        if file_name.endswith('.png'):
-                            image_url = media_file.file.url if hasattr(media_file, 'file') and media_file.file else None
-                            break
-                
-                if not image_url:
-                    error_msg = f'No {media_type} image found for product {product_id}'
-                    logger.warning(f"Post {index + 1} failed: {error_msg}")
-                    errors.append({
-                        'post': post_data,
-                        'error': error_msg
-                    })
-                    continue
-                
-                # Make image URL absolute if it's relative
-                if image_url.startswith('/'):
-                    site_domain = getattr(settings, 'SITE_DOMAIN', 'wedesignz.com')
-                    protocol = 'https' if not settings.DEBUG else 'http'
-                    image_url = f"{protocol}://{site_domain}{image_url}"
-                
-                # Create InstagramPost record
+                # Create InstagramPost record immediately (before queuing)
                 try:
                     instagram_post = InstagramPost.objects.create(
                         product=product,
@@ -2457,75 +2402,87 @@ def instagram_post(request):
                         post_type=post_type,
                         status='pending'
                     )
-                    logger.info(f"Created InstagramPost record {instagram_post.id} for product {product_id}")
+                    logger.info(f"[{index + 1}/{total_posts}] Created InstagramPost record ID: {instagram_post.id} for product {product_id}")
+                    instagram_post_records.append(instagram_post)
                 except Exception as e:
                     error_msg = f"Failed to create InstagramPost record: {str(e)}"
-                    logger.error(f"Post {index + 1} failed: {error_msg}", exc_info=True)
+                    logger.error(f"[{index + 1}/{total_posts}] Failed: {error_msg}", exc_info=True)
+                    errors.append({'index': index + 1, 'post': post_data, 'error': error_msg})
+                    continue
+                    
+            except Exception as e:
+                error_msg = f"Unexpected error processing post {index + 1}: {str(e)}"
+                logger.error(f"[{index + 1}/{total_posts}] Unexpected error: {error_msg}", exc_info=True)
+                errors.append({'index': index + 1, 'post': post_data, 'error': error_msg})
+                continue
+        
+        # Now queue all tasks (after all records are created)
+        logger.info(f"=== Queuing {len(instagram_post_records)} tasks ===")
+        queued_tasks = []
+        
+        for idx, instagram_post in enumerate(instagram_post_records):
+            try:
+                # Queue the task immediately without delay
+                task_result = post_to_instagram.delay(instagram_post.id)
+                
+                # Verify task was queued
+                if not task_result or not task_result.id:
+                    error_msg = "Task queuing returned no task ID"
+                    logger.error(f"Post {instagram_post.id} failed: {error_msg}")
+                    instagram_post.status = 'failed'
+                    instagram_post.error_message = error_msg
+                    instagram_post.save(update_fields=['status', 'error_message'])
                     errors.append({
-                        'post': post_data,
+                        'index': idx + 1,
+                        'post_id': instagram_post.id,
                         'error': error_msg
                     })
                     continue
                 
-                # Queue Celery task for async posting
-                try:
-                    # Get base_url for consistency (though task can work without it)
-                    base_url = getattr(settings, 'SITE_DOMAIN', 'wedesignz.com')
-                    if not base_url.startswith('http'):
-                        base_url = f"https://{base_url}"
-                    
-                    # Queue the task
-                    task_result = post_to_instagram.delay(instagram_post.id, base_url)
-                    logger.info(f"Queued Instagram post task {task_result.id} for post {instagram_post.id}, product {product_id}")
-                    
-                    created_posts.append({
-                        'id': instagram_post.id,
-                        'product_id': product_id,
-                        'status': 'queued'
-                    })
-                    
-                    # Add small delay between queuing tasks to avoid overwhelming the worker
-                    # and to respect Instagram rate limits. Only delay if there are more posts to process.
-                    if index < total_posts - 1:
-                        time.sleep(0.5)  # 500ms delay between queuing tasks
-                        
-                except Exception as e:
-                    # If task queuing fails, mark the post as failed
-                    error_msg = f"Failed to queue Instagram post task: {str(e)}"
-                    logger.error(f"Post {index + 1} failed: {error_msg}", exc_info=True)
-                    try:
-                        instagram_post.status = 'failed'
-                        instagram_post.error_message = error_msg
-                        instagram_post.save(update_fields=['status', 'error_message'])
-                    except Exception as save_error:
-                        logger.error(f"Failed to update InstagramPost {instagram_post.id} status: {save_error}")
-                    errors.append({
-                        'post': post_data,
-                        'error': error_msg
-                    })
-                    continue
-                    
+                logger.info(f"[{idx + 1}/{len(instagram_post_records)}] Queued task {task_result.id} for post {instagram_post.id}, product {instagram_post.product.id}")
+                
+                queued_tasks.append({
+                    'id': instagram_post.id,
+                    'product_id': instagram_post.product.id,
+                    'task_id': task_result.id,
+                    'status': 'queued'
+                })
+                
+                created_posts.append({
+                    'id': instagram_post.id,
+                    'product_id': instagram_post.product.id,
+                    'status': 'queued'
+                })
+                
             except Exception as e:
-                # Catch any unexpected errors for this specific post
-                error_msg = f"Unexpected error processing post {index + 1}: {str(e)}"
-                logger.error(error_msg, exc_info=True)
+                error_msg = f"Failed to queue Instagram post task: {str(e)}"
+                logger.error(f"Post {instagram_post.id} failed to queue: {error_msg}", exc_info=True)
+                try:
+                    instagram_post.status = 'failed'
+                    instagram_post.error_message = error_msg
+                    instagram_post.save(update_fields=['status', 'error_message'])
+                except Exception as save_error:
+                    logger.error(f"Failed to update InstagramPost {instagram_post.id} status: {save_error}")
                 errors.append({
-                    'post': post_data,
+                    'index': idx + 1,
+                    'post_id': instagram_post.id,
                     'error': error_msg
                 })
-                continue  # Continue processing remaining posts
+        
+        logger.info(f"=== Completed: {len(created_posts)} queued, {len(errors)} errors ===")
         
         response_data = {
             'message': f'Queued {len(created_posts)} post(s) for Instagram',
             'posts_queued': len(created_posts),
             'post_ids': [p['id'] for p in created_posts],
+            'task_ids': [t['task_id'] for t in queued_tasks],
             'errors': errors if errors else None
         }
         
         return JsonResponse(response_data, status=200)
         
     except Exception as e:
-        logger.error(f"Error creating Instagram posts: {str(e)}", exc_info=True)
+        logger.error(f"Critical error creating Instagram posts: {str(e)}", exc_info=True)
         return JsonResponse({
             'error': f'Error creating posts: {str(e)}'
         }, status=500)

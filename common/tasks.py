@@ -1152,40 +1152,57 @@ def send_notification_email(self, user_type, user_id, notification_id):
 @shared_task(
     bind=True, 
     max_retries=3,
-    name='common.tasks.post_to_instagram'  # Explicit task name for better tracking
-    # Removed rate_limit - we add delays in task execution and between queuing
+    name='common.tasks.post_to_instagram'
 )
-def post_to_instagram(self, instagram_post_id, base_url=None):
+def post_to_instagram(self, instagram_post_id):
     """
     Post to Instagram asynchronously.
     Updates InstagramPost record with result.
     """
     import logging
     import os
+    import requests
     logger = logging.getLogger(__name__)
+    
+    logger.info(f"=== Starting Instagram post task for post ID: {instagram_post_id} ===")
     
     try:
         from django.conf import settings
         from .models import InstagramPost, InstagramIntegration
         from Catalog.models import Product
         
-        # Check if Instagram is enabled
-        integration = InstagramIntegration.get_instance()
-        if not integration.is_enabled:
-            logger.debug("Instagram integration is disabled")
-            instagram_post = InstagramPost.objects.get(id=instagram_post_id)
-            instagram_post.mark_failed("Instagram integration is disabled")
-            return
-        
         # Get the InstagramPost record
         try:
             instagram_post = InstagramPost.objects.get(id=instagram_post_id)
         except InstagramPost.DoesNotExist:
-            logger.error(f"InstagramPost {instagram_post_id} not found")
+            logger.error(f"InstagramPost {instagram_post_id} not found in database")
             return
         
-        # Mark as processing
+        # Check if already processed
+        if instagram_post.status in ['success', 'processing']:
+            logger.info(f"Post {instagram_post_id} already in status: {instagram_post.status}. Skipping.")
+            return
+        
+        # Mark as processing immediately
         instagram_post.mark_processing()
+        logger.info(f"Post {instagram_post_id} marked as processing")
+        
+        # Check if Instagram is enabled
+        integration = InstagramIntegration.get_instance()
+        if not integration.is_enabled:
+            logger.warning(f"Instagram integration is disabled for post {instagram_post_id}")
+            instagram_post.mark_failed("Instagram integration is disabled")
+            return
+        
+        if not integration.access_token:
+            logger.warning(f"Instagram access token not configured for post {instagram_post_id}")
+            instagram_post.mark_failed("Instagram access token not configured")
+            return
+        
+        if not integration.is_token_valid():
+            logger.warning(f"Instagram access token expired for post {instagram_post_id}")
+            instagram_post.mark_failed("Instagram access token expired")
+            return
         
         # Get the product
         try:
@@ -1195,17 +1212,19 @@ def post_to_instagram(self, instagram_post_id, base_url=None):
             instagram_post.mark_failed("Product not found")
             return
         
-        # Check if Instagram is configured
+        logger.info(f"Processing post {instagram_post_id} for product {product.id} ({product.title})")
+        
+        # Initialize Instagram service
         try:
             from .instagram_service import InstagramService
             instagram_service = InstagramService()
         except Exception as e:
-            error_msg = f"Instagram not configured: {str(e)}"
-            logger.warning(error_msg)
+            error_msg = f"Instagram service initialization failed: {str(e)}"
+            logger.error(f"Post {instagram_post_id}: {error_msg}", exc_info=True)
             instagram_post.mark_failed(error_msg)
             return
         
-        # Get media files (images only - exclude vectors, documents, etc.)
+        # Get all image media files for the product
         media_files = product.get_media().filter(media_type='image')
         
         if not media_files.exists():
@@ -1213,8 +1232,12 @@ def post_to_instagram(self, instagram_post_id, base_url=None):
             instagram_post.mark_failed("No image media found for product")
             return
         
-        # Collect all valid image media files (exclude CDR and EPS)
-        valid_image_media = []
+        # Find the appropriate image based on media_type preference
+        # Priority: mockup > requested type (png/jpg) > any available image
+        image_media = None
+        requested_type = instagram_post.media_type.lower()
+        
+        # First pass: collect all valid images (exclude CDR/EPS)
         mockup_media = None
         png_media = None
         jpg_media = None
@@ -1223,24 +1246,24 @@ def post_to_instagram(self, instagram_post_id, base_url=None):
             if not media.file:
                 continue
             
-            file_name = media.file.name.lower() if hasattr(media, 'file') and media.file else ''
+            try:
+                file_name = media.file.name.lower()
+            except (AttributeError, ValueError):
+                continue
             
-            # NEVER select CDR or EPS files
+            # Skip CDR and EPS files
             if file_name.endswith(('.cdr', '.eps')):
-                logger.debug(f"Skipping CDR/EPS file: {file_name}")
                 continue
             
-            # Only process image files (jpg, jpeg, png, gif, webp)
+            # Only process image files
             if not file_name.endswith(('.jpg', '.jpeg', '.png', '.gif', '.webp')):
-                logger.debug(f"Skipping non-image file: {file_name}")
                 continue
             
-            base_name = os.path.splitext(os.path.basename(file_name))[0] if file_name else ''
-            
-            # Check if it's a mockup (base name = "mockup")
+            # Check if it's a mockup
+            base_name = os.path.splitext(os.path.basename(file_name))[0]
             is_mockup = base_name == 'mockup'
             
-            # Also check metadata if available
+            # Also check metadata
             if not is_mockup:
                 try:
                     from MediaFiles.models import Relation
@@ -1254,174 +1277,123 @@ def post_to_instagram(self, instagram_post_id, base_url=None):
                 except Exception:
                     pass
             
-            # Categorize the media file
-            if is_mockup:
-                if not mockup_media:  # Store first mockup found
-                    mockup_media = media
-            elif file_name.endswith('.png'):
-                if not png_media:  # Store first PNG found
-                    png_media = media
-            elif file_name.endswith(('.jpg', '.jpeg')):
-                if not jpg_media:  # Store first JPG found
-                    jpg_media = media
+            # Categorize
+            if is_mockup and not mockup_media:
+                mockup_media = media
+            elif file_name.endswith('.png') and not png_media:
+                png_media = media
+            elif file_name.endswith(('.jpg', '.jpeg')) and not jpg_media:
+                jpg_media = media
         
-        # Priority selection logic:
-        # 1. ALWAYS check if product has a mockup image first - if yes, use it (regardless of user selection)
-        # 2. If no mockup exists, respect user's selection (mockup/jpg/png) or fallback to any PNG/JPG
-        # 3. Never use CDR or EPS files
-        
-        image_media = None
-        selected_type = None
-        requested_type = instagram_post.media_type  # What user selected in UI
-        
-        # Always prioritize mockup if it exists
+        # Select image based on priority
         if mockup_media:
+            # Always prefer mockup if available
             image_media = mockup_media
-            selected_type = 'mockup'
-            logger.info(f"Selected mockup image for product {product.id} (requested: {requested_type})")
-        else:
-            # No mockup available - respect user's selection or fallback
-            if requested_type == 'png' and png_media:
-                image_media = png_media
-                selected_type = 'png'
-                logger.info(f"Selected PNG image for product {product.id} (as requested)")
-            elif requested_type == 'jpg' and jpg_media:
-                image_media = jpg_media
-                selected_type = 'jpg'
-                logger.info(f"Selected JPG image for product {product.id} (as requested)")
-            elif requested_type == 'mockup':
-                # User requested mockup but it doesn't exist - fallback to PNG or JPG
-                if png_media:
-                    image_media = png_media
-                    selected_type = 'png'
-                    logger.info(f"Mockup not found for product {product.id}, using PNG as fallback")
-                elif jpg_media:
-                    image_media = jpg_media
-                    selected_type = 'jpg'
-                    logger.info(f"Mockup not found for product {product.id}, using JPG as fallback")
-            else:
-                # User selected PNG/JPG but specific type not available - use any available
-                if png_media:
-                    image_media = png_media
-                    selected_type = 'png'
-                    logger.info(f"Selected PNG image for product {product.id} (fallback)")
-                elif jpg_media:
-                    image_media = jpg_media
-                    selected_type = 'jpg'
-                    logger.info(f"Selected JPG image for product {product.id} (fallback)")
+            logger.info(f"Selected mockup image for product {product.id}")
+        elif requested_type == 'png' and png_media:
+            image_media = png_media
+            logger.info(f"Selected PNG image for product {product.id} (as requested)")
+        elif requested_type == 'jpg' and jpg_media:
+            image_media = jpg_media
+            logger.info(f"Selected JPG image for product {product.id} (as requested)")
+        elif png_media:
+            image_media = png_media
+            logger.info(f"Selected PNG image for product {product.id} (fallback)")
+        elif jpg_media:
+            image_media = jpg_media
+            logger.info(f"Selected JPG image for product {product.id} (fallback)")
         
         if not image_media:
-            logger.warning(f"No valid image (mockup/PNG/JPG) found for product {product.id}")
-            instagram_post.mark_failed("No valid image found for product. Product must have at least one mockup, PNG, or JPG image file.")
+            error_msg = "No valid image found. Product must have at least one mockup, PNG, or JPG image file."
+            logger.warning(f"Post {instagram_post_id}: {error_msg}")
+            instagram_post.mark_failed(error_msg)
             return
         
-        logger.info(f"Selected {selected_type} image (media ID: {image_media.id}) for Instagram post")
+        logger.info(f"Selected image media ID: {image_media.id} for post {instagram_post_id}")
         
         # Get image URL
         try:
-            image_url = image_media.file.url if hasattr(image_media, 'file') and image_media.file else None
+            image_url = image_media.file.url
         except Exception as e:
-            logger.error(f"Error getting URL for media {image_media.id}: {e}")
-            instagram_post.mark_failed(f"Error getting image URL: {str(e)}")
+            error_msg = f"Error getting image URL: {str(e)}"
+            logger.error(f"Post {instagram_post_id}: {error_msg}", exc_info=True)
+            instagram_post.mark_failed(error_msg)
             return
         
         if not image_url:
-            logger.warning(f"Image URL not available for media {image_media.id}")
-            instagram_post.mark_failed("Image URL not available")
-            return
-        
-        # Clean the URL (remove any trailing whitespace or invalid characters)
-        image_url = str(image_url).strip()
-        
-        # Make image URL absolute if it's relative
-        # Use MEDIA_DOMAIN (devapi.wedesignz.com) for media files, not SITE_DOMAIN
-        if image_url.startswith('/'):
-            # Use MEDIA_DOMAIN for media files (where Django serves media)
-            media_domain = getattr(settings, 'MEDIA_DOMAIN', 'devapi.wedesignz.com')
-            protocol = 'https'  # Always use HTTPS for Instagram
-            # Ensure no double slashes
-            media_domain = media_domain.rstrip('/')
-            image_url = image_url.lstrip('/')
-            image_url = f"{protocol}://{media_domain}/{image_url}"
-        elif not image_url.startswith(('http://', 'https://')):
-            # If it's not a relative path and not absolute, make it absolute
-            media_domain = getattr(settings, 'MEDIA_DOMAIN', 'devapi.wedesignz.com')
-            protocol = 'https'  # Always use HTTPS for Instagram
-            media_domain = media_domain.rstrip('/')
-            image_url = f"{protocol}://{media_domain}/{image_url.lstrip('/')}"
-        elif image_url.startswith('http://'):
-            # Convert HTTP to HTTPS for Instagram
-            image_url = image_url.replace('http://', 'https://', 1)
-            logger.info(f"Converted HTTP URL to HTTPS: {image_url[:100]}...")
-        
-        # Final validation: ensure URL is properly formatted and uses HTTPS
-        if not image_url.startswith('https://'):
-            logger.error(f"Invalid image URL format (must be HTTPS): {image_url}")
-            instagram_post.mark_failed(f"Invalid image URL format (must be HTTPS)")
-            return
-        
-        logger.info(f"Using image URL: {image_url}")  # Log full URL for debugging
-        logger.info(f"Image URL length: {len(image_url)}")
-        
-        # Validate URL is accessible before sending to Instagram
-        try:
-            import requests
-            logger.info("Validating image URL accessibility...")
-            validation_response = requests.head(image_url, timeout=10, allow_redirects=True)
-            if validation_response.status_code != 200:
-                error_msg = f"Image URL returned status {validation_response.status_code}. URL may not be accessible: {image_url[:100]}"
-                logger.error(error_msg)
-                instagram_post.mark_failed(error_msg)
-                return
-            
-            content_type = validation_response.headers.get('Content-Type', '')
-            if not content_type.startswith('image/'):
-                error_msg = f"URL does not point to an image. Content-Type: {content_type}. URL: {image_url[:100]}"
-                logger.error(error_msg)
-                instagram_post.mark_failed(error_msg)
-                return
-            
-            logger.info(f"Image URL validated successfully. Content-Type: {content_type}, Status: {validation_response.status_code}")
-        except requests.exceptions.RequestException as e:
-            error_msg = f"Image URL is not accessible: {str(e)}. URL: {image_url[:100]}"
-            logger.error(error_msg)
+            error_msg = "Image URL not available"
+            logger.warning(f"Post {instagram_post_id}: {error_msg}")
             instagram_post.mark_failed(error_msg)
             return
-        except Exception as e:
-            logger.warning(f"Could not validate image URL (continuing anyway): {e}")
+        
+        # Normalize URL to absolute HTTPS
+        image_url = str(image_url).strip()
+        
+        if image_url.startswith('/'):
+            media_domain = getattr(settings, 'MEDIA_DOMAIN', 'devapi.wedesignz.com').rstrip('/')
+            image_url = f"https://{media_domain}/{image_url.lstrip('/')}"
+        elif not image_url.startswith(('http://', 'https://')):
+            media_domain = getattr(settings, 'MEDIA_DOMAIN', 'devapi.wedesignz.com').rstrip('/')
+            image_url = f"https://{media_domain}/{image_url.lstrip('/')}"
+        elif image_url.startswith('http://'):
+            image_url = image_url.replace('http://', 'https://', 1)
+        
+        if not image_url.startswith('https://'):
+            error_msg = f"Invalid image URL format (must be HTTPS): {image_url[:100]}"
+            logger.error(f"Post {instagram_post_id}: {error_msg}")
+            instagram_post.mark_failed(error_msg)
+            return
+        
+        logger.info(f"Using image URL: {image_url[:100]}...")
+        
+        # Validate URL is accessible
+        try:
+            logger.info(f"Validating image URL accessibility...")
+            validation_response = requests.head(image_url, timeout=10, allow_redirects=True)
+            validation_response.raise_for_status()
+            
+            content_type = validation_response.headers.get('Content-Type', '').lower()
+            if not content_type.startswith('image/'):
+                error_msg = f"URL does not point to an image. Content-Type: {content_type}"
+                logger.error(f"Post {instagram_post_id}: {error_msg}")
+                instagram_post.mark_failed(error_msg)
+                return
+            
+            logger.info(f"Image URL validated. Content-Type: {content_type}, Status: {validation_response.status_code}")
+        except requests.exceptions.RequestException as e:
+            error_msg = f"Image URL is not accessible: {str(e)}"
+            logger.error(f"Post {instagram_post_id}: {error_msg}")
+            instagram_post.mark_failed(error_msg)
+            return
         
         # Post to Instagram
         is_story = instagram_post.post_type == 'story'
+        logger.info(f"Posting to Instagram (type: {'story' if is_story else 'post'})...")
+        
         result = instagram_service.create_and_publish_post(
             image_url=image_url,
-            caption=instagram_post.caption,
+            caption=instagram_post.caption or '',
             is_story=is_story
         )
         
-        # Handle the improved result format with error information
+        # Handle result
         if result and result.get('success') and result.get('data') and result['data'].get('id'):
-            # Success
             post_data = result['data']
             instagram_post.mark_success(
-                media_id=post_data.get('media_id'),  # Container ID from step 1
-                post_id=post_data.get('id'),  # Post ID from step 2
+                media_id=post_data.get('media_id'),
+                post_id=post_data.get('id'),
                 post_url=post_data.get('url')
             )
-            logger.info(f"Instagram post created successfully: Post ID {post_data.get('id')}, Container ID {post_data.get('media_id')}")
+            logger.info(f"=== SUCCESS: Post {instagram_post_id} published. Instagram Post ID: {post_data.get('id')} ===")
         else:
-            # Failed - use actual error message from result
-            if result and result.get('error'):
-                error_msg = f"Failed at {result.get('step', 'unknown')} step: {result.get('error')}"
-            elif result:
-                error_msg = result.get('error', 'Failed to create Instagram post')
-            else:
-                error_msg = 'Instagram service returned no result'
-            
+            error_msg = result.get('error', 'Unknown error') if result else 'Instagram service returned no result'
+            if result and result.get('step'):
+                error_msg = f"Failed at {result.get('step')} step: {error_msg}"
+            logger.error(f"=== FAILED: Post {instagram_post_id}: {error_msg} ===")
             instagram_post.mark_failed(error_msg)
-            logger.error(f"Failed to create Instagram post for product {product.id}: {error_msg}")
             
     except Exception as e:
-        logger.error(f"Error posting to Instagram: {str(e)}", exc_info=True)
+        logger.error(f"=== ERROR: Post {instagram_post_id} exception: {str(e)} ===", exc_info=True)
         try:
             instagram_post = InstagramPost.objects.get(id=instagram_post_id)
             instagram_post.mark_failed(f"Error: {str(e)}")
@@ -1430,7 +1402,9 @@ def post_to_instagram(self, instagram_post_id, base_url=None):
         
         # Retry if not exceeded max retries
         if self.request.retries < self.max_retries:
-            raise self.retry(exc=e, countdown=60 * (self.request.retries + 1))
+            retry_countdown = 60 * (self.request.retries + 1)
+            logger.info(f"Retrying post {instagram_post_id} in {retry_countdown} seconds (attempt {self.request.retries + 1}/{self.max_retries})")
+            raise self.retry(exc=e, countdown=retry_countdown)
 
 
 # ==================== PINTEREST TASKS ====================
