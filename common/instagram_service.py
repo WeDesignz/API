@@ -125,14 +125,15 @@ class InstagramService:
             'access_token': self.integration.access_token
         }
         
-        # For stories, use different parameters (stories don't support captions)
+        # For stories, use different parameters
         if is_story:
+            # Instagram Stories API requires media_type='STORIES' and NO caption
             params['media_type'] = 'STORIES'
-            # Stories don't accept captions in the container creation
-            logger.info("Creating story media container (no caption in container)")
+            logger.info("Creating story media container (media_type=STORIES, no caption)")
         else:
             # Regular posts can have captions
-            params['caption'] = (caption[:2200] if caption else "")  # Instagram limits caption to 2200 chars
+            if caption:
+                params['caption'] = caption[:2200]  # Instagram limits caption to 2200 chars
             logger.info(f"Creating post media container with caption: {caption[:50] if caption else 'no caption'}...")
         
         try:
@@ -141,6 +142,12 @@ class InstagramService:
             
             data = response.json()
             container_id = data.get('id')
+            
+            if not container_id:
+                error_msg = "Instagram API did not return a container ID"
+                logger.error(f"Failed to create media container: {error_msg}. Response: {data}")
+                self.integration.update_error(error_msg)
+                return None
             
             logger.info(f"Instagram media container created: {container_id} (type: {'story' if is_story else 'post'})")
             return {
@@ -155,7 +162,12 @@ class InstagramService:
                 try:
                     error_data = e.response.json()
                     error_msg = error_data.get('error', {}).get('message', str(e))
+                    error_code = error_data.get('error', {}).get('code')
+                    error_type = error_data.get('error', {}).get('type')
                     logger.error(f"Instagram API Error: {error_data}")
+                    # Log specific error details for stories
+                    if is_story:
+                        logger.error(f"Story creation failed - Error Code: {error_code}, Type: {error_type}, Message: {error_msg}")
                 except:
                     logger.error(f"Response: {e.response.text}")
                     error_msg = e.response.text[:500]

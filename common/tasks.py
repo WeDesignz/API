@@ -1164,7 +1164,8 @@ def post_to_instagram(self, instagram_post_id):
     import requests
     logger = logging.getLogger(__name__)
     
-    logger.info(f"=== Starting Instagram post task for post ID: {instagram_post_id} ===")
+    logger.info(f"=== TASK STARTED: Instagram post task for post ID: {instagram_post_id} ===")
+    logger.info(f"Task ID: {self.request.id}, Retry: {self.request.retries}/{self.max_retries}")
     
     try:
         from django.conf import settings
@@ -1174,18 +1175,23 @@ def post_to_instagram(self, instagram_post_id):
         # Get the InstagramPost record
         try:
             instagram_post = InstagramPost.objects.get(id=instagram_post_id)
+            logger.info(f"Found InstagramPost {instagram_post_id}: status={instagram_post.status}, type={instagram_post.post_type}, media_type={instagram_post.media_type}")
         except InstagramPost.DoesNotExist:
             logger.error(f"InstagramPost {instagram_post_id} not found in database")
             return
         
-        # Check if already processed
-        if instagram_post.status in ['success', 'processing']:
-            logger.info(f"Post {instagram_post_id} already in status: {instagram_post.status}. Skipping.")
+        # Check if already successfully processed
+        if instagram_post.status == 'success':
+            logger.info(f"Post {instagram_post_id} already successful. Skipping.")
             return
         
         # Mark as processing immediately
-        instagram_post.mark_processing()
-        logger.info(f"Post {instagram_post_id} marked as processing")
+        try:
+            instagram_post.mark_processing()
+            logger.info(f"Post {instagram_post_id} marked as processing")
+        except Exception as e:
+            logger.error(f"Failed to mark post {instagram_post_id} as processing: {str(e)}", exc_info=True)
+            # Continue anyway - don't fail the task just because status update failed
         
         # Check if Instagram is enabled
         integration = InstagramIntegration.get_instance()

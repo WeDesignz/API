@@ -7,8 +7,13 @@ class CommonConfig(AppConfig):
     verbose_name = 'Common Utilities'
     
     def ready(self):
-        """Import signals when the app is ready."""
+        """Import signals and tasks when the app is ready."""
         import common.signals
+        # Import tasks to ensure they are registered with Celery
+        try:
+            import common.tasks  # noqa
+        except ImportError:
+            pass
         # Patch Jazzmin template tags to fix errors
         self._patch_jazzmin_tags()
     
