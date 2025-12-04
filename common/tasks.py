@@ -1329,24 +1329,30 @@ def post_to_instagram(self, instagram_post_id, base_url=None):
         image_url = str(image_url).strip()
         
         # Make image URL absolute if it's relative
+        # Use MEDIA_DOMAIN (devapi.wedesignz.com) for media files, not SITE_DOMAIN
         if image_url.startswith('/'):
-            site_domain = getattr(settings, 'SITE_DOMAIN', 'wedesignz.com')
-            protocol = 'https' if not settings.DEBUG else 'http'
+            # Use MEDIA_DOMAIN for media files (where Django serves media)
+            media_domain = getattr(settings, 'MEDIA_DOMAIN', 'devapi.wedesignz.com')
+            protocol = 'https'  # Always use HTTPS for Instagram
             # Ensure no double slashes
-            site_domain = site_domain.rstrip('/')
+            media_domain = media_domain.rstrip('/')
             image_url = image_url.lstrip('/')
-            image_url = f"{protocol}://{site_domain}/{image_url}"
+            image_url = f"{protocol}://{media_domain}/{image_url}"
         elif not image_url.startswith(('http://', 'https://')):
             # If it's not a relative path and not absolute, make it absolute
-            site_domain = getattr(settings, 'SITE_DOMAIN', 'wedesignz.com')
-            protocol = 'https' if not settings.DEBUG else 'http'
-            site_domain = site_domain.rstrip('/')
-            image_url = f"{protocol}://{site_domain}/{image_url.lstrip('/')}"
+            media_domain = getattr(settings, 'MEDIA_DOMAIN', 'devapi.wedesignz.com')
+            protocol = 'https'  # Always use HTTPS for Instagram
+            media_domain = media_domain.rstrip('/')
+            image_url = f"{protocol}://{media_domain}/{image_url.lstrip('/')}"
+        elif image_url.startswith('http://'):
+            # Convert HTTP to HTTPS for Instagram
+            image_url = image_url.replace('http://', 'https://', 1)
+            logger.info(f"Converted HTTP URL to HTTPS: {image_url[:100]}...")
         
-        # Final validation: ensure URL is properly formatted
-        if not image_url.startswith(('http://', 'https://')):
-            logger.error(f"Invalid image URL format: {image_url}")
-            instagram_post.mark_failed(f"Invalid image URL format")
+        # Final validation: ensure URL is properly formatted and uses HTTPS
+        if not image_url.startswith('https://'):
+            logger.error(f"Invalid image URL format (must be HTTPS): {image_url}")
+            instagram_post.mark_failed(f"Invalid image URL format (must be HTTPS)")
             return
         
         logger.info(f"Using image URL: {image_url[:100]}...")  # Log first 100 chars for debugging
