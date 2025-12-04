@@ -2274,7 +2274,13 @@ def instagram_post(request):
             image_url = None
             
             for media_file in media_files:
-                file_name = getattr(media_file, 'file_name', '').lower() if hasattr(media_file, 'file_name') else ''
+                # Get file name from the file field (same as Celery task)
+                file_name = ''
+                if hasattr(media_file, 'file') and media_file.file:
+                    try:
+                        file_name = media_file.file.name.lower()
+                    except (AttributeError, ValueError):
+                        file_name = ''
                 
                 if media_type == 'mockup':
                     # Check if it's a mockup
@@ -2294,15 +2300,15 @@ def instagram_post(request):
                             pass
                     
                     if is_mockup:
-                        image_url = media_file.file.url if hasattr(media_file, 'file') else None
+                        image_url = media_file.file.url if hasattr(media_file, 'file') and media_file.file else None
                         break
                 elif media_type == 'jpg':
                     if file_name.endswith(('.jpg', '.jpeg')):
-                        image_url = media_file.file.url if hasattr(media_file, 'file') else None
+                        image_url = media_file.file.url if hasattr(media_file, 'file') and media_file.file else None
                         break
                 elif media_type == 'png':
                     if file_name.endswith('.png'):
-                        image_url = media_file.file.url if hasattr(media_file, 'file') else None
+                        image_url = media_file.file.url if hasattr(media_file, 'file') and media_file.file else None
                         break
             
             if not image_url:
