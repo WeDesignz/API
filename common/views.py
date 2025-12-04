@@ -2390,49 +2390,49 @@ def instagram_post(request):
                     logger.warning(f"Post {index + 1} failed: {error_msg}")
                     errors.append({'post': post_data, 'error': error_msg})
                     continue
-            
-            # Get media file URL based on media_type
-            media_files = product.get_media().filter(media_type='image')
-            image_url = None
-            
-            for media_file in media_files:
-                # Get file name from the file field (same as Celery task)
-                file_name = ''
-                if hasattr(media_file, 'file') and media_file.file:
-                    try:
-                        file_name = media_file.file.name.lower()
-                    except (AttributeError, ValueError):
-                        file_name = ''
                 
-                if media_type == 'mockup':
-                    # Check if it's a mockup
-                    is_mockup = 'mockup' in file_name
-                    if not is_mockup:
-                        # Check metadata
+                # Get media file URL based on media_type
+                media_files = product.get_media().filter(media_type='image')
+                image_url = None
+                
+                for media_file in media_files:
+                    # Get file name from the file field (same as Celery task)
+                    file_name = ''
+                    if hasattr(media_file, 'file') and media_file.file:
                         try:
-                            from MediaFiles.models import Relation
-                            relation = Relation.objects.filter(
-                                relation_type='Product:Media',
-                                id_1=product.pk,
-                                id_2=media_file.pk
-                            ).first()
-                            if relation and relation.meta and 'mockup' in str(relation.meta).lower():
-                                is_mockup = True
-                        except Exception:
-                            pass
+                            file_name = media_file.file.name.lower()
+                        except (AttributeError, ValueError):
+                            file_name = ''
                     
-                    if is_mockup:
-                        image_url = media_file.file.url if hasattr(media_file, 'file') and media_file.file else None
-                        break
-                elif media_type == 'jpg':
-                    if file_name.endswith(('.jpg', '.jpeg')):
-                        image_url = media_file.file.url if hasattr(media_file, 'file') and media_file.file else None
-                        break
-                elif media_type == 'png':
-                    if file_name.endswith('.png'):
-                        image_url = media_file.file.url if hasattr(media_file, 'file') and media_file.file else None
-                        break
-            
+                    if media_type == 'mockup':
+                        # Check if it's a mockup
+                        is_mockup = 'mockup' in file_name
+                        if not is_mockup:
+                            # Check metadata
+                            try:
+                                from MediaFiles.models import Relation
+                                relation = Relation.objects.filter(
+                                    relation_type='Product:Media',
+                                    id_1=product.pk,
+                                    id_2=media_file.pk
+                                ).first()
+                                if relation and relation.meta and 'mockup' in str(relation.meta).lower():
+                                    is_mockup = True
+                            except Exception:
+                                pass
+                        
+                        if is_mockup:
+                            image_url = media_file.file.url if hasattr(media_file, 'file') and media_file.file else None
+                            break
+                    elif media_type == 'jpg':
+                        if file_name.endswith(('.jpg', '.jpeg')):
+                            image_url = media_file.file.url if hasattr(media_file, 'file') and media_file.file else None
+                            break
+                    elif media_type == 'png':
+                        if file_name.endswith('.png'):
+                            image_url = media_file.file.url if hasattr(media_file, 'file') and media_file.file else None
+                            break
+                
                 if not image_url:
                     error_msg = f'No {media_type} image found for product {product_id}'
                     logger.warning(f"Post {index + 1} failed: {error_msg}")
