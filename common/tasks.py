@@ -1162,12 +1162,7 @@ def post_to_instagram(self, instagram_post_id, base_url=None):
     """
     import logging
     import os
-    import time
     logger = logging.getLogger(__name__)
-    
-    # Add small delay to space out Instagram API calls (2 seconds between posts)
-    # This helps avoid rate limiting while allowing bulk posting
-    time.sleep(2)
     
     try:
         from django.conf import settings
