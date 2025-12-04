@@ -2367,6 +2367,17 @@ def instagram_post(request):
                 'error': f'Invalid post_type: {post_type}. Must be post or story'
             }, status=400)
         
+        # Validate caption: required for posts, not for stories
+        if post_type == 'post' and not caption.strip():
+            return JsonResponse({
+                'error': 'Caption is required for Instagram posts'
+            }, status=400)
+        
+        # For stories, caption is not used (Instagram Stories don't support captions)
+        if post_type == 'story':
+            caption = ''  # Ensure caption is empty for stories
+            logger.info("Story post detected - caption will not be used")
+        
         # Get product
         try:
             product = Product.objects.get(id=product_id)

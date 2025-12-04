@@ -105,7 +105,7 @@ class InstagramService:
         
         Args:
             image_url: Absolute URL to the image (must be publicly accessible)
-            caption: Caption for the post (max 2200 chars)
+            caption: Caption for the post (max 2200 chars) - NOT used for stories
             is_story: Whether this is a story (True) or regular post (False)
         
         Returns:
@@ -122,14 +122,18 @@ class InstagramService:
         
         params = {
             'image_url': image_url,
-            'caption': (caption[:2200] if caption else ""),  # Instagram limits caption to 2200 chars
             'access_token': self.integration.access_token
         }
         
-        # For stories, use different endpoint
+        # For stories, use different parameters (stories don't support captions)
         if is_story:
-            url = f"{self.base_url}/{self.integration.user_id}/media"
             params['media_type'] = 'STORIES'
+            # Stories don't accept captions in the container creation
+            logger.info("Creating story media container (no caption in container)")
+        else:
+            # Regular posts can have captions
+            params['caption'] = (caption[:2200] if caption else "")  # Instagram limits caption to 2200 chars
+            logger.info(f"Creating post media container with caption: {caption[:50] if caption else 'no caption'}...")
         
         try:
             response = requests.post(url, params=params, timeout=30)
@@ -138,7 +142,7 @@ class InstagramService:
             data = response.json()
             container_id = data.get('id')
             
-            logger.info(f"Instagram media container created: {container_id}")
+            logger.info(f"Instagram media container created: {container_id} (type: {'story' if is_story else 'post'})")
             return {
                 'id': container_id,
                 'status_code': data.get('status_code'),
@@ -190,10 +194,14 @@ class InstagramService:
             data = response.json()
             post_id = data.get('id')
             
-            # Build post URL
-            post_url = f"https://www.instagram.com/p/{post_id}/" if post_id else None
-            
-            logger.info(f"Instagram post published: {post_id}")
+            # Stories don't have public URLs like posts do
+            if is_story:
+                post_url = None  # Stories don't have shareable URLs
+                logger.info(f"Instagram story published: {post_id}")
+            else:
+                # Build post URL for regular posts
+                post_url = f"https://www.instagram.com/p/{post_id}/" if post_id else None
+                logger.info(f"Instagram post published: {post_id}")
             
             # Update integration success tracking
             self.integration.update_success()
@@ -216,7 +224,7 @@ class InstagramService:
                     error_msg = e.response.text[:500]
             
             self.integration.update_error(error_msg)
-            logger.error(f"Failed to publish Instagram post: {error_msg}")
+            logger.error(f"Failed to publish Instagram {'story' if is_story else 'post'}: {error_msg}")
             return None
     
     def create_and_publish_post(self, image_url, caption, is_story=False):
