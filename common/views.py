@@ -1426,17 +1426,18 @@ def instagram_oauth_initiate(request):
     redirect_uri_clean = redirect_uri.rstrip('/')
     redirect_uri_encoded = quote_plus(redirect_uri_clean)
     
-    # Instagram requires these permissions:
-    # - instagram_basic: Basic Instagram account info
-    # - instagram_content_publish: Post to Instagram
+    # Instagram Graph API requires these permissions:
     # - pages_show_list: List Facebook pages (needed for Instagram Business accounts)
     # - pages_read_engagement: Read page engagement
+    # - business_management: Manage business assets
+    # - instagram_content_publish: Post to Instagram (requires App Review for production)
+    # Note: instagram_basic is deprecated, use pages permissions instead
     auth_url = (
         f"https://www.facebook.com/v18.0/dialog/oauth"
         f"?client_id={app_id}"
         f"&redirect_uri={redirect_uri_encoded}"
         f"&response_type=code"
-        f"&scope=instagram_basic,instagram_content_publish,pages_show_list,pages_read_engagement"
+        f"&scope=pages_show_list,pages_read_engagement,business_management,instagram_content_publish"
         f"&state=instagram_auth"
     )
     
