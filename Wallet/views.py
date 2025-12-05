@@ -821,39 +821,68 @@ def transfer_to_wallet(request):
 def settlement_status(request):
     """
     Get current settlement status and check if settlement window is active.
+    Settlement window: Days 1-5 of each month
     """
-    from datetime import datetime
+    from datetime import datetime, date
     import pytz
+    from Wallet.models import SettlementRequest
+    from CoreAdmin.models import DesignerOnboardingStatus
+    from common.relations import get_related, get_user_wallets
     
     # Get current date in Asia/Kolkata timezone
     kolkata_tz = pytz.timezone('Asia/Kolkata')
-    current_date = datetime.now(kolkata_tz)
+    current_date = datetime.now(kolkata_tz).date()
     current_day = current_date.day
     
-    # Check if we're in settlement window (days 5-10)
-    settlement_window_active = 5 <= current_day <= 10
+    # Check if we're in settlement window (days 1-5)
+    settlement_window_active = 1 <= current_day <= 5
     
-    # TODO: Get settlement request for current period
-    # settlement_request = SettlementRequest.objects.filter(
-    #     designer=request.user,
-    #     status='PENDING'
-    # ).first()
+    # Calculate current period (previous month)
+    if current_date.month == 1:
+        period_start = date(current_date.year - 1, 12, 1)
+    else:
+        period_start = date(current_date.year, current_date.month - 1, 1)
+    
+    # Get settlement request for current period
+    settlement_request = SettlementRequest.objects.filter(
+        designer_id=request.user.id,
+        settlement_period_start=period_start
+    ).first()
+    
+    # Check Razorpay account verification
+    onboarding_statuses = get_related(request.user, 'User:DesignerOnboardingStatus', DesignerOnboardingStatus)
+    onboarding = onboarding_statuses.first()
+    linked_account_verified = onboarding.razorpay_account_verified if onboarding else False
+    
+    # Get current wallet balance
+    wallets = get_user_wallets(request.user)
+    current_wallet_balance = wallets.first().balance if wallets.exists() else 0
     
     settlement_data = {
         'settlement_window_active': settlement_window_active,
         'current_day': current_day,
-        'settlement_window_days': [5, 6, 7, 8, 9, 10],
-        'settlement_request': None,  # TODO: Get from SettlementRequest model
+        'settlement_window_days': [1, 2, 3, 4, 5],
+        'settlement_request': None,
         'can_accept_settlement': False,
-        'linked_account_verified': False  # TODO: Check Razorpay account verification
+        'linked_account_verified': linked_account_verified,
+        'current_wallet_balance': float(current_wallet_balance)
     }
     
-    if settlement_window_active:
-        # TODO: Check if designer has pending settlement
-        # if settlement_request:
-        #     settlement_data['settlement_request'] = SettlementRequestSerializer(settlement_request).data
-        #     settlement_data['can_accept_settlement'] = True
-        pass
+    if settlement_request:
+        settlement_data['settlement_request'] = {
+            'id': settlement_request.id,
+            'settlement_period_start': settlement_request.settlement_period_start.isoformat(),
+            'settlement_period_end': settlement_request.settlement_period_end.isoformat(),
+            'wallet_balance_at_period_end': float(settlement_request.wallet_balance_at_period_end),
+            'settlement_amount': float(settlement_request.settlement_amount),
+            'status': settlement_request.status,
+            'opted_in': settlement_request.opted_in,
+            'opted_in_at': settlement_request.opted_in_at.isoformat() if settlement_request.opted_in_at else None,
+            'settlement_date': settlement_request.settlement_date.isoformat() if settlement_request.settlement_date else None
+        }
+        
+        if settlement_window_active and settlement_request.status == 'pending':
+            settlement_data['can_accept_settlement'] = linked_account_verified
     
     return Response(settlement_data)
 
@@ -890,62 +919,69 @@ def settlement_status(request):
 @permission_classes([IsAuthenticated])
 def accept_settlement(request):
     """
-    Accept settlement during the settlement window (days 5-10).
+    Designer opts in to settlement during the settlement window (days 1-5).
     """
-    from datetime import datetime
+    from datetime import datetime, date
     import pytz
+    from django.utils import timezone
+    from Wallet.models import SettlementRequest
+    from CoreAdmin.models import DesignerOnboardingStatus
+    from common.relations import get_related
     
-    # Check if we're in settlement window
+    # Check if we're in settlement window (days 1-5)
     kolkata_tz = pytz.timezone('Asia/Kolkata')
     current_date = datetime.now(kolkata_tz)
     current_day = current_date.day
     
-    if not (5 <= current_day <= 10):
+    if not (1 <= current_day <= 5):
         return Response({
-            'error': 'Settlement window is not active. Settlement can only be accepted between days 5-10 of each month.'
+            'error': 'Settlement window is not active. Settlement can only be accepted between days 1-5 of each month.'
         }, status=status.HTTP_400_BAD_REQUEST)
     
-    # TODO: Get settlement request
-    # try:
-    #     settlement_request = SettlementRequest.objects.get(
-    #         designer=request.user,
-    #         status='PENDING'
-    #     )
-    # except SettlementRequest.DoesNotExist:
-    #     return Response({
-    #         'error': 'No pending settlement request found'
-    #     }, status=status.HTTP_404_NOT_FOUND)
+    # Calculate current period (previous month)
+    today = current_date.date()
+    if today.month == 1:
+        period_start = date(today.year - 1, 12, 1)
+    else:
+        period_start = date(today.year, today.month - 1, 1)
     
-    # TODO: Check if linked account is verified
-    # if not razorpay_service.is_account_verified(request.user):
-    #     return Response({
-    #         'error': 'Razorpay account is not verified. Please complete verification first.'
-    #     }, status=status.HTTP_400_BAD_REQUEST)
+    # Get pending settlement request for current period
+    try:
+        settlement_request = SettlementRequest.objects.get(
+            designer_id=request.user.id,
+            settlement_period_start=period_start,
+            status='pending'
+        )
+    except SettlementRequest.DoesNotExist:
+        return Response({
+            'error': 'No pending settlement request found for this period'
+        }, status=status.HTTP_404_NOT_FOUND)
+    
+    # Check if linked account is verified
+    onboarding_statuses = get_related(request.user, 'User:DesignerOnboardingStatus', DesignerOnboardingStatus)
+    onboarding = onboarding_statuses.first()
+    
+    if not onboarding or not onboarding.razorpay_account_verified:
+        return Response({
+            'error': 'Razorpay account is not verified. Please complete verification first.'
+        }, status=status.HTTP_400_BAD_REQUEST)
     
     try:
-        # TODO: Accept settlement
-        # settlement_request.status = 'ACCEPTED'
-        # settlement_request.accepted_at = timezone.now()
-        # settlement_request.save()
-        
-        # TODO: Schedule payout for day 11
-        # payout_date = current_date.replace(day=11)
-        # payments.tasks.schedule_payout.delay(
-        #     settlement_request.id,
-        #     payout_date
-        # )
-        
-        # Send confirmation notifications (handled by signals)
-        # The post_save signal will automatically send the notification
+        # Opt in to settlement
+        settlement_request.opted_in = True
+        settlement_request.opted_in_at = timezone.now()
+        settlement_request.status = 'opted_in'
+        settlement_request.save()
         
         return Response({
             'message': 'Settlement accepted successfully',
-            'scheduled_payout_date': 'Day 11 of current month',  # TODO: Calculate actual date
-            'settlement_reference_id': 'SETTLEMENT_REF_123',  # TODO: Generate actual reference
-            'payout_breakdown': {
-                'gross_earnings': 0,  # TODO: Calculate from settlement
-                'platform_fee': 0,   # TODO: Calculate platform fee
-                'net_payable': 0     # TODO: Calculate net amount
+            'settlement_request': {
+                'id': settlement_request.id,
+                'amount': float(settlement_request.settlement_amount),
+                'period_start': settlement_request.settlement_period_start.isoformat(),
+                'period_end': settlement_request.settlement_period_end.isoformat(),
+                'status': settlement_request.status,
+                'settlement_date': 'Day 6 of current month'  # Will be processed on Day 6
             }
         })
         

@@ -25,4 +25,7 @@ urlpatterns = [
     # Webhooks
     path('webhook/', views.webhook_handler, name='webhook_handler'),
     path('webhook-events/', views.webhook_events, name='webhook_events'),
+    
+    # Linked Accounts
+    path('create-linked-account/', views.create_linked_account, name='create_linked_account'),
 ]

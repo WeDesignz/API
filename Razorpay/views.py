@@ -774,6 +774,77 @@ def webhook_handler(request):
                 except RazorpayPayment.DoesNotExist:
                     pass
         
+        # Handle linked account verification events
+        elif event_type == 'contact.activated' or event_type == 'fund_account.activated':
+            # Account/fund account verified
+            from CoreAdmin.models import DesignerOnboardingStatus
+            from common.relations import get_related
+            
+            contact_id = None
+            if event_type == 'contact.activated':
+                contact_id = webhook_data.get('payload', {}).get('contact', {}).get('entity', {}).get('id')
+            elif event_type == 'fund_account.activated':
+                fund_account = webhook_data.get('payload', {}).get('fund_account', {}).get('entity', {})
+                contact_id = fund_account.get('contact_id')
+            
+            if contact_id:
+                try:
+                    onboarding = DesignerOnboardingStatus.objects.filter(
+                        razorpay_linked_account_id=contact_id
+                    ).first()
+                    
+                    if onboarding:
+                        onboarding.razorpay_account_verified = True
+                        onboarding.save()
+                        
+                        # Log activity
+                        from CoreAdmin.models import AdminActivityLog
+                        AdminActivityLog.log_activity(
+                            user=None,  # System action
+                            activity_type='system',
+                            description=f'Razorpay account verified for designer {onboarding.designer_id}',
+                            metadata={'account_id': contact_id, 'event_type': event_type}
+                        )
+                        
+                        webhook_event.processed = True
+                        webhook_event.save()
+                except Exception as e:
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.error(f'Failed to process account verification webhook: {str(e)}', exc_info=True)
+        
+        # Handle payout events (Payouts API)
+        elif event_type == 'payout.processed' or event_type == 'payout.failed' or event_type == 'payout.reversed':
+            from Wallet.models import SettlementRequest
+            
+            payout_id = webhook_data.get('payload', {}).get('payout', {}).get('entity', {}).get('id')
+            payout_status = webhook_data.get('payload', {}).get('payout', {}).get('entity', {}).get('status')
+            
+            if payout_id:
+                try:
+                    settlement_request = SettlementRequest.objects.filter(
+                        razorpay_payout_id=payout_id
+                    ).first()
+                    
+                    if settlement_request:
+                        if event_type == 'payout.processed' and payout_status == 'processed':
+                            settlement_request.status = 'completed'
+                        elif event_type == 'payout.failed':
+                            settlement_request.status = 'failed'
+                            settlement_request.failure_reason = webhook_data.get('payload', {}).get('payout', {}).get('entity', {}).get('failure_reason', 'Payout failed')
+                        elif event_type == 'payout.reversed':
+                            settlement_request.status = 'failed'
+                            settlement_request.failure_reason = 'Payout reversed'
+                        
+                        settlement_request.save()
+                        
+                        webhook_event.processed = True
+                        webhook_event.save()
+                except Exception as e:
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.error(f'Failed to process payout webhook: {str(e)}', exc_info=True)
+        
         return HttpResponse('OK', status=200)
     
     except Exception as e:
@@ -847,6 +918,185 @@ def payment_methods(request):
         return Response({
             'error': f'Failed to fetch payment methods: {str(e)}'
         }, status=status.HTTP_400_BAD_REQUEST)
+
+
+# ==================== RAZORPAY LINKED ACCOUNTS ====================
+
+@swagger_auto_schema(
+    method='post',
+    operation_summary='Create Razorpay Linked Account',
+    operation_description='Create a Razorpay linked account for a designer. Called by admin during approval process.',
+    request_body=openapi.Schema(
+        type=openapi.TYPE_OBJECT,
+        properties={
+            'designer_id': openapi.Schema(
+                type=openapi.TYPE_INTEGER,
+                description='Designer user ID',
+                example=123
+            )
+        },
+        required=['designer_id']
+    ),
+    responses={
+        200: openapi.Response(description='Linked account created successfully'),
+        400: openapi.Response(description='Bad request'),
+        403: openapi.Response(description='Admin access required'),
+        404: openapi.Response(description='Designer or onboarding not found')
+    },
+    tags=['Razorpay Linked Accounts']
+)
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def create_linked_account(request):
+    """
+    Create Razorpay linked account for a designer.
+    Called by admin during approval process.
+    """
+    from CoreAdmin.models import DesignerOnboardingStatus, AdminUserProfile
+    from common.relations import get_related
+    from django.contrib.auth.models import User
+    import logging
+    
+    logger = logging.getLogger(__name__)
+    
+    # Verify admin permissions
+    try:
+        admin_profile = request.user.admin_profile
+    except:
+        return Response({
+            'error': 'Admin access required'
+        }, status=status.HTTP_403_FORBIDDEN)
+    
+    designer_id = request.data.get('designer_id')
+    if not designer_id:
+        return Response({
+            'error': 'designer_id is required'
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    try:
+        designer = User.objects.get(id=designer_id)
+        onboarding_statuses = get_related(designer, 'User:DesignerOnboardingStatus', DesignerOnboardingStatus)
+        onboarding = onboarding_statuses.first()
+        
+        if not onboarding:
+            return Response({
+                'error': 'Onboarding status not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+        
+        # Check if already created
+        if onboarding.razorpay_linked_account_id:
+            return Response({
+                'message': 'Linked account already exists',
+                'linked_account_id': onboarding.razorpay_linked_account_id,
+                'verified': onboarding.razorpay_account_verified
+            })
+        
+        # Get bank details from onboarding
+        bank_account_number = onboarding.bank_account_number  # Should be decrypted if encrypted
+        bank_ifsc_code = onboarding.bank_ifsc_code
+        bank_account_holder_name = onboarding.bank_account_holder_name
+        contact_phone = onboarding.contact_phone or designer.email
+        pan_number = onboarding.pan_number
+        
+        if not all([bank_account_number, bank_ifsc_code, bank_account_holder_name]):
+            return Response({
+                'error': 'Bank account details are incomplete. Please ensure bank account number, IFSC code, and account holder name are provided.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Get business details
+        from Profiles.models import DesignerProfile, Studio, StudioBusinessDetails
+        try:
+            designer_profile = DesignerProfile.objects.get(created_by=designer)
+            is_individual = designer_profile.is_individual
+            
+            if is_individual:
+                legal_business_name = f"{designer.first_name} {designer.last_name}"
+                business_type = 'individual'
+            else:
+                studio = Studio.objects.filter(created_by=designer).first()
+                if studio:
+                    business_details = StudioBusinessDetails.objects.filter(studio=studio).first()
+                    if business_details:
+                        legal_business_name = business_details.legal_business_name or studio.name
+                        business_type = business_details.business_type or 'partnership'
+                    else:
+                        legal_business_name = studio.name
+                        business_type = 'partnership'
+                else:
+                    legal_business_name = f"{designer.first_name} {designer.last_name}"
+                    business_type = 'partnership'
+        except:
+            legal_business_name = f"{designer.first_name} {designer.last_name}"
+            business_type = 'individual'
+        
+        # Get address
+        address = onboarding.contact_address or ''
+        # Parse address if needed (for now, use as is)
+        street1 = address
+        city = ''
+        state = ''
+        postal_code = ''
+        country = 'IN'
+        
+        # Create linked account via Razorpay Route API
+        try:
+            # First, create a contact
+            contact_data = {
+                'name': bank_account_holder_name,
+                'email': designer.email,
+                'contact': contact_phone,
+                'type': 'vendor',
+                'reference_id': f'designer_{designer.id}'
+            }
+            
+            contact = razorpay_client.contact.create(contact_data)
+            contact_id = contact['id']
+            
+            # Create fund account (bank account)
+            fund_account_data = {
+                'contact_id': contact_id,
+                'account_type': 'bank_account',
+                'bank_account': {
+                    'name': bank_account_holder_name,
+                    'ifsc': bank_ifsc_code,
+                    'account_number': bank_account_number
+                }
+            }
+            
+            fund_account = razorpay_client.fund_account.create(fund_account_data)
+            fund_account_id = fund_account['id']
+            
+            # Create linked account (Route account)
+            # Note: Razorpay Route API uses contacts and fund accounts
+            # The linked account is essentially the contact with fund account
+            
+            # Store linked account ID (using contact_id as the identifier)
+            onboarding.razorpay_linked_account_id = contact_id
+            onboarding.save()
+            
+            logger.info(f"Created Razorpay linked account for designer {designer.id}: contact_id={contact_id}, fund_account_id={fund_account_id}")
+            
+            # Note: Account verification happens asynchronously via webhook
+            # Razorpay will send webhook when account is verified
+            
+            return Response({
+                'message': 'Linked account created successfully',
+                'linked_account_id': contact_id,
+                'fund_account_id': fund_account_id,
+                'status': 'pending_verification',
+                'verification_status': 'pending'  # Will be updated via webhook
+            })
+            
+        except Exception as e:
+            logger.error(f"Failed to create linked account for designer {designer.id}: {str(e)}", exc_info=True)
+            return Response({
+                'error': f'Failed to create linked account: {str(e)}'
+            }, status=status.HTTP_400_BAD_REQUEST)
+            
+    except User.DoesNotExist:
+        return Response({
+            'error': 'Designer not found'
+        }, status=status.HTTP_404_NOT_FOUND)
 
 
 @swagger_auto_schema(

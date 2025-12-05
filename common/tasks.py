@@ -483,37 +483,279 @@ def send_settlement_reminders(self):
 
 @shared_task(bind=True, name='common.tasks.process_monthly_settlements')
 def process_monthly_settlements(self):
-    """Process monthly settlements for designers on day 1 of each month."""
+    """Create settlement requests on day 1 of each month."""
     try:
-        from datetime import datetime
+        from datetime import datetime, date, timedelta
         import pytz
+        from decimal import Decimal
+        from django.contrib.auth.models import User
+        from Wallet.models import Wallet, SettlementRequest
+        from CoreAdmin.models import DesignerOnboardingStatus
+        from common.relations import get_related, get_user_wallets
         
         # Get current date in Asia/Kolkata timezone
         kolkata_tz = pytz.timezone('Asia/Kolkata')
-        current_date = datetime.now(kolkata_tz)
+        current_date = datetime.now(kolkata_tz).date()
         
         # Only run on day 1 of the month
         if current_date.day != 1:
-            logger.info("Not the first day of the month, skipping settlement processing")
+            logger.info("Not the first day of the month, skipping settlement request creation")
             return "Not the first day of the month"
         
-        # TODO: Create settlement requests for all eligible designers
-        # eligible_designers = User.objects.filter(
-        #     is_active=True,
-        #     designerprofile__status='verified',
-        #     wallet__balance__gt=0
-        # )
+        # Calculate previous month period
+        if current_date.month == 1:
+            period_start = date(current_date.year - 1, 12, 1)
+            # Get last day of December
+            period_end = date(current_date.year - 1, 12, 31)
+        else:
+            period_start = date(current_date.year, current_date.month - 1, 1)
+            # Get last day of previous month
+            if current_date.month == 2:
+                period_end = date(current_date.year, 1, 31)
+            else:
+                # Calculate last day of previous month
+                first_day_current = date(current_date.year, current_date.month, 1)
+                period_end = first_day_current - timedelta(days=1)
         
-        # for designer in eligible_designers:
-        #     # Calculate earnings from last settlement
-        #     # Create settlement request
-        #     # Send notification
+        # Get all active designers
+        designers = User.objects.filter(is_active=True).distinct()
         
-        logger.info("Monthly settlement processing completed")
-        return "Monthly settlement processing completed"
+        created_count = 0
+        skipped_count = 0
+        
+        for designer in designers:
+            try:
+                # Check if designer has verified Razorpay account
+                onboarding_statuses = get_related(designer, 'User:DesignerOnboardingStatus', DesignerOnboardingStatus)
+                onboarding = onboarding_statuses.first()
+                
+                if not onboarding or not onboarding.razorpay_account_verified:
+                    skipped_count += 1
+                    continue
+                
+                # Get wallet balance
+                wallets = get_user_wallets(designer)
+                if not wallets.exists():
+                    skipped_count += 1
+                    continue
+                
+                wallet = wallets.first()
+                balance = Decimal(str(wallet.balance))
+                
+                if balance <= 0:
+                    skipped_count += 1
+                    continue
+                
+                # Create settlement request (or get existing one)
+                settlement_request, created = SettlementRequest.objects.get_or_create(
+                    designer_id=designer.id,
+                    settlement_period_start=period_start,
+                    defaults={
+                        'settlement_period_end': period_end,
+                        'wallet_balance_at_period_end': balance,
+                        'settlement_amount': balance,  # Settle full balance
+                        'status': 'pending'
+                    }
+                )
+                
+                if created:
+                    # Link designer to settlement request
+                    settlement_request.set_designer(designer)
+                    created_count += 1
+                    logger.info(f"Created settlement request for designer {designer.id}: ₹{balance}")
+                    
+                    # TODO: Send notification to designer about settlement window
+                    # send_mail(
+                    #     subject="Settlement Window Open - WeDesignz",
+                    #     message=f"Hi {designer.first_name},\n\nYour settlement window is now open (Days 1-5 of the month).\n\nAvailable for settlement: ₹{balance}\nPeriod: {period_start} to {period_end}\n\nPlease log in to accept your settlement.\n\nVisit {settings.SITE_URL}/designer-console to access your dashboard.",
+                    #     from_email=settings.DEFAULT_FROM_EMAIL,
+                    #     recipient_list=[designer.email],
+                    #     fail_silently=False,
+                    # )
+                else:
+                    # Update existing request if balance changed
+                    if settlement_request.wallet_balance_at_period_end != balance:
+                        settlement_request.wallet_balance_at_period_end = balance
+                        settlement_request.settlement_amount = balance
+                        settlement_request.save()
+                        logger.info(f"Updated settlement request for designer {designer.id}: ₹{balance}")
+                    
+            except Exception as e:
+                logger.error(f"Failed to create settlement for designer {designer.id}: {str(e)}", exc_info=True)
+                skipped_count += 1
+        
+        logger.info(f"Created {created_count} settlement requests, skipped {skipped_count} designers")
+        return f"Created {created_count} settlement requests, skipped {skipped_count} designers"
         
     except Exception as e:
-        logger.error(f"Failed to process monthly settlements: {str(e)}")
+        logger.error(f"Failed to process monthly settlements: {str(e)}", exc_info=True)
+        raise self.retry(exc=e, countdown=60, max_retries=3)
+
+
+@shared_task(bind=True, name='common.tasks.process_settlement_payouts')
+def process_settlement_payouts(self):
+    """
+    Process all opted-in settlements on day 6 of each month.
+    Uses Razorpay Payouts API to transfer funds from your account to designer bank accounts.
+    
+    Why Payouts API (not Route API):
+    - Route API splits payments immediately when customer pays (real-time)
+    - Our flow: Hold funds → Designer opts in (Days 1-5) → Transfer on Day 6
+    - Payouts API supports scheduled/on-demand transfers from account balance
+    - Perfect for opt-in logic and bulk payouts
+    """
+    try:
+        from datetime import datetime, date
+        import pytz
+        from decimal import Decimal
+        from django.contrib.auth.models import User
+        from django.conf import settings
+        from Wallet.models import Wallet, SettlementRequest, WalletTransaction
+        from CoreAdmin.models import DesignerOnboardingStatus
+        from common.relations import get_related, get_user_wallets
+        import razorpay
+        
+        # Initialize Razorpay client
+        razorpay_client = razorpay.Client(auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET))
+        
+        # Get current date in Asia/Kolkata timezone
+        kolkata_tz = pytz.timezone('Asia/Kolkata')
+        current_date = datetime.now(kolkata_tz).date()
+        
+        # Only run on day 6
+        if current_date.day != 6:
+            logger.info("Not day 6, skipping settlement processing")
+            return "Not day 6"
+        
+        # Get all opted-in settlement requests
+        settlement_requests = SettlementRequest.objects.filter(
+            status='opted_in',
+            settlement_date__isnull=True  # Not yet processed
+        )
+        
+        processed_count = 0
+        failed_count = 0
+        
+        for settlement_request in settlement_requests:
+            try:
+                designer_id = settlement_request.designer_id
+                
+                # Get designer and onboarding
+                designer = User.objects.get(id=designer_id)
+                onboarding_statuses = get_related(designer, 'User:DesignerOnboardingStatus', DesignerOnboardingStatus)
+                onboarding = onboarding_statuses.first()
+                
+                if not onboarding or not onboarding.razorpay_linked_account_id:
+                    logger.error(f"No Razorpay account for designer {designer_id}")
+                    settlement_request.status = 'failed'
+                    settlement_request.failure_reason = 'Razorpay linked account not found'
+                    settlement_request.save()
+                    failed_count += 1
+                    continue
+                
+                # Get current wallet balance
+                wallets = get_user_wallets(designer)
+                wallet = wallets.first()
+                current_balance = Decimal(str(wallet.balance))
+                settlement_amount = Decimal(str(settlement_request.settlement_amount))
+                
+                # Ensure we don't settle more than available
+                if settlement_amount > current_balance:
+                    settlement_amount = current_balance
+                    logger.warning(f"Adjusting settlement amount for designer {designer_id}: {settlement_amount}")
+                
+                if settlement_amount <= 0:
+                    logger.warning(f"Insufficient balance for designer {designer_id}")
+                    settlement_request.status = 'failed'
+                    settlement_request.failure_reason = 'Insufficient wallet balance'
+                    settlement_request.save()
+                    failed_count += 1
+                    continue
+                
+                # Create payout using Razorpay Payouts API
+                # Note: Fund accounts are created via Route API during onboarding for verification,
+                # but actual payouts use Payouts API for scheduled transfers
+                try:
+                    # Get the contact ID (stored when creating linked account)
+                    contact_id = onboarding.razorpay_linked_account_id
+                    
+                    # Fetch fund accounts for this contact (created via Route API)
+                    fund_accounts = razorpay_client.fund_account.fetch_all({'contact_id': contact_id})
+                    
+                    if not fund_accounts.get('items'):
+                        raise Exception("No fund account found for linked account")
+                    
+                    fund_account_id = fund_accounts['items'][0]['id']
+                    
+                    # Create payout using Payouts API
+                    # This transfers from your Razorpay account balance to designer's bank account
+                    payout_data = {
+                        'account_number': getattr(settings, 'RAZORPAY_ACCOUNT_NUMBER', None),  # Optional: Your Razorpay account number
+                        'fund_account': {
+                            'id': fund_account_id
+                        },
+                        'amount': int(float(settlement_amount) * 100),  # Convert to paise
+                        'currency': 'INR',
+                        'mode': 'IMPS',  # or 'NEFT', 'RTGS'
+                        'purpose': 'payout',
+                        'queue_if_low_balance': True,
+                        'reference_id': f'SETTLE_{settlement_request.id}_{designer_id}',
+                        'narration': f'Settlement {settlement_request.settlement_period_start.strftime("%b %Y")}'
+                    }
+                    
+                    # Create payout using Payouts API
+                    payout = razorpay_client.payout.create(payout_data)
+                    
+                    payout_id = payout.get('id', '')
+                    transfer_id = payout_id  # Store payout ID
+                    
+                    # Update settlement request
+                    settlement_request.status = 'processing'
+                    settlement_request.settlement_date = current_date
+                    settlement_request.razorpay_transfer_id = transfer_id
+                    settlement_request.razorpay_payout_id = payout_id  # Store payout ID separately
+                    settlement_request.save()
+                    
+                    # Deduct from wallet
+                    wallet.balance = current_balance - settlement_amount
+                    wallet.save()
+                    
+                    # Create debit transaction
+                    transaction = WalletTransaction.objects.create(
+                        wallet_transaction_type='debit',
+                        amount=settlement_amount,
+                        description=f"Settlement payout for period {settlement_request.settlement_period_start} to {settlement_request.settlement_period_end}",
+                        reference_id=f"settlement_{settlement_request.id}",
+                        created_by=designer
+                    )
+                    wallet.attach_wallet_transaction(transaction)
+                    
+                    # Mark as processing (will be updated to completed via webhook)
+                    processed_count += 1
+                    logger.info(f"Processed settlement for designer {designer_id}: ₹{settlement_amount}, Payout ID: {payout_id}")
+                    
+                except Exception as e:
+                    logger.error(f"Razorpay payout failed for designer {designer_id}: {str(e)}", exc_info=True)
+                    settlement_request.status = 'failed'
+                    settlement_request.failure_reason = str(e)
+                    settlement_request.save()
+                    failed_count += 1
+                    
+            except User.DoesNotExist:
+                logger.error(f"Designer {settlement_request.designer_id} not found")
+                settlement_request.status = 'failed'
+                settlement_request.failure_reason = 'Designer not found'
+                settlement_request.save()
+                failed_count += 1
+            except Exception as e:
+                logger.error(f"Failed to process settlement {settlement_request.id}: {str(e)}", exc_info=True)
+                failed_count += 1
+        
+        logger.info(f"Processed {processed_count} settlements, {failed_count} failed")
+        return f"Processed {processed_count} settlements, {failed_count} failed"
+        
+    except Exception as e:
+        logger.error(f"Failed to process settlement payouts: {str(e)}", exc_info=True)
         raise self.retry(exc=e, countdown=60, max_retries=3)
 
 
