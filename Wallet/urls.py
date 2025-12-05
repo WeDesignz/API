@@ -21,4 +21,7 @@ urlpatterns = [
     
     # Earnings Summary
     path('earnings-summary/', views.earnings_summary, name='earnings_summary'),
+    
+    # Admin - Settlement Sheet Download
+    path('admin/settlement-sheet/', views.download_settlement_sheet, name='download_settlement_sheet'),
 ]

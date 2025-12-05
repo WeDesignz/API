@@ -7,10 +7,20 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from django.db.models import Sum, Q
 from django.utils import timezone
-from .models import Wallet, WalletTransaction, WalletWithdrawalRequest
+from django.http import HttpResponse
+from django.contrib.auth.models import User
+from .models import Wallet, WalletTransaction, WalletWithdrawalRequest, SettlementRequest
 from .serializers import (
     WalletSerializer, WalletTransactionSerializer, WalletWithdrawalRequestSerializer
 )
+from CoreAdmin.auth import admin_required
+from CoreAdmin.models import DesignerOnboardingStatus
+from common.relations import get_related
+import csv
+import io
+from datetime import datetime, date
+import pytz
+from decimal import Decimal
 
 
 @swagger_auto_schema(
@@ -1175,3 +1185,299 @@ def linked_account_status(request):
     }
     
     return Response(account_status)
+
+
+# ==================== ADMIN - SETTLEMENT SHEET DOWNLOAD ====================
+
+@swagger_auto_schema(
+    method='get',
+    operation_summary='Download Settlement Sheet',
+    operation_description='Download settlement sheet as CSV or Excel file (Admin only). Filter by status, period, or settlement date.',
+    manual_parameters=[
+        openapi.Parameter(
+            'format',
+            openapi.IN_QUERY,
+            description='File format (csv or xlsx)',
+            type=openapi.TYPE_STRING,
+            enum=['csv', 'xlsx'],
+            default='xlsx'
+        ),
+        openapi.Parameter(
+            'status',
+            openapi.IN_QUERY,
+            description='Filter by settlement status (pending, opted_in, processing, completed, failed, expired)',
+            type=openapi.TYPE_STRING
+        ),
+        openapi.Parameter(
+            'period_start',
+            openapi.IN_QUERY,
+            description='Filter by settlement period start date (YYYY-MM-DD)',
+            type=openapi.TYPE_STRING
+        ),
+        openapi.Parameter(
+            'settlement_date',
+            openapi.IN_QUERY,
+            description='Filter by settlement date (YYYY-MM-DD)',
+            type=openapi.TYPE_STRING
+        ),
+    ],
+    responses={
+        200: openapi.Response(
+            description='Settlement sheet file',
+            content={
+                'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': {},
+                'text/csv': {}
+            }
+        ),
+        403: openapi.Response(description='Access denied - Admin privileges required'),
+        400: openapi.Response(description='Invalid parameters')
+    },
+    tags=['Wallet Admin']
+)
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+@admin_required()
+def download_settlement_sheet(request):
+    """
+    Download settlement sheet as CSV or Excel file.
+    Admin-only endpoint to generate settlement reports for manual payouts.
+    """
+    try:
+        # Get query parameters
+        file_format = request.GET.get('format', 'xlsx').lower()
+        status_filter = request.GET.get('status')
+        period_start_str = request.GET.get('period_start')
+        settlement_date_str = request.GET.get('settlement_date')
+        
+        # Validate format
+        if file_format not in ['csv', 'xlsx']:
+            return Response({
+                'error': 'Invalid format. Use "csv" or "xlsx"'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Build query
+        queryset = SettlementRequest.objects.all()
+        
+        if status_filter:
+            queryset = queryset.filter(status=status_filter)
+        
+        if period_start_str:
+            try:
+                period_start = datetime.strptime(period_start_str, '%Y-%m-%d').date()
+                queryset = queryset.filter(settlement_period_start=period_start)
+            except ValueError:
+                return Response({
+                    'error': 'Invalid period_start format. Use YYYY-MM-DD'
+                }, status=status.HTTP_400_BAD_REQUEST)
+        
+        if settlement_date_str:
+            try:
+                settlement_date = datetime.strptime(settlement_date_str, '%Y-%m-%d').date()
+                queryset = queryset.filter(settlement_date=settlement_date)
+            except ValueError:
+                return Response({
+                    'error': 'Invalid settlement_date format. Use YYYY-MM-DD'
+                }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Order by settlement period and designer ID
+        queryset = queryset.order_by('-settlement_period_start', 'designer_id')
+        
+        # Prepare data
+        settlement_data = []
+        total_amount = Decimal('0.00')
+        
+        for settlement in queryset:
+            try:
+                # Get designer
+                designer = settlement.designer
+                if not designer:
+                    continue
+                
+                # Get onboarding status for bank details
+                onboarding_statuses = get_related(designer, 'User:DesignerOnboardingStatus', DesignerOnboardingStatus)
+                onboarding = onboarding_statuses.first()
+                
+                # Get bank details (may be encrypted, but we'll display as-is)
+                bank_account_number = onboarding.bank_account_number if onboarding else ''
+                bank_ifsc_code = onboarding.bank_ifsc_code if onboarding else ''
+                bank_account_holder_name = onboarding.bank_account_holder_name if onboarding else ''
+                
+                # Mask account number for security (show last 4 digits)
+                if bank_account_number:
+                    if len(bank_account_number) > 4:
+                        masked_account = '****' + bank_account_number[-4:]
+                    else:
+                        masked_account = '****'
+                else:
+                    masked_account = 'N/A'
+                
+                # Get designer contact info
+                designer_email = designer.email if hasattr(designer, 'email') else ''
+                designer_phone = ''
+                try:
+                    from Authentication.models import MobileNumber
+                    mobile_numbers = get_related(designer, 'User:MobileNumber', MobileNumber)
+                    if mobile_numbers.exists():
+                        mobile = mobile_numbers.first()
+                        designer_phone = str(mobile.mobile_number) if hasattr(mobile, 'mobile_number') else ''
+                except:
+                    pass
+                
+                # Format period
+                period_str = f"{settlement.settlement_period_start.strftime('%b %d, %Y')} - {settlement.settlement_period_end.strftime('%b %d, %Y')}"
+                
+                settlement_data.append({
+                    'Settlement ID': settlement.id,
+                    'Designer ID': designer.id,
+                    'Designer Name': f"{designer.first_name} {designer.last_name}".strip() or designer.username,
+                    'Email': designer_email,
+                    'Phone': designer_phone,
+                    'Account Holder Name': bank_account_holder_name or 'N/A',
+                    'Account Number': masked_account,
+                    'IFSC Code': bank_ifsc_code or 'N/A',
+                    'Settlement Period': period_str,
+                    'Settlement Amount (₹)': float(settlement.settlement_amount),
+                    'Status': settlement.get_status_display(),
+                    'Opted In': 'Yes' if settlement.opted_in else 'No',
+                    'Opted In At': settlement.opted_in_at.strftime('%Y-%m-%d %H:%M:%S') if settlement.opted_in_at else 'N/A',
+                    'Settlement Date': settlement.settlement_date.strftime('%Y-%m-%d') if settlement.settlement_date else 'N/A',
+                    'Failure Reason': settlement.failure_reason or 'N/A',
+                    'Created At': settlement.created_at.strftime('%Y-%m-%d %H:%M:%S'),
+                })
+                
+                total_amount += Decimal(str(settlement.settlement_amount))
+                
+            except Exception as e:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.error(f"Error processing settlement {settlement.id}: {str(e)}", exc_info=True)
+                continue
+        
+        # Generate filename
+        current_date = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f'settlement_sheet_{current_date}.{file_format}'
+        
+        # Generate file
+        if file_format == 'csv':
+            return _generate_csv_response(settlement_data, filename, total_amount)
+        else:
+            return _generate_excel_response(settlement_data, filename, total_amount)
+    
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Error generating settlement sheet: {str(e)}", exc_info=True)
+        return Response({
+            'error': f'Failed to generate settlement sheet: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+def _generate_csv_response(settlement_data, filename, total_amount):
+    """Generate CSV response"""
+    response = HttpResponse(content_type='text/csv; charset=utf-8')
+    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    
+    if not settlement_data:
+        writer = csv.writer(response)
+        writer.writerow(['No settlements found'])
+        return response
+    
+    # Write header
+    writer = csv.DictWriter(response, fieldnames=settlement_data[0].keys())
+    writer.writeheader()
+    
+    # Write data
+    for row in settlement_data:
+        writer.writerow(row)
+    
+    # Write summary
+    writer.writerow({})
+    writer.writerow({'Settlement ID': 'SUMMARY', 'Designer Name': f'Total Settlements: {len(settlement_data)}', 'Settlement Amount (₹)': f'Total Amount: ₹{float(total_amount):.2f}'})
+    
+    return response
+
+
+def _generate_excel_response(settlement_data, filename, total_amount):
+    """Generate Excel response using openpyxl"""
+    try:
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+        from openpyxl.utils import get_column_letter
+        
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Settlement Sheet"
+        
+        # Header style
+        header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
+        header_font = Font(bold=True, color="FFFFFF", size=11)
+        header_alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        border = Border(
+            left=Side(style='thin'),
+            right=Side(style='thin'),
+            top=Side(style='thin'),
+            bottom=Side(style='thin')
+        )
+        
+        if not settlement_data:
+            ws['A1'] = 'No settlements found'
+            ws['A1'].font = Font(bold=True)
+            response = HttpResponse(
+                content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            )
+            response['Content-Disposition'] = f'attachment; filename="{filename}"'
+            wb.save(response)
+            return response
+        
+        # Write header
+        headers = list(settlement_data[0].keys())
+        for col_num, header in enumerate(headers, 1):
+            cell = ws.cell(row=1, column=col_num, value=header)
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = header_alignment
+            cell.border = border
+        
+        # Write data
+        for row_num, row_data in enumerate(settlement_data, 2):
+            for col_num, header in enumerate(headers, 1):
+                value = row_data.get(header, '')
+                cell = ws.cell(row=row_num, column=col_num, value=value)
+                cell.border = border
+                cell.alignment = Alignment(horizontal="left", vertical="center")
+        
+        # Write summary row
+        summary_row = len(settlement_data) + 3
+        ws.cell(row=summary_row, column=1, value='SUMMARY').font = Font(bold=True)
+        ws.cell(row=summary_row, column=2, value=f'Total Settlements: {len(settlement_data)}').font = Font(bold=True)
+        
+        # Find the amount column
+        amount_col = headers.index('Settlement Amount (₹)') + 1
+        ws.cell(row=summary_row, column=amount_col, value=f'Total Amount: ₹{float(total_amount):.2f}').font = Font(bold=True)
+        
+        # Auto-adjust column widths
+        for col_num, header in enumerate(headers, 1):
+            column_letter = get_column_letter(col_num)
+            max_length = len(str(header))
+            for row in ws[column_letter]:
+                try:
+                    if len(str(row.value)) > max_length:
+                        max_length = len(str(row.value))
+                except:
+                    pass
+            adjusted_width = min(max_length + 2, 50)
+            ws.column_dimensions[column_letter].width = adjusted_width
+        
+        # Freeze header row
+        ws.freeze_panes = 'A2'
+        
+        response = HttpResponse(
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        wb.save(response)
+        return response
+    
+    except ImportError:
+        # Fallback to CSV if openpyxl is not available
+        return _generate_csv_response(settlement_data, filename.replace('.xlsx', '.csv'), total_amount)
