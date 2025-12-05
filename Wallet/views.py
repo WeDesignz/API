@@ -1477,6 +1477,412 @@ def _generate_excel_response(settlement_data, filename, total_amount):
         response['Content-Disposition'] = f'attachment; filename="{filename}"'
         wb.save(response)
         return response
+
+
+# ==================== ADMIN - SETTLEMENT STATUS UPDATE ====================
+
+@swagger_auto_schema(
+    method='put',
+    operation_summary='Update Settlement Status',
+    operation_description='Update settlement request status after manual payout processing (Admin only).',
+    request_body=openapi.Schema(
+        type=openapi.TYPE_OBJECT,
+        properties={
+            'status': openapi.Schema(
+                type=openapi.TYPE_STRING,
+                description='New settlement status',
+                enum=['processing', 'completed', 'failed'],
+                example='completed'
+            ),
+            'failure_reason': openapi.Schema(
+                type=openapi.TYPE_STRING,
+                description='Failure reason (required if status is failed)',
+                example='Bank account details incorrect'
+            ),
+            'manual_reference_id': openapi.Schema(
+                type=openapi.TYPE_STRING,
+                description='Manual transaction reference ID (e.g., UTR number, transaction ID)',
+                example='UTR123456789'
+            ),
+            'admin_notes': openapi.Schema(
+                type=openapi.TYPE_STRING,
+                description='Admin notes about the settlement',
+                example='Payout processed via NEFT on 2024-02-06'
+            )
+        },
+        required=['status']
+    ),
+    responses={
+        200: openapi.Response(description='Settlement status updated successfully'),
+        400: openapi.Response(description='Invalid data'),
+        404: openapi.Response(description='Settlement not found'),
+        403: openapi.Response(description='Access denied - Admin privileges required')
+    },
+    tags=['Wallet Admin']
+)
+@api_view(['PUT'])
+@permission_classes([IsAuthenticated])
+@admin_required()
+def update_settlement_status(request, settlement_id):
+    """
+    Update settlement request status after manual payout processing.
+    Admin-only endpoint to mark settlements as completed or failed.
+    """
+    try:
+        settlement = SettlementRequest.objects.get(id=settlement_id)
+    except SettlementRequest.DoesNotExist:
+        return Response({
+            'error': 'Settlement request not found'
+        }, status=status.HTTP_404_NOT_FOUND)
+    
+    new_status = request.data.get('status')
+    failure_reason = request.data.get('failure_reason', '')
+    manual_reference_id = request.data.get('manual_reference_id', '')
+    admin_notes = request.data.get('admin_notes', '')
+    
+    # Validate status
+    valid_statuses = ['processing', 'completed', 'failed']
+    if new_status not in valid_statuses:
+        return Response({
+            'error': f'Invalid status. Must be one of: {", ".join(valid_statuses)}'
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    # Validate failure reason if status is failed
+    if new_status == 'failed' and not failure_reason:
+        return Response({
+            'error': 'failure_reason is required when status is failed'
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    old_status = settlement.status
+    
+    # Update settlement
+    settlement.status = new_status
+    
+    if new_status == 'failed':
+        settlement.failure_reason = failure_reason
+    elif new_status == 'completed':
+        # Clear failure reason if completing
+        if settlement.failure_reason:
+            settlement.failure_reason = None
+    
+    # Store manual reference ID in razorpay_transfer_id field (repurposed for manual transactions)
+    if manual_reference_id:
+        settlement.razorpay_transfer_id = manual_reference_id
+    
+    settlement.save()
+    
+    # Log activity
+    try:
+        from CoreAdmin.models import AdminActivityLog
+        AdminActivityLog.log_activity(
+            user=request.user,
+            activity_type='settlement_management',
+            description=f'Updated settlement {settlement_id} status from {old_status} to {new_status}',
+            request=request,
+            metadata={
+                'settlement_id': settlement_id,
+                'old_status': old_status,
+                'new_status': new_status,
+                'manual_reference_id': manual_reference_id,
+                'admin_notes': admin_notes,
+                'designer_id': settlement.designer_id
+            }
+        )
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f'Failed to log activity: {str(e)}', exc_info=True)
+    
+    return Response({
+        'message': 'Settlement status updated successfully',
+        'settlement': {
+            'id': settlement.id,
+            'designer_id': settlement.designer_id,
+            'settlement_amount': float(settlement.settlement_amount),
+            'old_status': old_status,
+            'new_status': settlement.status,
+            'settlement_period_start': settlement.settlement_period_start.isoformat(),
+            'settlement_period_end': settlement.settlement_period_end.isoformat(),
+            'manual_reference_id': settlement.razorpay_transfer_id,
+            'failure_reason': settlement.failure_reason
+        }
+    })
+
+
+@swagger_auto_schema(
+    method='post',
+    operation_summary='Bulk Update Settlement Status',
+    operation_description='Bulk update multiple settlement request statuses after manual payout processing (Admin only).',
+    request_body=openapi.Schema(
+        type=openapi.TYPE_OBJECT,
+        properties={
+            'settlement_ids': openapi.Schema(
+                type=openapi.TYPE_ARRAY,
+                items=openapi.Schema(type=openapi.TYPE_INTEGER),
+                description='List of settlement IDs to update',
+                example=[1, 2, 3]
+            ),
+            'status': openapi.Schema(
+                type=openapi.TYPE_STRING,
+                description='New settlement status for all settlements',
+                enum=['processing', 'completed', 'failed'],
+                example='completed'
+            ),
+            'failure_reason': openapi.Schema(
+                type=openapi.TYPE_STRING,
+                description='Failure reason (applied to all if status is failed)',
+                example='Bank account details incorrect'
+            ),
+            'manual_reference_ids': openapi.Schema(
+                type=openapi.TYPE_OBJECT,
+                description='Mapping of settlement_id to manual_reference_id (optional)',
+                additional_properties=openapi.Schema(type=openapi.TYPE_STRING),
+                example={'1': 'UTR123456789', '2': 'UTR987654321'}
+            ),
+            'admin_notes': openapi.Schema(
+                type=openapi.TYPE_STRING,
+                description='Admin notes about the bulk update',
+                example='All payouts processed via NEFT on 2024-02-06'
+            )
+        },
+        required=['settlement_ids', 'status']
+    ),
+    responses={
+        200: openapi.Response(description='Settlements updated successfully'),
+        400: openapi.Response(description='Invalid data'),
+        403: openapi.Response(description='Access denied - Admin privileges required')
+    },
+    tags=['Wallet Admin']
+)
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+@admin_required()
+def bulk_update_settlement_status(request):
+    """
+    Bulk update multiple settlement request statuses after manual payout processing.
+    Admin-only endpoint to mark multiple settlements as completed or failed at once.
+    """
+    settlement_ids = request.data.get('settlement_ids', [])
+    new_status = request.data.get('status')
+    failure_reason = request.data.get('failure_reason', '')
+    manual_reference_ids = request.data.get('manual_reference_ids', {})
+    admin_notes = request.data.get('admin_notes', '')
+    
+    if not settlement_ids:
+        return Response({
+            'error': 'settlement_ids is required and cannot be empty'
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    if not isinstance(settlement_ids, list):
+        return Response({
+            'error': 'settlement_ids must be a list'
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    # Validate status
+    valid_statuses = ['processing', 'completed', 'failed']
+    if new_status not in valid_statuses:
+        return Response({
+            'error': f'Invalid status. Must be one of: {", ".join(valid_statuses)}'
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    # Validate failure reason if status is failed
+    if new_status == 'failed' and not failure_reason:
+        return Response({
+            'error': 'failure_reason is required when status is failed'
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    updated_count = 0
+    failed_updates = []
+    
+    for settlement_id in settlement_ids:
+        try:
+            settlement = SettlementRequest.objects.get(id=settlement_id)
+            
+            old_status = settlement.status
+            settlement.status = new_status
+            
+            if new_status == 'failed':
+                settlement.failure_reason = failure_reason
+            elif new_status == 'completed':
+                # Clear failure reason if completing
+                if settlement.failure_reason:
+                    settlement.failure_reason = None
+            
+            # Store manual reference ID if provided
+            if str(settlement_id) in manual_reference_ids:
+                settlement.razorpay_transfer_id = manual_reference_ids[str(settlement_id)]
+            
+            settlement.save()
+            updated_count += 1
+            
+        except SettlementRequest.DoesNotExist:
+            failed_updates.append(f"Settlement {settlement_id} not found")
+        except Exception as e:
+            failed_updates.append(f"Error updating settlement {settlement_id}: {str(e)}")
+    
+    # Log activity
+    try:
+        from CoreAdmin.models import AdminActivityLog
+        AdminActivityLog.log_activity(
+            user=request.user,
+            activity_type='settlement_management',
+            description=f'Bulk updated {updated_count} settlements to {new_status}',
+            request=request,
+            metadata={
+                'settlement_ids': settlement_ids,
+                'old_status': 'various',
+                'new_status': new_status,
+                'updated_count': updated_count,
+                'failed_updates': failed_updates,
+                'admin_notes': admin_notes
+            }
+        )
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f'Failed to log activity: {str(e)}', exc_info=True)
+    
+    return Response({
+        'message': f'Successfully updated {updated_count} settlements',
+        'updated_count': updated_count,
+        'failed_updates': failed_updates,
+        'status': new_status
+    })
+
+
+@swagger_auto_schema(
+    method='get',
+    operation_summary='List Settlements',
+    operation_description='Get list of settlement requests with filtering (Admin only).',
+    manual_parameters=[
+        openapi.Parameter(
+            'status',
+            openapi.IN_QUERY,
+            description='Filter by settlement status',
+            type=openapi.TYPE_STRING,
+            enum=['pending', 'opted_in', 'processing', 'completed', 'failed', 'expired']
+        ),
+        openapi.Parameter(
+            'period_start',
+            openapi.IN_QUERY,
+            description='Filter by settlement period start date (YYYY-MM-DD)',
+            type=openapi.TYPE_STRING
+        ),
+        openapi.Parameter(
+            'settlement_date',
+            openapi.IN_QUERY,
+            description='Filter by settlement date (YYYY-MM-DD)',
+            type=openapi.TYPE_STRING
+        ),
+        openapi.Parameter(
+            'designer_id',
+            openapi.IN_QUERY,
+            description='Filter by designer ID',
+            type=openapi.TYPE_INTEGER
+        ),
+        openapi.Parameter(
+            'page',
+            openapi.IN_QUERY,
+            description='Page number',
+            type=openapi.TYPE_INTEGER
+        ),
+        openapi.Parameter(
+            'page_size',
+            openapi.IN_QUERY,
+            description='Number of items per page',
+            type=openapi.TYPE_INTEGER
+        )
+    ],
+    responses={
+        200: openapi.Response(description='Settlements retrieved successfully'),
+        403: openapi.Response(description='Access denied - Admin privileges required')
+    },
+    tags=['Wallet Admin']
+)
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+@admin_required()
+def list_settlements(request):
+    """
+    Get list of settlement requests with filtering.
+    Admin-only endpoint to view and manage settlements.
+    """
+    status_filter = request.GET.get('status')
+    period_start_str = request.GET.get('period_start')
+    settlement_date_str = request.GET.get('settlement_date')
+    designer_id = request.GET.get('designer_id')
+    page = int(request.GET.get('page', 1))
+    page_size = int(request.GET.get('page_size', 20))
+    
+    queryset = SettlementRequest.objects.all()
+    
+    if status_filter:
+        queryset = queryset.filter(status=status_filter)
+    
+    if period_start_str:
+        try:
+            period_start = datetime.strptime(period_start_str, '%Y-%m-%d').date()
+            queryset = queryset.filter(settlement_period_start=period_start)
+        except ValueError:
+            return Response({
+                'error': 'Invalid period_start format. Use YYYY-MM-DD'
+            }, status=status.HTTP_400_BAD_REQUEST)
+    
+    if settlement_date_str:
+        try:
+            settlement_date = datetime.strptime(settlement_date_str, '%Y-%m-%d').date()
+            queryset = queryset.filter(settlement_date=settlement_date)
+        except ValueError:
+            return Response({
+                'error': 'Invalid settlement_date format. Use YYYY-MM-DD'
+            }, status=status.HTTP_400_BAD_REQUEST)
+    
+    if designer_id:
+        try:
+            queryset = queryset.filter(designer_id=int(designer_id))
+        except ValueError:
+            return Response({
+                'error': 'Invalid designer_id'
+            }, status=status.HTTP_400_BAD_REQUEST)
+    
+    # Order by settlement period and designer ID
+    queryset = queryset.order_by('-settlement_period_start', 'designer_id')
+    
+    # Pagination
+    total_count = queryset.count()
+    start = (page - 1) * page_size
+    end = start + page_size
+    settlements_page = queryset[start:end]
+    
+    # Serialize settlements
+    settlements_data = []
+    for settlement in settlements_page:
+        settlements_data.append({
+            'id': settlement.id,
+            'designer_id': settlement.designer_id,
+            'settlement_period_start': settlement.settlement_period_start.isoformat(),
+            'settlement_period_end': settlement.settlement_period_end.isoformat(),
+            'wallet_balance_at_period_end': float(settlement.wallet_balance_at_period_end),
+            'settlement_amount': float(settlement.settlement_amount),
+            'status': settlement.status,
+            'opted_in': settlement.opted_in,
+            'opted_in_at': settlement.opted_in_at.isoformat() if settlement.opted_in_at else None,
+            'settlement_date': settlement.settlement_date.isoformat() if settlement.settlement_date else None,
+            'manual_reference_id': settlement.razorpay_transfer_id,
+            'failure_reason': settlement.failure_reason,
+            'created_at': settlement.created_at.isoformat(),
+            'updated_at': settlement.updated_at.isoformat()
+        })
+    
+    return Response({
+        'settlements': settlements_data,
+        'pagination': {
+            'page': page,
+            'page_size': page_size,
+            'total_count': total_count,
+            'total_pages': (total_count + page_size - 1) // page_size
+        }
+    })
     
     except ImportError:
         # Fallback to CSV if openpyxl is not available
