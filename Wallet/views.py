@@ -859,14 +859,14 @@ def settlement_status(request):
         settlement_period_start=period_start
     ).first()
     
-    # Check Razorpay account verification
-    onboarding_statuses = get_related(request.user, 'User:DesignerOnboardingStatus', DesignerOnboardingStatus)
-    onboarding = onboarding_statuses.first()
-    linked_account_verified = onboarding.razorpay_account_verified if onboarding else False
-    
     # Get current wallet balance
     wallets = get_user_wallets(request.user)
     current_wallet_balance = wallets.first().balance if wallets.exists() else 0
+    
+    # Check if bank details are provided (required for settlement)
+    onboarding_statuses = get_related(request.user, 'User:DesignerOnboardingStatus', DesignerOnboardingStatus)
+    onboarding = onboarding_statuses.first()
+    has_bank_details = onboarding and onboarding.bank_account_number and onboarding.bank_ifsc_code and onboarding.bank_account_holder_name if onboarding else False
     
     settlement_data = {
         'settlement_window_active': settlement_window_active,
@@ -874,7 +874,7 @@ def settlement_status(request):
         'settlement_window_days': [1, 2, 3, 4, 5],
         'settlement_request': None,
         'can_accept_settlement': False,
-        'linked_account_verified': linked_account_verified,
+        'has_bank_details': has_bank_details,
         'current_wallet_balance': float(current_wallet_balance)
     }
     
@@ -892,7 +892,7 @@ def settlement_status(request):
         }
         
         if settlement_window_active and settlement_request.status == 'pending':
-            settlement_data['can_accept_settlement'] = linked_account_verified
+            settlement_data['can_accept_settlement'] = has_bank_details
     
     return Response(settlement_data)
 
@@ -967,13 +967,13 @@ def accept_settlement(request):
             'error': 'No pending settlement request found for this period'
         }, status=status.HTTP_404_NOT_FOUND)
     
-    # Check if linked account is verified
+    # Check if bank details are provided
     onboarding_statuses = get_related(request.user, 'User:DesignerOnboardingStatus', DesignerOnboardingStatus)
     onboarding = onboarding_statuses.first()
     
-    if not onboarding or not onboarding.razorpay_account_verified:
+    if not onboarding or not onboarding.bank_account_number or not onboarding.bank_ifsc_code or not onboarding.bank_account_holder_name:
         return Response({
-            'error': 'Razorpay account is not verified. Please complete verification first.'
+            'error': 'Bank account details are incomplete. Please provide bank account number, IFSC code, and account holder name.'
         }, status=status.HTTP_400_BAD_REQUEST)
     
     try:

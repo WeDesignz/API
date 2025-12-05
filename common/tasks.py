@@ -596,27 +596,16 @@ def process_monthly_settlements(self):
 def process_settlement_payouts(self):
     """
     Process all opted-in settlements on day 6 of each month.
-    Uses Razorpay Payouts API to transfer funds from your account to designer bank accounts.
-    
-    Why Payouts API (not Route API):
-    - Route API splits payments immediately when customer pays (real-time)
-    - Our flow: Hold funds → Designer opts in (Days 1-5) → Transfer on Day 6
-    - Payouts API supports scheduled/on-demand transfers from account balance
-    - Perfect for opt-in logic and bulk payouts
+    Deducts from wallet and marks settlements as 'processing' for manual payout.
+    Admin will download settlement sheet and process payouts manually.
     """
     try:
         from datetime import datetime, date
         import pytz
         from decimal import Decimal
         from django.contrib.auth.models import User
-        from django.conf import settings
         from Wallet.models import Wallet, SettlementRequest, WalletTransaction
-        from CoreAdmin.models import DesignerOnboardingStatus
-        from common.relations import get_related, get_user_wallets
-        import razorpay
-        
-        # Initialize Razorpay client
-        razorpay_client = razorpay.Client(auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET))
+        from common.relations import get_user_wallets
         
         # Get current date in Asia/Kolkata timezone
         kolkata_tz = pytz.timezone('Asia/Kolkata')
@@ -640,22 +629,21 @@ def process_settlement_payouts(self):
             try:
                 designer_id = settlement_request.designer_id
                 
-                # Get designer and onboarding
+                # Get designer
                 designer = User.objects.get(id=designer_id)
-                onboarding_statuses = get_related(designer, 'User:DesignerOnboardingStatus', DesignerOnboardingStatus)
-                onboarding = onboarding_statuses.first()
-                
-                if not onboarding or not onboarding.razorpay_linked_account_id:
-                    logger.error(f"No Razorpay account for designer {designer_id}")
-                    settlement_request.status = 'failed'
-                    settlement_request.failure_reason = 'Razorpay linked account not found'
-                    settlement_request.save()
-                    failed_count += 1
-                    continue
                 
                 # Get current wallet balance
                 wallets = get_user_wallets(designer)
                 wallet = wallets.first()
+                
+                if not wallet:
+                    logger.error(f"No wallet found for designer {designer_id}")
+                    settlement_request.status = 'failed'
+                    settlement_request.failure_reason = 'Wallet not found'
+                    settlement_request.save()
+                    failed_count += 1
+                    continue
+                
                 current_balance = Decimal(str(wallet.balance))
                 settlement_amount = Decimal(str(settlement_request.settlement_amount))
                 
@@ -672,74 +660,27 @@ def process_settlement_payouts(self):
                     failed_count += 1
                     continue
                 
-                # Create payout using Razorpay Payouts API
-                # Note: Fund accounts are created via Route API during onboarding for verification,
-                # but actual payouts use Payouts API for scheduled transfers
-                try:
-                    # Get the contact ID (stored when creating linked account)
-                    contact_id = onboarding.razorpay_linked_account_id
-                    
-                    # Fetch fund accounts for this contact (created via Route API)
-                    fund_accounts = razorpay_client.fund_account.fetch_all({'contact_id': contact_id})
-                    
-                    if not fund_accounts.get('items'):
-                        raise Exception("No fund account found for linked account")
-                    
-                    fund_account_id = fund_accounts['items'][0]['id']
-                    
-                    # Create payout using Payouts API
-                    # This transfers from your Razorpay account balance to designer's bank account
-                    payout_data = {
-                        'account_number': getattr(settings, 'RAZORPAY_ACCOUNT_NUMBER', None),  # Optional: Your Razorpay account number
-                        'fund_account': {
-                            'id': fund_account_id
-                        },
-                        'amount': int(float(settlement_amount) * 100),  # Convert to paise
-                        'currency': 'INR',
-                        'mode': 'IMPS',  # or 'NEFT', 'RTGS'
-                        'purpose': 'payout',
-                        'queue_if_low_balance': True,
-                        'reference_id': f'SETTLE_{settlement_request.id}_{designer_id}',
-                        'narration': f'Settlement {settlement_request.settlement_period_start.strftime("%b %Y")}'
-                    }
-                    
-                    # Create payout using Payouts API
-                    payout = razorpay_client.payout.create(payout_data)
-                    
-                    payout_id = payout.get('id', '')
-                    transfer_id = payout_id  # Store payout ID
-                    
-                    # Update settlement request
-                    settlement_request.status = 'processing'
-                    settlement_request.settlement_date = current_date
-                    settlement_request.razorpay_transfer_id = transfer_id
-                    settlement_request.razorpay_payout_id = payout_id  # Store payout ID separately
-                    settlement_request.save()
-                    
-                    # Deduct from wallet
-                    wallet.balance = current_balance - settlement_amount
-                    wallet.save()
-                    
-                    # Create debit transaction
-                    transaction = WalletTransaction.objects.create(
-                        wallet_transaction_type='debit',
-                        amount=settlement_amount,
-                        description=f"Settlement payout for period {settlement_request.settlement_period_start} to {settlement_request.settlement_period_end}",
-                        reference_id=f"settlement_{settlement_request.id}",
-                        created_by=designer
-                    )
-                    wallet.attach_wallet_transaction(transaction)
-                    
-                    # Mark as processing (will be updated to completed via webhook)
-                    processed_count += 1
-                    logger.info(f"Processed settlement for designer {designer_id}: ₹{settlement_amount}, Payout ID: {payout_id}")
-                    
-                except Exception as e:
-                    logger.error(f"Razorpay payout failed for designer {designer_id}: {str(e)}", exc_info=True)
-                    settlement_request.status = 'failed'
-                    settlement_request.failure_reason = str(e)
-                    settlement_request.save()
-                    failed_count += 1
+                # Update settlement request to processing
+                settlement_request.status = 'processing'
+                settlement_request.settlement_date = current_date
+                settlement_request.save()
+                
+                # Deduct from wallet
+                wallet.balance = current_balance - settlement_amount
+                wallet.save()
+                
+                # Create debit transaction
+                transaction = WalletTransaction.objects.create(
+                    wallet_transaction_type='debit',
+                    amount=settlement_amount,
+                    description=f"Settlement for period {settlement_request.settlement_period_start} to {settlement_request.settlement_period_end} (Manual payout required)",
+                    reference_id=f"settlement_{settlement_request.id}",
+                    created_by=designer
+                )
+                wallet.attach_wallet_transaction(transaction)
+                
+                processed_count += 1
+                logger.info(f"Processed settlement for designer {designer_id}: ₹{settlement_amount} (marked for manual payout)")
                     
             except User.DoesNotExist:
                 logger.error(f"Designer {settlement_request.designer_id} not found")
@@ -751,7 +692,7 @@ def process_settlement_payouts(self):
                 logger.error(f"Failed to process settlement {settlement_request.id}: {str(e)}", exc_info=True)
                 failed_count += 1
         
-        logger.info(f"Processed {processed_count} settlements, {failed_count} failed")
+        logger.info(f"Processed {processed_count} settlements, {failed_count} failed. Admin can download settlement sheet for manual payout.")
         return f"Processed {processed_count} settlements, {failed_count} failed"
         
     except Exception as e:
