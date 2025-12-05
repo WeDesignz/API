@@ -1477,6 +1477,10 @@ def _generate_excel_response(settlement_data, filename, total_amount):
         response['Content-Disposition'] = f'attachment; filename="{filename}"'
         wb.save(response)
         return response
+    
+    except ImportError:
+        # Fallback to CSV if openpyxl is not available
+        return _generate_csv_response(settlement_data, filename.replace('.xlsx', '.csv'), total_amount)
 
 
 # ==================== ADMIN - SETTLEMENT STATUS UPDATE ====================
@@ -1883,7 +1887,3 @@ def list_settlements(request):
             'total_pages': (total_count + page_size - 1) // page_size
         }
     })
-    
-    except ImportError:
-        # Fallback to CSV if openpyxl is not available
-        return _generate_csv_response(settlement_data, filename.replace('.xlsx', '.csv'), total_amount)
