@@ -270,24 +270,177 @@ app.conf.beat_schedule = {
 
 ## Monitoring
 
-### Flower
+### Celery Flower (Best + Real-Time GUI Monitoring)
 
-Flower is a web-based tool for monitoring Celery clusters.
+Flower is a web-based tool for real-time monitoring of Celery clusters. It provides a comprehensive GUI to monitor all three task states: **scheduled**, **reserved**, and **active** tasks.
 
 **Access**: http://localhost:5555
 
-**Features**:
-- Real-time task monitoring
-- Worker status
-- Task history
-- Task details and results
-- Worker statistics
+#### Features
 
-**Start Flower**:
+Flower provides real-time monitoring of:
+
+1. **Scheduled Tasks** - Tasks waiting in the queue to be executed
+2. **Reserved Tasks** - Tasks that have been picked up by workers but haven't started executing yet
+3. **Active Tasks** - Tasks currently being executed by workers
+4. **Task History** - Complete history of all executed tasks with results
+5. **Worker Status** - Real-time status of all workers (online/offline, active tasks, processed tasks)
+6. **Performance Metrics** - Task execution times, success/failure rates, throughput
+7. **Task Details** - Full task information including arguments, results, tracebacks, and retries
+8. **Worker Management** - Shutdown, restart, and rate limit workers
+9. **Task Management** - Revoke tasks, retry failed tasks, view task results
+
+#### Starting Flower
+
+**Using Management Command (Recommended)**:
 ```bash
+# Start Flower only
 python manage.py start_celery --flower
-# or
+
+# Start Flower on custom port
+python manage.py start_celery --flower --flower-port=5556
+
+# Start Flower with authentication (recommended for production)
+python manage.py start_celery --flower --flower-auth=admin:securepassword
+
+# Start all services (worker, beat, flower)
+python manage.py start_celery --all
+```
+
+**Manual Command**:
+```bash
+# Basic
 celery -A API flower --port=5555
+
+# With authentication
+celery -A API flower --port=5555 --basic_auth=admin:securepassword
+
+# With broker URL
+celery -A API flower --port=5555 --broker=redis://localhost:6379/0
+```
+
+**For Production (Recommended)**:
+```bash
+# Use separate terminal/process for each service
+# Terminal 1: Worker
+python manage.py start_celery --worker
+
+# Terminal 2: Beat
+python manage.py start_celery --beat
+
+# Terminal 3: Flower
+python manage.py start_celery --flower --flower-auth=admin:securepassword
+```
+
+#### Using Flower Web Interface
+
+1. **Dashboard** (`/`)
+   - Overview of all workers
+   - Total tasks processed
+   - Active, scheduled, and reserved tasks count
+   - System resources (CPU, memory)
+
+2. **Tasks** (`/tasks`)
+   - View all tasks (scheduled, reserved, active, completed, failed)
+   - Filter by task name, state, worker
+   - View task details: arguments, results, tracebacks, retries
+   - Revoke or retry tasks
+
+3. **Workers** (`/workers`)
+   - List all workers with status
+   - View worker details: active tasks, processed tasks, stats
+   - Shutdown or restart workers
+   - View worker logs
+
+4. **Monitor** (`/monitor`)
+   - Real-time task rate graphs
+   - Task execution time graphs
+   - Success/failure rate graphs
+
+5. **Broker** (`/broker`)
+   - View broker connection status
+   - Queue information
+   - Exchange and routing information
+
+#### Monitoring Task States in Real-Time
+
+**Scheduled Tasks**:
+- Tasks waiting in the queue
+- View in Flower: Dashboard → "Scheduled" count, or Tasks page → Filter by "Scheduled"
+- These are tasks that have been sent to the broker but not yet picked up by workers
+
+**Reserved Tasks**:
+- Tasks assigned to workers but not yet started
+- View in Flower: Dashboard → "Reserved" count, or Tasks page → Filter by "Reserved"
+- These tasks are in the worker's prefetch queue
+
+**Active Tasks**:
+- Tasks currently being executed
+- View in Flower: Dashboard → "Active" count, or Tasks page → Filter by "Active"
+- Click on a task to see detailed execution information
+
+#### Flower API
+
+Flower also provides a REST API for programmatic access:
+
+```bash
+# Get worker list
+curl http://localhost:5555/api/workers
+
+# Get active tasks
+curl http://localhost:5555/api/tasks?state=ACTIVE
+
+# Get scheduled tasks
+curl http://localhost:5555/api/tasks?state=PENDING
+
+# Get reserved tasks
+curl http://localhost:5555/api/tasks?state=RESERVED
+
+# Get task details
+curl http://localhost:5555/api/task/<task-id>
+
+# Revoke a task
+curl -X POST http://localhost:5555/api/task/revoke/<task-id>
+```
+
+#### Security Considerations
+
+For production environments, always enable authentication:
+
+```bash
+celery -A API flower --basic_auth=username:password
+```
+
+Or use environment variables:
+```bash
+export FLOWER_BASIC_AUTH=username:password
+celery -A API flower
+```
+
+For additional security, consider:
+- Running Flower behind a reverse proxy (nginx) with SSL
+- Restricting access by IP address
+- Using OAuth or other authentication methods
+
+### Celery Inspect Commands
+
+Use `celery inspect` to check the status of workers and tasks:
+
+```bash
+# Check active tasks (currently executing)
+celery -A API inspect active
+
+# Check reserved tasks (picked up but not executing yet)
+celery -A API inspect reserved
+
+# Check scheduled tasks (waiting to be executed)
+celery -A API inspect scheduled
+
+# Check which queues workers are listening to
+celery -A API inspect active_queues
+
+# Check registered tasks and their routing
+celery -A API inspect registered
 ```
 
 ### Django Admin
