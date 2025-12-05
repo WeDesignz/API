@@ -2,7 +2,7 @@
 .env
 .env.local
 .env.production
-
+logs/
 # Python
 __pycache__/
 *.py[cod]
