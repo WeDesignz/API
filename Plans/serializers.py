@@ -14,11 +14,12 @@ class PlanSerializer(serializers.ModelSerializer):
     created_by_id = serializers.IntegerField(write_only=True, required=False)
     updated_by_id = serializers.IntegerField(write_only=True, required=False)
     subscriptions_count = serializers.SerializerMethodField()
+    plan_name_display = serializers.CharField(source='get_plan_name_display', read_only=True)
     
     class Meta:
         model = Plan
         fields = [
-            'id', 'plan_name', 'description', 'price', 'plan_duration', 'status',
+            'id', 'plan_name', 'plan_name_display', 'description', 'price', 'plan_duration', 'status',
             'discount', 'custom_design_hour', 'mock_pdf_count', 'no_of_free_downloads',
             'is_most_popular',
             'created_by', 'created_at', 'updated_by', 'updated_at',
@@ -94,11 +95,12 @@ class PlanListSerializer(serializers.ModelSerializer):
     Simplified serializer for Plan model used in list views.
     """
     subscriptions_count = serializers.SerializerMethodField()
+    plan_name_display = serializers.CharField(source='get_plan_name_display', read_only=True)
     
     class Meta:
         model = Plan
         fields = [
-            'id', 'plan_name', 'description', 'price', 'plan_duration', 
+            'id', 'plan_name', 'plan_name_display', 'description', 'price', 'plan_duration', 
             'status', 'discount', 'custom_design_hour', 'mock_pdf_count', 'no_of_free_downloads',
             'created_at', 'subscriptions_count'
         ]

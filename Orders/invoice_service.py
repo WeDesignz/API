@@ -264,12 +264,13 @@ def _draw_invoice_meta(c: canvas.Canvas, data: Dict[str, Any], page_width: float
     c.setFont("Helvetica-Bold", 9)
     c.drawRightString(value_x, meta_y, f"{inv.get('invoice_number', '')}")
     
-    # Order Number: label on left, value on right
-    meta_y -= 6 * mm
-    c.setFont("Helvetica", 9)
-    c.drawString(label_start_x, meta_y, "Order Number:")
-    c.setFont("Helvetica-Bold", 9)
-    c.drawRightString(value_x, meta_y, f"{inv.get('order_number', '')}")
+    # Order Number: label on left, value on right (only for customer invoices)
+    if invoice_type != "designer":  # Hide Order Number for designer bills
+        meta_y -= 6 * mm
+        c.setFont("Helvetica", 9)
+        c.drawString(label_start_x, meta_y, "Order Number:")
+        c.setFont("Helvetica-Bold", 9)
+        c.drawRightString(value_x, meta_y, f"{inv.get('order_number', '')}")
     
     # Invoice Date: label on left, value on right
     meta_y -= 6 * mm
@@ -281,26 +282,59 @@ def _draw_invoice_meta(c: canvas.Canvas, data: Dict[str, Any], page_width: float
     return top_y - 30 * mm  # Adjusted for 3 rows
 
 
-def _draw_company_contact(c: canvas.Canvas, data: Dict[str, Any], left_x: float, y: float) -> float:
-    """Draw company contact info near the bottom."""
+def _draw_company_contact(c: canvas.Canvas, data: Dict[str, Any], page_width: float, y: float) -> float:
+    """Draw company contact info in an attractive footer."""
     company = data["company_details"]
+    
+    # Draw a subtle line separator
+    left_margin = 25 * mm
+    right_margin = 25 * mm
+    line_y = y + 8 * mm
+    
+    c.setStrokeColorRGB(0.85, 0.85, 0.85)
+    c.setLineWidth(0.5)
+    c.line(left_margin, line_y, page_width - right_margin, line_y)
+    
+    # Footer content with better styling
+    footer_y = y
+    
+    # Left side: Contact Email ID
+    c.setFont("Helvetica-Bold", 8)
+    c.setFillColorRGB(0.22, 0.55, 0.80)
+    c.drawString(left_margin, footer_y, "Contact Email ID:")
+    
     c.setFont("Helvetica", 8)
     c.setFillColor(colors.black)
-    text = f"Bank Transfer: {company.get('company_bank_details', '')}"
-    c.drawString(left_x, y, text)
-    c.drawRightString(190 * mm, y, f"Contact: {company.get('company_email', '')}")
-    return y - 6 * mm
+    email = company.get('company_email', 'info@wedesignz.com')
+    c.drawString(left_margin, footer_y - 4 * mm, email)
+    
+    # Right side: Support Link
+    support_link = company.get('company_support_link', 'https://support.wedesignz.com')
+    c.setFont("Helvetica-Bold", 8)
+    c.setFillColorRGB(0.22, 0.55, 0.80)
+    c.drawRightString(page_width - right_margin, footer_y, "Support Link:")
+    
+    c.setFont("Helvetica", 8)
+    c.setFillColor(colors.black)
+    c.drawRightString(page_width - right_margin, footer_y - 4 * mm, support_link)
+    
+    return footer_y - 8 * mm
 
 
 def _draw_billed_and_from_blocks(c: canvas.Canvas, data: Dict[str, Any], page_width: float, start_y: float) -> float:
-    """Draw billed to and from blocks."""
+    """Draw billed to and from blocks with proper text wrapping."""
     billed = data["billed_to"]
     sender = data["from_details"]
+    company = data.get("company_details", {})
 
     left_margin = 25 * mm
     right_margin = 25 * mm
     mid_x = page_width / 2
+    
+    # Column width for each section (to prevent overlap)
+    col_width = (mid_x - left_margin - 5 * mm)  # Leave 5mm gap between columns
 
+    # BILLED TO section
     c.setFont("Helvetica-Bold", 9)
     c.setFillColorRGB(0.22, 0.55, 0.80)
     c.drawString(left_margin, start_y, "BILLED TO")
@@ -308,23 +342,103 @@ def _draw_billed_and_from_blocks(c: canvas.Canvas, data: Dict[str, Any], page_wi
     c.setFont("Helvetica", 9)
     c.setFillColor(colors.black)
     text_y = start_y - 5 * mm
-    c.drawString(left_margin, text_y, billed.get("client_company", ""))
-    c.drawString(left_margin, text_y - 4 * mm, billed.get("client_address_line1", ""))
-    c.drawString(left_margin, text_y - 8 * mm, billed.get("client_address_line2", ""))
+    
+    # Company/Individual Name (with wrapping)
+    company_name = billed.get("client_company", "")
+    wrapped_lines = _wrap_text(company_name, col_width, c, "Helvetica", 9)
+    for line in wrapped_lines:
+        c.drawString(left_margin, text_y, line)
+        text_y -= 4 * mm
+    
+    # Address Line 1 (with wrapping)
+    if billed.get("client_address_line1"):
+        addr1 = billed.get("client_address_line1", "")
+        wrapped_lines = _wrap_text(addr1, col_width, c, "Helvetica", 9)
+        for line in wrapped_lines:
+            c.drawString(left_margin, text_y, line)
+            text_y -= 4 * mm
+    
+    # Address Line 2 (with wrapping)
+    if billed.get("client_address_line2"):
+        addr2 = billed.get("client_address_line2", "")
+        wrapped_lines = _wrap_text(addr2, col_width, c, "Helvetica", 9)
+        for line in wrapped_lines:
+            c.drawString(left_margin, text_y, line)
+            text_y -= 4 * mm
+    
+    # GST Number (if available)
+    if billed.get("client_gst_number"):
+        c.setFont("Helvetica", 8)
+        c.drawString(left_margin, text_y, f"GSTIN: {billed.get('client_gst_number')}")
+        text_y -= 4 * mm
 
+    # FROM section (WeDesignz fixed address)
     c.setFont("Helvetica-Bold", 9)
     c.setFillColorRGB(0.22, 0.55, 0.80)
     c.drawString(mid_x + 5 * mm, start_y, "FROM")
 
-    c.setFont("Helvetica-Bold", 9)
+    c.setFont("Helvetica", 9)
     c.setFillColor(colors.black)
     from_y = start_y - 5 * mm
-    c.drawString(mid_x + 5 * mm, from_y, sender.get("sender_name", ""))
+    
+    # WeDesignz Company Name
+    sender_name = sender.get("sender_name", "WeDesignz")
+    wrapped_lines = _wrap_text(sender_name, col_width, c, "Helvetica", 9)
+    for line in wrapped_lines:
+        c.drawString(mid_x + 5 * mm, from_y, line)
+        from_y -= 4 * mm
+    
+    # WeDesignz Address Line 1 (with wrapping)
+    if sender.get("sender_address_line1"):
+        addr1 = sender.get("sender_address_line1", "")
+        wrapped_lines = _wrap_text(addr1, col_width, c, "Helvetica", 9)
+        for line in wrapped_lines:
+            c.drawString(mid_x + 5 * mm, from_y, line)
+            from_y -= 4 * mm
+    
+    # WeDesignz Address Line 2 (with wrapping)
+    if sender.get("sender_address_line2"):
+        addr2 = sender.get("sender_address_line2", "")
+        wrapped_lines = _wrap_text(addr2, col_width, c, "Helvetica", 9)
+        for line in wrapped_lines:
+            c.drawString(mid_x + 5 * mm, from_y, line)
+            from_y -= 4 * mm
+    
+    # WeDesignz GST Number
+    sender_gst = sender.get("sender_gst_number", "")
+    if sender_gst:
+        c.setFont("Helvetica", 8)
+        c.drawString(mid_x + 5 * mm, from_y, f"GSTIN: {sender_gst}")
 
-    c.setFont("Helvetica", 9)
-    c.drawString(mid_x + 5 * mm, from_y - 4 * mm, sender.get("sender_location", ""))
+    # Calculate the lowest point used
+    lowest_y = min(text_y, from_y - 4 * mm)
+    return lowest_y - 4 * mm
 
-    return start_y - 20 * mm
+
+def _wrap_text(text: str, max_width: float, c: canvas.Canvas, font_name: str, font_size: int) -> List[str]:
+    """Wrap text to fit within max_width using canvas stringWidth."""
+    if not text:
+        return [""]
+    
+    words = text.split()
+    lines = []
+    current_line = []
+    
+    for word in words:
+        test_line = " ".join(current_line + [word])
+        width = c.stringWidth(test_line, font_name, font_size)
+        
+        if width <= max_width:
+            current_line.append(word)
+        else:
+            if current_line:
+                lines.append(" ".join(current_line))
+            current_line = [word]
+    
+    if current_line:
+        lines.append(" ".join(current_line))
+    
+    return lines if lines else [text]
 
 
 def _draw_items_table(c: canvas.Canvas, data: Dict[str, Any], page_width: float, start_y: float) -> float:
@@ -356,44 +470,69 @@ def _draw_items_table(c: canvas.Canvas, data: Dict[str, Any], page_width: float,
     x = left_margin + 2 * mm
     y_text = start_y - header_height + 3 * mm
 
+    # Draw headers with proper alignment
     for i, title in enumerate(headers):
-        c.drawString(x, y_text, title)
+        if i in [2, 3, 4]:  # QTY, RATE, AMOUNT - center or right align
+            # Center align headers for QTY, RATE, AMOUNT
+            col_center_x = x + col_widths[i] / 2
+            c.drawCentredString(col_center_x, y_text, title)
+        else:  # ITEM, DESCRIPTION - left align
+            c.drawString(x, y_text, title)
         x += col_widths[i]
 
     c.setFont("Helvetica", 8)
     current_y = start_y - header_height
 
-    max_rows = max(4, len(items))  # Show at least 4 rows, or more if needed
-    for row_index in range(max_rows):
+    # Draw all items (should be 2: Individual Design + GST)
+    for row_index, item in enumerate(items):
         current_y -= row_height
 
-        item = items[row_index] if row_index < len(items) else None
-
+        # Alternate row colors
         if row_index % 2 == 0:
             c.setFillColorRGB(0.96, 0.96, 0.96)
             c.rect(left_margin, current_y, table_width, row_height, stroke=0, fill=1)
 
-        if item is not None:
-            c.setFillColor(colors.black)
-            x = left_margin + 2 * mm
-            c.drawString(x, current_y + 4 * mm, str(item.get("item_no", "")))
-            x += col_widths[0]
+        c.setFillColor(colors.black)
+        x = left_margin + 2 * mm
+        
+        # Item number
+        c.drawString(x, current_y + 4 * mm, str(item.get("item_no", "")))
+        x += col_widths[0]
 
-            c.drawString(x, current_y + 4 * mm, str(item.get("description", "")))
-            x += col_widths[1]
+        # Description
+        c.drawString(x, current_y + 4 * mm, str(item.get("description", "")))
+        x += col_widths[1]
 
-            qty = item.get("quantity", "")
-            c.drawString(x, current_y + 4 * mm, str(qty))
-            x += col_widths[2]
+        # Quantity (center aligned, show actual count for GST and Commission rows)
+        qty = item.get("quantity", "")
+        description = item.get("description", "")
+        if qty == "-":
+            qty_display = "-"
+        else:
+            # Show actual quantity (number of designs)
+            qty_display = str(qty) if qty else "-"
+        col_center_x = x + col_widths[2] / 2
+        c.drawCentredString(col_center_x, current_y + 4 * mm, qty_display)
+        x += col_widths[2]
 
-            currency = data.get("currency", "")
-            rate = item.get("rate", 0)
-            amount = item.get("amount", 0)
+        # Rate (center aligned, show "-" for GST and Commission rows)
+        currency = data.get("currency", "")
+        rate = item.get("rate", 0)
+        amount = item.get("amount", 0)
 
-            c.drawRightString(x + col_widths[3] - 2 * mm, current_y + 4 * mm, f"{currency}{rate:,.2f}")
-            x += col_widths[3]
+        # For GST and Commission rows, rate column shows "-"
+        if description.startswith("GST") or description.startswith("Platform Commission") or rate == "-":
+            rate_display = "-"
+        else:
+            rate_display = f"{currency}{rate:,.2f}"
+        col_center_x = x + col_widths[3] / 2
+        c.drawCentredString(col_center_x, current_y + 4 * mm, rate_display)
+        x += col_widths[3]
 
-            c.drawRightString(x + col_widths[4] - 2 * mm, current_y + 4 * mm, f"{currency}{amount:,.2f}")
+        # Amount (center aligned)
+        amount_display = f"{currency}{amount:,.2f}"
+        col_center_x = x + col_widths[4] / 2
+        c.drawCentredString(col_center_x, current_y + 4 * mm, amount_display)
 
     c.setStrokeColorRGB(0.80, 0.80, 0.80)
     c.line(left_margin, current_y, left_margin + table_width, current_y)
@@ -405,38 +544,78 @@ def _draw_totals_section(c: canvas.Canvas, data: Dict[str, Any], page_width: flo
     """Draw totals section on the lower-right side."""
     inv = data["invoice"]
     currency = data.get("currency", "")
+    invoice_type = data.get("invoice_type", "customer")
 
-    items: List[Dict[str, Any]] = data.get("items", [])
-    calculated_total = sum(float(i.get("amount", 0)) for i in items)
-    total_due = calculated_total
+    # Use total_due from data if available, otherwise calculate from items
+    total_due = data.get("total_due", 0)
+    if total_due == 0:
+        items: List[Dict[str, Any]] = data.get("items", [])
+        total_due = sum(float(i.get("amount", 0)) for i in items)
 
     box_width = 70 * mm
-    box_height = 25 * mm
     right_margin = 25 * mm
     box_x = page_width - right_margin - box_width
-    box_y = start_y - box_height
+    
+    # For customer invoices, show subtotal, GST, and total
+    if invoice_type == "customer":
+        gst_amount = data.get("gst_amount", 0)
+        gst_percentage = data.get("gst_percentage", 18)
+        subtotal = data.get("subtotal", total_due - gst_amount)
+        
+        # Calculate box height based on number of lines
+        box_height = 40 * mm  # Increased height for GST line
+        box_y = start_y - box_height
+        
+        # Draw background box
+        c.setFillColorRGB(0.22, 0.55, 0.80)
+        c.rect(box_x, box_y + box_height - 9 * mm, box_width, 9 * mm, stroke=0, fill=1)
+        c.setFillColor(colors.white)
+        c.setFont("Helvetica-Bold", 9)
+        c.drawCentredString(box_x + box_width / 2, box_y + box_height - 6 * mm, "TOTAL AMOUNT")
+        
+        # Draw subtotal, GST, and total
+        c.setFillColor(colors.black)
+        y_pos = box_y + box_height - 15 * mm
+        
+        # Subtotal
+        c.setFont("Helvetica", 9)
+        c.drawString(box_x + 2 * mm, y_pos, "Subtotal:")
+        c.drawRightString(box_x + box_width - 2 * mm, y_pos, f"{currency}{subtotal:,.2f}")
+        y_pos -= 6 * mm
+        
+        # GST
+        c.drawString(box_x + 2 * mm, y_pos, f"GST ({gst_percentage}%):")
+        c.drawRightString(box_x + box_width - 2 * mm, y_pos, f"{currency}{gst_amount:,.2f}")
+        y_pos -= 8 * mm
+        
+        # Total Amount (bold and larger)
+        c.setFont("Helvetica-Bold", 16)
+        c.drawRightString(box_x + box_width - 2 * mm, y_pos, f"{currency}{total_due:,.2f}")
+        
+        return box_y - 6 * mm
+    else:
+        # For designer invoices, keep the original simple layout
+        box_height = 25 * mm
+        box_y = start_y - box_height
 
-    c.setFillColorRGB(0.22, 0.55, 0.80)
-    c.rect(box_x, box_y + box_height - 9 * mm, box_width, 9 * mm, stroke=0, fill=1)
-    c.setFillColor(colors.white)
-    c.setFont("Helvetica-Bold", 9)
-    c.drawCentredString(box_x + box_width / 2, box_y + box_height - 6 * mm, "TOTAL DUE")
+        c.setFillColorRGB(0.22, 0.55, 0.80)
+        c.rect(box_x, box_y + box_height - 9 * mm, box_width, 9 * mm, stroke=0, fill=1)
+        c.setFillColor(colors.white)
+        c.setFont("Helvetica-Bold", 9)
+        c.drawCentredString(box_x + box_width / 2, box_y + box_height - 6 * mm, "TOTAL AMOUNT")
 
-    c.setFillColor(colors.black)
-    c.setFont("Helvetica-Bold", 16)
-    c.drawCentredString(box_x + box_width / 2, box_y + 9 * mm, f"{currency}{total_due:,.2f}")
+        c.setFillColor(colors.black)
+        c.setFont("Helvetica-Bold", 16)
+        c.drawCentredString(box_x + box_width / 2, box_y + 9 * mm, f"{currency}{total_due:,.2f}")
 
-    c.setFont("Helvetica", 8)
-    c.drawString(box_x, box_y - 6 * mm, f"PAYMENT DUE: {inv.get('payment_due_date', '')}")
-
-    return box_y - 12 * mm
+        return box_y - 6 * mm
 
 
 def _draw_thank_you(c: canvas.Canvas, data: Dict[str, Any], page_width: float, y: float) -> float:
-    """Draw thank you note centered near the bottom."""
-    c.setFont("Helvetica", 8)
-    c.setFillColor(colors.black)
-    c.drawCentredString(page_width / 2, y, "Thank you for your business!")
+    """Draw thank you note centered near the bottom with attractive styling."""
+    c.setFont("Helvetica-Bold", 10)
+    c.setFillColorRGB(0.22, 0.55, 0.80)
+    c.drawCentredString(page_width / 2, y, "Thank you for doing business with us")
     return y - 6 * mm
 
 
@@ -471,9 +650,8 @@ def generate_invoice_pdf(invoice_data: Dict[str, Any], output_path: str) -> None
     y_totals_bottom = _draw_totals_section(c, invoice_data, page_width, y - 4 * mm)
 
     footer_y = 32 * mm
-    _draw_company_contact(c, invoice_data, left_margin, footer_y)
-
-    _draw_thank_you(c, invoice_data, page_width, 18 * mm)
+    footer_bottom = _draw_company_contact(c, invoice_data, page_width, footer_y)
+    _draw_thank_you(c, invoice_data, page_width, footer_bottom - 4 * mm)
 
     c.showPage()
     c.save()
@@ -512,30 +690,72 @@ def get_company_details() -> Dict[str, Any]:
         "logo": logo_path,
         "text_logo": text_logo_path,
         "company_name": "WeDesignz",
-        "company_email": "info@wedesignz.com",  # Update with actual email
+        "company_email": "support@wedesignz.com",
         "company_bank_details": "IBAN ESXX XXXX XXXX XXX",  # Update with actual bank details
+        "company_gst_number": "08IXHPS5429F2ZX",
+        "company_address_line1": "B-117, Akar Tower, B-block, Old RTO road, Yogi Tower",
+        "company_address_line2": "Bhilwara - 311001",
+        "company_support_link": "https://support.wedesignz.com",  # Update with actual support link
     }
 
 
 def get_user_address(user: User) -> Dict[str, str]:
-    """Get user address details for invoice."""
-    # Try to get from user profile if available
+    """Get user address details for invoice including GST number."""
+    from Profiles.models import DesignerProfile, Studio, StudioBusinessDetails
+    from Profiles.models import Addresses
+    
+    # Get company/individual name
+    company_name = user.get_full_name() or user.username
+    
+    # Try to get address from Addresses model (for customers)
+    address_line1 = ""
+    address_line2 = ""
+    gst_number = None
+    
+    # Check if user has addresses
+    addresses = Addresses.objects.filter(created_by=user).order_by('-is_permanent', '-created_at')
+    primary_address = addresses.first()
+    
+    if primary_address:
+        address_parts = []
+        if primary_address.address_line_1:
+            address_parts.append(primary_address.address_line_1)
+        if primary_address.address_line_2:
+            address_parts.append(primary_address.address_line_2)
+        if primary_address.landmark:
+            address_parts.append(primary_address.landmark)
+        
+        address_line1 = ", ".join(address_parts) if address_parts else ""
+        
+        city_state_parts = []
+        if primary_address.city:
+            city_state_parts.append(primary_address.city)
+        if primary_address.state:
+            city_state_parts.append(primary_address.state)
+        if primary_address.postal_code:
+            city_state_parts.append(primary_address.postal_code)
+        
+        address_line2 = ", ".join(city_state_parts) if city_state_parts else ""
+    
+    # Try to get GST number from StudioBusinessDetails (if user is a designer)
     try:
-        from Profiles.models import DesignerProfile
-        profile = DesignerProfile.objects.filter(created_by=user).first()
-        if profile:
-            return {
-                "client_company": user.get_full_name() or user.username,
-                "client_address_line1": getattr(profile, 'address', '') or '',
-                "client_address_line2": getattr(profile, 'city', '') or '',
-            }
+        designer_profile = DesignerProfile.objects.filter(created_by=user).first()
+        if designer_profile:
+            studio = Studio.objects.filter(created_by=user).first()
+            if studio:
+                business_details = StudioBusinessDetails.objects.filter(studio=studio).first()
+                if business_details and business_details.gst_number:
+                    gst_number = business_details.gst_number
+                if business_details and business_details.legal_business_name:
+                    company_name = business_details.legal_business_name
     except:
         pass
     
     return {
-        "client_company": user.get_full_name() or user.username,
-        "client_address_line1": "",
-        "client_address_line2": "",
+        "client_company": company_name,
+        "client_address_line1": address_line1,
+        "client_address_line2": address_line2,
+        "client_gst_number": gst_number,
     }
 
 
@@ -548,7 +768,7 @@ def create_customer_invoice(order: Order) -> Invoice:
     invoice.invoice_type = 'customer'
     invoice.order = order
     invoice.user = order.created_by
-    invoice.subtotal = breakdown['base_amount']
+    invoice.subtotal = breakdown['total_amount'] - breakdown['gst_amount']
     invoice.gst_amount = breakdown['gst_amount']
     invoice.commission_amount = Decimal('0')
     invoice.total_amount = breakdown['total_amount']
@@ -565,13 +785,22 @@ def create_customer_invoice(order: Order) -> Invoice:
         product_ids = [int(pid.strip()) for pid in order.product_ids.split(',') if pid.strip()]
         products = Product.objects.filter(id__in=product_ids)
         
-        for idx, product in enumerate(products, 1):
+        # Count total products
+        total_quantity = len(products)
+        
+        if total_quantity > 0:
+            # Calculate rate per item (base_amount + commission, before GST)
+            # amount_after_gst = base_amount + commission = total_amount - gst_amount
+            amount_after_gst_total = float(breakdown['total_amount']) - float(breakdown['gst_amount'])
+            rate_per_item = amount_after_gst_total / total_quantity
+            
+            # Only Individual Design row (GST will be shown in totals section)
             items.append({
-                "item_no": idx,
-                "description": product.title,
-                "quantity": 1,
-                "rate": float(product.price or 0),
-                "amount": float(product.price or 0),
+                "item_no": 1,
+                "description": "Individual Design",
+                "quantity": total_quantity,
+                "rate": rate_per_item,
+                "amount": amount_after_gst_total,  # quantity * rate
             })
     
     invoice_data = {
@@ -585,12 +814,17 @@ def create_customer_invoice(order: Order) -> Invoice:
         "company_details": company_details,
         "billed_to": user_address,
         "from_details": {
-            "sender_name": "WeDesignz",
-            "sender_location": "India",
+            "sender_name": company_details.get("company_name", "WeDesignz"),
+            "sender_address_line1": company_details.get("company_address_line1", ""),
+            "sender_address_line2": company_details.get("company_address_line2", ""),
+            "sender_gst_number": company_details.get("company_gst_number", ""),
         },
         "items": items,
         "currency": "Rs",
         "total_due": float(breakdown['total_amount']),
+        "gst_amount": float(breakdown['gst_amount']),
+        "gst_percentage": BusinessConfig.get_gst_percentage(),
+        "subtotal": float(breakdown['total_amount']) - float(breakdown['gst_amount']),
     }
     
     invoice.invoice_data = invoice_data
@@ -622,7 +856,7 @@ def create_customer_invoice(order: Order) -> Invoice:
 def create_designer_invoice(order: Order, designer: User, breakdown: Dict[str, Any]) -> Invoice:
     """Create and generate designer invoice for GST + Commission."""
     invoice = Invoice()
-    invoice.invoice_number = invoice.generate_invoice_number()
+    invoice.invoice_number = invoice.generate_bill_number()  # Use BILL prefix
     invoice.invoice_type = 'designer'
     invoice.order = order
     invoice.user = designer
@@ -640,28 +874,53 @@ def create_designer_invoice(order: Order, designer: User, breakdown: Dict[str, A
     # Calculate base amount for commission calculation display
     base_for_commission = breakdown['product_total'] - breakdown['gst_amount']
     
-    # Create more descriptive items
-    items = [
-        {
+    # Determine purchase type and plan name
+    plan_name = None
+    if order.subscription and order.subscription.plan:
+        plan_name = order.subscription.plan.plan_name  # 'basic', 'prime', or 'premium'
+    
+    # Create items based on purchase type
+    items = []
+    
+    if plan_name:
+        # Purchase with subscription - capitalize plan name
+        plan_display = plan_name.capitalize()  # 'Basic', 'Prime', or 'Premium'
+        
+        items.append({
             "item_no": 1,
-            "description": f"GST (18% on Design Sales of Rs {breakdown['product_total']:.2f})",
-            "quantity": 1,
-            "rate": float(breakdown['gst_amount']),
+            "description": f"GST on Designs of {plan_display} Plan",
+            "quantity": "-",
+            "rate": "-",
             "amount": float(breakdown['gst_amount']),
-        },
-        {
+        })
+        items.append({
             "item_no": 2,
-            "description": f"Platform Commission on Rs {base_for_commission:.2f} after GST",
-            "quantity": 1,
-            "rate": float(breakdown['commission_amount']),
+            "description": f"Platform Commission on {plan_display} Plan",
+            "quantity": "-",
+            "rate": "-",
             "amount": float(breakdown['commission_amount']),
-        },
-    ]
+        })
+    else:
+        # Purchase without subscription (individual design)
+        items.append({
+            "item_no": 1,
+            "description": "GST on individual design",
+            "quantity": "-",
+            "rate": "-",
+            "amount": float(breakdown['gst_amount']),
+        })
+        items.append({
+            "item_no": 2,
+            "description": "Platform Commission on individual Design after GST",
+            "quantity": "-",
+            "rate": "-",
+            "amount": float(breakdown['commission_amount']),
+        })
     
     invoice_data = {
         "invoice": {
             "invoice_number": invoice.invoice_number,
-            "order_number": order.order_number or f"ORD-{order.id}",
+            # Remove order_number for designer invoices
             "invoice_date": invoice.invoice_date.strftime('%B %d, %Y'),
             "payment_due_date": invoice.payment_due_date.strftime('%b %d, %Y') if invoice.payment_due_date else "",
         },
@@ -669,8 +928,10 @@ def create_designer_invoice(order: Order, designer: User, breakdown: Dict[str, A
         "company_details": company_details,
         "billed_to": user_address,
         "from_details": {
-            "sender_name": "WeDesignz",
-            "sender_location": "India",
+            "sender_name": company_details.get("company_name", "WeDesignz"),
+            "sender_address_line1": company_details.get("company_address_line1", ""),
+            "sender_address_line2": company_details.get("company_address_line2", ""),
+            "sender_gst_number": company_details.get("company_gst_number", ""),
         },
         "items": items,
         "currency": "Rs",
@@ -707,6 +968,132 @@ def create_designer_invoice(order: Order, designer: User, breakdown: Dict[str, A
         import logging
         logger = logging.getLogger(__name__)
         logger.error(f'Failed to queue designer invoice email: {str(e)}', exc_info=True)
+    
+    return invoice
+
+
+def create_monthly_designer_bill(designer: User, purchase_type_breakdowns: Dict[str, Dict[str, Any]], period_start: date, period_end: date) -> Invoice:
+    """
+    Create monthly bill for designer with separate rows for each purchase type.
+    
+    Args:
+        designer: Designer user
+        purchase_type_breakdowns: Dict with keys like 'individual', 'basic', 'prime', 'premium'
+            Each value is a dict with 'gst_amount', 'commission_amount', 'product_total', 'orders'
+        period_start: Start date of billing period
+        period_end: End date of billing period
+    """
+    invoice = Invoice()
+    invoice.invoice_number = invoice.generate_bill_number()
+    invoice.invoice_type = 'designer'
+    invoice.order = None  # No single order for monthly bills
+    invoice.user = designer
+    
+    # Calculate totals
+    total_gst = sum(Decimal(str(breakdown['gst_amount'])) for breakdown in purchase_type_breakdowns.values())
+    total_commission = sum(Decimal(str(breakdown['commission_amount'])) for breakdown in purchase_type_breakdowns.values())
+    total_product_total = sum(Decimal(str(breakdown['product_total'])) for breakdown in purchase_type_breakdowns.values())
+    
+    invoice.subtotal = total_product_total
+    invoice.gst_amount = total_gst
+    invoice.commission_amount = total_commission
+    invoice.total_amount = total_gst + total_commission
+    invoice.payment_due_date = timezone.now().date()
+    invoice.save()
+    
+    # Prepare invoice data
+    company_details = get_company_details()
+    user_address = get_user_address(designer)
+    
+    # Create items for each purchase type
+    items = []
+    item_no = 1
+    
+    # Order: individual, basic, prime, premium
+    purchase_type_order = ['individual', 'basic', 'prime', 'premium']
+    
+    for purchase_type in purchase_type_order:
+        if purchase_type not in purchase_type_breakdowns:
+            continue
+            
+        breakdown = purchase_type_breakdowns[purchase_type]
+        gst_amount = float(breakdown['gst_amount'])
+        commission_amount = float(breakdown['commission_amount'])
+        design_count = breakdown.get('design_count', 0)
+        
+        if gst_amount > 0:
+            if purchase_type == 'individual':
+                items.append({
+                    "item_no": item_no,
+                    "description": "GST on individual design",
+                    "quantity": design_count,  # Show actual count of designs
+                    "rate": "-",
+                    "amount": gst_amount,
+                })
+            else:
+                plan_display = purchase_type.capitalize()  # 'Basic', 'Prime', 'Premium'
+                items.append({
+                    "item_no": item_no,
+                    "description": f"GST on Designs of {plan_display} Plan",
+                    "quantity": design_count,  # Show actual count of designs
+                    "rate": "-",
+                    "amount": gst_amount,
+                })
+            item_no += 1
+        
+        if commission_amount > 0:
+            if purchase_type == 'individual':
+                items.append({
+                    "item_no": item_no,
+                    "description": "Platform Commission on individual Design after GST",
+                    "quantity": design_count,  # Show actual count of designs
+                    "rate": "-",
+                    "amount": commission_amount,
+                })
+            else:
+                plan_display = purchase_type.capitalize()
+                items.append({
+                    "item_no": item_no,
+                    "description": f"Platform Commission on {plan_display} Plan",
+                    "quantity": design_count,  # Show actual count of designs
+                    "rate": "-",
+                    "amount": commission_amount,
+                })
+            item_no += 1
+    
+    invoice_data = {
+        "invoice": {
+            "invoice_number": invoice.invoice_number,
+            "invoice_date": invoice.invoice_date.strftime('%B %d, %Y'),
+            "payment_due_date": invoice.payment_due_date.strftime('%b %d, %Y') if invoice.payment_due_date else "",
+        },
+        "invoice_type": "designer",
+        "company_details": company_details,
+        "billed_to": user_address,
+        "from_details": {
+            "sender_name": company_details.get("company_name", "WeDesignz"),
+            "sender_address_line1": company_details.get("company_address_line1", ""),
+            "sender_address_line2": company_details.get("company_address_line2", ""),
+            "sender_gst_number": company_details.get("company_gst_number", ""),
+        },
+        "items": items,
+        "currency": "Rs",
+        "total_due": float(total_gst + total_commission),
+    }
+    
+    invoice.invoice_data = invoice_data
+    invoice.save()
+    
+    # Generate PDF
+    media_root = getattr(settings, 'MEDIA_ROOT', 'media')
+    invoice_dir = os.path.join(media_root, 'invoices')
+    pdf_filename = f"{invoice.invoice_number}.pdf"
+    pdf_path = os.path.join(invoice_dir, pdf_filename)
+    
+    generate_invoice_pdf(invoice_data, pdf_path)
+    
+    invoice.pdf_file_path = pdf_path
+    invoice.save()
     
     return invoice
 
@@ -792,8 +1179,8 @@ def create_designer_invoice_for_subscription(subscription: Subscription, designe
         {
             "item_no": 2,
             "description": f"Platform Commission on Rs {base_for_commission:.2f} after GST",
-            "quantity": 1,
-            "rate": float(breakdown['commission_amount']),
+            "quantity": "-",
+            "rate": "-",
             "amount": float(breakdown['commission_amount']),
         },
     ]
@@ -812,8 +1199,10 @@ def create_designer_invoice_for_subscription(subscription: Subscription, designe
         "company_details": company_details,
         "billed_to": user_address,
         "from_details": {
-            "sender_name": "WeDesignz",
-            "sender_location": "India",
+            "sender_name": company_details.get("company_name", "WeDesignz"),
+            "sender_address_line1": company_details.get("company_address_line1", ""),
+            "sender_address_line2": company_details.get("company_address_line2", ""),
+            "sender_gst_number": company_details.get("company_gst_number", ""),
         },
         "items": items,
         "currency": "Rs",
