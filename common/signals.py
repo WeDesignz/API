@@ -137,6 +137,23 @@ def cleanup_coupon_related_data(sender, instance, **kwargs):
 
 
 # Wallet Signals
+@receiver(post_save, sender=Wallet)
+def auto_link_wallet_to_user(sender, instance, created, **kwargs):
+    """Automatically link wallet to user via relation system when wallet is created."""
+    if created and instance.created_by:
+        try:
+            from Authentication.user_relations import get_user_wallets, attach_user_wallet
+            
+            # Check if wallet is already linked via relation system
+            wallets = get_user_wallets(instance.created_by)
+            if not wallets.filter(id=instance.id).exists():
+                # Link wallet to user via relation system
+                attach_user_wallet(instance.created_by, instance)
+                logger.info(f"Automatically linked wallet {instance.id} to user {instance.created_by.id} via relation system")
+        except Exception as e:
+            logger.error(f"Failed to auto-link wallet {instance.id} to user: {str(e)}", exc_info=True)
+
+
 @receiver(post_save, sender=WalletTransaction)
 def send_wallet_transaction_notification(sender, instance, created, **kwargs):
     """Send notification for wallet transactions."""

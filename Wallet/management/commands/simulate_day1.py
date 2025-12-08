@@ -66,8 +66,10 @@ class Command(BaseCommand):
                 self.stdout.write(f'    Period: {settlement.settlement_period_start} to {settlement.settlement_period_end}')
         else:
             self.stdout.write(self.style.WARNING('\n⚠️  No settlements created. Make sure:'))
-            self.stdout.write(self.style.WARNING('  1. Designers have wallet balance > 0'))
-            self.stdout.write(self.style.WARNING('  2. Designers have verified Razorpay onboarding status'))
+            self.stdout.write(self.style.WARNING('  1. Designers are active (is_active=True)'))
+            self.stdout.write(self.style.WARNING('  2. Designers have DesignerProfile.status = "verified"'))
+            self.stdout.write(self.style.WARNING('  3. Designers have wallets linked via relation system'))
+            self.stdout.write(self.style.WARNING('  4. Designers have wallet balance > 0'))
         
         self.stdout.write(self.style.SUCCESS('\n' + '=' * 70))
 

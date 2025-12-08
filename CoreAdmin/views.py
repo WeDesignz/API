@@ -1911,10 +1911,10 @@ def designer_onboarding_detail(request, designer_id):
             'designer_profile_status': designer_profile.status if designer_profile else 'pending',
             'onboarding_completed': designer_profile.onboarding_completed if designer_profile else False,
             # Legacy fields for backward compatibility (always False since we're not using multi-step verification)
-            'superadmin_verified': False,
-            'moderator_verified': False,
+                'superadmin_verified': False,
+                'moderator_verified': False,
             'final_approval': designer_profile.status == 'verified' if designer_profile else False,
-            'rejection_reason': None,
+                'rejection_reason': None,
         }
         
         # Get Step 1 data (Personal Details)
