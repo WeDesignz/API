@@ -515,16 +515,18 @@ def _draw_items_table(c: canvas.Canvas, data: Dict[str, Any], page_width: float,
         c.drawCentredString(col_center_x, current_y + 4 * mm, qty_display)
         x += col_widths[2]
 
-        # Rate (center aligned, show "-" for GST and Commission rows)
+        # Rate (center aligned, show calculated rate or "-" if not applicable)
         currency = data.get("currency", "")
         rate = item.get("rate", 0)
         amount = item.get("amount", 0)
 
-        # For GST and Commission rows, rate column shows "-"
-        if description.startswith("GST") or description.startswith("Platform Commission") or rate == "-":
+        # Display rate if it's a number, otherwise show "-"
+        if rate == "-" or rate is None:
             rate_display = "-"
-        else:
+        elif isinstance(rate, (int, float)) and rate > 0:
             rate_display = f"{currency}{rate:,.2f}"
+        else:
+            rate_display = "-"
         col_center_x = x + col_widths[3] / 2
         c.drawCentredString(col_center_x, current_y + 4 * mm, rate_display)
         x += col_widths[3]
@@ -1021,13 +1023,16 @@ def create_monthly_designer_bill(designer: User, purchase_type_breakdowns: Dict[
         commission_amount = float(breakdown['commission_amount'])
         design_count = breakdown.get('design_count', 0)
         
+        # Calculate rate per design for GST
+        gst_rate_per_design = gst_amount / design_count if design_count > 0 else 0
+        
         if gst_amount > 0:
             if purchase_type == 'individual':
                 items.append({
                     "item_no": item_no,
                     "description": "GST on individual design",
                     "quantity": design_count,  # Show actual count of designs
-                    "rate": "-",
+                    "rate": round(gst_rate_per_design, 2),
                     "amount": gst_amount,
                 })
             else:
@@ -1036,10 +1041,13 @@ def create_monthly_designer_bill(designer: User, purchase_type_breakdowns: Dict[
                     "item_no": item_no,
                     "description": f"GST on Designs of {plan_display} Plan",
                     "quantity": design_count,  # Show actual count of designs
-                    "rate": "-",
+                    "rate": round(gst_rate_per_design, 2),
                     "amount": gst_amount,
                 })
             item_no += 1
+        
+        # Calculate rate per design for Commission
+        commission_rate_per_design = commission_amount / design_count if design_count > 0 else 0
         
         if commission_amount > 0:
             if purchase_type == 'individual':
@@ -1047,7 +1055,7 @@ def create_monthly_designer_bill(designer: User, purchase_type_breakdowns: Dict[
                     "item_no": item_no,
                     "description": "Platform Commission on individual Design after GST",
                     "quantity": design_count,  # Show actual count of designs
-                    "rate": "-",
+                    "rate": round(commission_rate_per_design, 2),
                     "amount": commission_amount,
                 })
             else:
@@ -1056,7 +1064,7 @@ def create_monthly_designer_bill(designer: User, purchase_type_breakdowns: Dict[
                     "item_no": item_no,
                     "description": f"Platform Commission on {plan_display} Plan",
                     "quantity": design_count,  # Show actual count of designs
-                    "rate": "-",
+                    "rate": round(commission_rate_per_design, 2),
                     "amount": commission_amount,
                 })
             item_no += 1
@@ -1261,8 +1269,11 @@ def process_monthly_subscription_settlement(
     
     If customer used 7 downloads in period (5 from Designer1, 2 from Designer2):
     - Unused: 3 downloads
-    - Settlement: Calculate as if 10 downloads were used
-    - Unused 3 downloads distributed proportionally: Designer1 gets 5/7, Designer2 gets 2/7
+    - Price per download: Rs 100 / 10 = Rs 10
+    - Amount to distribute: Rs 10 × 7 = Rs 70
+    - Designer1 (5 downloads): (5/7) × Rs 70 = Rs 50
+    - Designer2 (2 downloads): (2/7) × Rs 70 = Rs 20
+    - Unused 3 downloads value (Rs 30) stays as platform revenue
     """
     from datetime import timedelta
     
@@ -1311,16 +1322,17 @@ def process_monthly_subscription_settlement(
             'message': 'No downloads used in this period, no settlement'
         }
     
-    # Step 1: Extract base amount from monthly price (includes GST and commission)
+    # Step 1: Calculate amount to distribute (only for downloads actually used)
+    # Price per download = monthly_price / monthly_downloads_allowed
+    # Amount to distribute = price_per_download * total_downloads_used
+    price_per_download = monthly_price / Decimal(str(monthly_downloads_allowed))
+    amount_to_distribute = price_per_download * Decimal(str(total_downloads_used))
+    
+    # Step 2: Extract GST and commission rates
     gst_percentage = Decimal(str(BusinessConfig.get_gst_percentage()))
     commission_rate = Decimal(str(BusinessConfig.get_commission_rate()))
     
-    # Extract base from monthly_price (reverse calculation)
-    monthly_extracted = extract_gst_and_commission(monthly_price, gst_percentage, commission_rate)
-    monthly_base_amount = monthly_extracted['base_amount']  # This is the Rs 65.2
-    
-    # Step 2: Distribute monthly price proportionally based on actual downloads used
-    # Group products by designer first
+    # Step 3: Group products by designer
     designer_breakdown = {}
     
     for product in all_products:
@@ -1340,13 +1352,13 @@ def process_monthly_subscription_settlement(
         designer_breakdown[designer_id]['products'].append(product)
         designer_breakdown[designer_id]['download_count'] += 1
     
-    # Distribute monthly_price proportionally based on actual downloads
+    # Step 4: Distribute amount_to_distribute proportionally based on actual downloads used
     for designer_id, breakdown in designer_breakdown.items():
         # Calculate proportion: designer downloads / total downloads used
         proportion = Decimal(str(breakdown['download_count'])) / Decimal(str(total_downloads_used))
-        breakdown['product_total'] = monthly_price * proportion  # Designer's share of monthly price
+        breakdown['product_total'] = amount_to_distribute * proportion  # Designer's share
     
-    # Step 3: Extract GST and commission from each designer's share
+    # Step 5: Extract GST and commission from each designer's share
     for designer_id, breakdown in designer_breakdown.items():
         # Extract GST and commission from designer's product_total (which includes GST and commission)
         extracted = extract_gst_and_commission(breakdown['product_total'], gst_percentage, commission_rate)
@@ -1370,7 +1382,7 @@ def process_monthly_subscription_settlement(
         transaction = WalletTransaction.objects.create(
             wallet_transaction_type='credit',
             amount=breakdown['wallet_amount'],
-            description=f"Earnings from subscription {subscription.id} - {period_start.strftime('%b %d')} to {period_end.strftime('%b %d, %Y')} ({breakdown['download_count']} downloads + unused allocation)",
+            description=f"Earnings from subscription {subscription.id} - {period_start.strftime('%b %d')} to {period_end.strftime('%b %d, %Y')} ({breakdown['download_count']} downloads)",
             reference_id=f"subscription_{subscription.id}_{period_start.strftime('%Y%m%d')}",
             created_by=designer
         )
@@ -1390,16 +1402,19 @@ def process_monthly_subscription_settlement(
     
     # Calculate unused downloads for reporting
     unused_downloads = monthly_downloads_allowed - total_downloads_used
+    unused_downloads_value = price_per_download * Decimal(str(unused_downloads))
     
     return {
         'subscription_id': subscription.id,
         'period_start': period_start.strftime('%Y-%m-%d'),
         'period_end': period_end.strftime('%Y-%m-%d'),
         'total_downloads_used': total_downloads_used,
-        'total_downloads_settled': monthly_downloads_allowed,
+        'total_downloads_allowed': monthly_downloads_allowed,
         'unused_downloads': unused_downloads,
+        'unused_downloads_value': float(unused_downloads_value),
         'monthly_price': float(monthly_price),
-        'monthly_base_amount': float(monthly_extracted['base_amount']),
+        'price_per_download': float(price_per_download),
+        'amount_distributed': float(amount_to_distribute),
         'designer_breakdown': {
             designer_id: {
                 'designer_id': designer_id,
@@ -1419,15 +1434,17 @@ def process_monthly_subscription_settlement(
 def process_subscription_settlement(subscription: Subscription) -> Dict[str, Any]:
     """
     Process subscription settlement for monthly subscriptions when subscription period ends.
-    Distributes subscription price across actual downloads used.
+    Distributes subscription price across actual downloads used only.
     
     Example:
     - Subscription: Rs 400, 20 downloads allowed
     - Actual downloads: 10 (6 from designer1, 4 from designer2)
-    - Per download price: Rs 400 / 10 = Rs 40
-    - Designer1: 6 × Rs 40 = Rs 240
-    - Designer2: 4 × Rs 40 = Rs 160
-    - Then apply GST and commission calculations
+    - Price per download: Rs 400 / 20 = Rs 20
+    - Amount to distribute: Rs 20 × 10 = Rs 200
+    - Designer1 (6 downloads): (6/10) × Rs 200 = Rs 120
+    - Designer2 (4 downloads): (4/10) × Rs 200 = Rs 80
+    - Unused 10 downloads value (Rs 200) stays as platform revenue
+    - Then apply GST and commission calculations on distributed amount
     """
     from datetime import timedelta
     
@@ -1466,17 +1483,20 @@ def process_subscription_settlement(subscription: Subscription) -> Dict[str, Any
             'message': 'No downloads used in this subscription period'
         }
     
-    # Step 1: Extract base amount from subscription price (includes GST and commission)
+    # Step 1: Calculate amount to distribute (only for downloads actually used)
     subscription_price = Decimal(str(subscription.plan.price))
+    total_downloads_allowed = subscription.plan.no_of_free_downloads
+    
+    # Price per download = subscription_price / total_downloads_allowed
+    # Amount to distribute = price_per_download * total_downloads (actual downloads used)
+    price_per_download = subscription_price / Decimal(str(total_downloads_allowed))
+    amount_to_distribute = price_per_download * Decimal(str(total_downloads))
+    
+    # Step 2: Extract GST and commission rates
     gst_percentage = Decimal(str(BusinessConfig.get_gst_percentage()))
     commission_rate = Decimal(str(BusinessConfig.get_commission_rate()))
     
-    # Extract base from subscription_price (reverse calculation)
-    subscription_extracted = extract_gst_and_commission(subscription_price, gst_percentage, commission_rate)
-    subscription_base_amount = subscription_extracted['base_amount']
-    
-    # Step 2: Distribute subscription price proportionally based on actual downloads used
-    # Group products by designer
+    # Step 3: Group products by designer
     designer_breakdown = {}
     
     for product in all_products:
@@ -1496,13 +1516,13 @@ def process_subscription_settlement(subscription: Subscription) -> Dict[str, Any
         designer_breakdown[designer_id]['products'].append(product)
         designer_breakdown[designer_id]['download_count'] += 1
     
-    # Distribute subscription_price proportionally based on actual downloads
+    # Step 4: Distribute amount_to_distribute proportionally based on actual downloads
     for designer_id, breakdown in designer_breakdown.items():
-        # Calculate proportion: designer downloads / total downloads
+        # Calculate proportion: designer downloads / total downloads used
         proportion = Decimal(str(breakdown['download_count'])) / Decimal(str(total_downloads))
-        breakdown['product_total'] = subscription_price * proportion  # Designer's share of subscription price
+        breakdown['product_total'] = amount_to_distribute * proportion  # Designer's share
     
-    # Step 3: Extract GST and commission from each designer's share
+    # Step 5: Extract GST and commission from each designer's share
     for designer_id, breakdown in designer_breakdown.items():
         # Extract GST and commission from designer's product_total (which includes GST and commission)
         extracted = extract_gst_and_commission(breakdown['product_total'], gst_percentage, commission_rate)
@@ -1542,15 +1562,19 @@ def process_subscription_settlement(subscription: Subscription) -> Dict[str, Any
     subscription.settlement_processed = True
     subscription.save()
     
-    # Calculate per download price for reporting
-    per_download_price = subscription_price / Decimal(str(total_downloads)) if total_downloads > 0 else Decimal('0')
+    # Calculate unused downloads for reporting
+    unused_downloads = total_downloads_allowed - total_downloads
+    unused_downloads_value = price_per_download * Decimal(str(unused_downloads))
     
     return {
         'subscription_id': subscription.id,
         'total_downloads': total_downloads,
-        'per_download_price': float(per_download_price),
+        'total_downloads_allowed': total_downloads_allowed,
+        'unused_downloads': unused_downloads,
+        'unused_downloads_value': float(unused_downloads_value),
         'subscription_price': float(subscription_price),
-        'subscription_base_amount': float(subscription_extracted['base_amount']),
+        'price_per_download': float(price_per_download),
+        'amount_distributed': float(amount_to_distribute),
         'designer_breakdown': {
             designer_id: {
                 'designer_id': designer_id,
