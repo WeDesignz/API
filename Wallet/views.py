@@ -14,7 +14,6 @@ from .serializers import (
     WalletSerializer, WalletTransactionSerializer, WalletWithdrawalRequestSerializer
 )
 from CoreAdmin.auth import admin_required
-from CoreAdmin.models import DesignerOnboardingStatus
 from common.relations import get_related
 import csv
 import io
@@ -836,8 +835,6 @@ def settlement_status(request):
     from datetime import datetime, date
     import pytz
     from Wallet.models import SettlementRequest
-    from CoreAdmin.models import DesignerOnboardingStatus
-    from common.relations import get_related
     from Authentication.user_relations import get_user_wallets
     
     # Get current date in Asia/Kolkata timezone
@@ -940,8 +937,6 @@ def accept_settlement(request):
     import pytz
     from django.utils import timezone
     from Wallet.models import SettlementRequest
-    from CoreAdmin.models import DesignerOnboardingStatus
-    from common.relations import get_related
     
     # Check if we're in settlement window (days 1-5)
     kolkata_tz = pytz.timezone('Asia/Kolkata')

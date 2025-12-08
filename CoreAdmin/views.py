@@ -23,8 +23,7 @@ from .serializers import (
 )
 from Profiles.serializers import (
     DesignerManagementSerializer, DesignerDetailSerializer, DesignerWalletSerializer,
-    DesignerTransactionSerializer, DesignerWithdrawalSerializer, DesignerOnboardingSerializer,
-    DesignerOnboardingDetailSerializer, DesignerOnboardingListSerializer,
+    DesignerTransactionSerializer, DesignerWithdrawalSerializer,
     DesignerAccountSuspensionSerializer, DesignerNotificationSerializer, DesignerOnboardingVerificationSerializer,
     DesignerAccountActionSerializer, DesignerWalletSummarySerializer
 )
@@ -1606,11 +1605,11 @@ def designer_analytics(request):
         total_designers = designers.count()
         pending_approval = designers.filter(created_designer_profiles__status='pending').distinct().count()
         
-        # Get rejected count (from onboarding status or profile status)
-        from .models import DesignerOnboardingStatus
-        rejected_onboarding = DesignerOnboardingStatus.objects.filter(status='rejected').count()
-        rejected_profiles = designers.filter(created_designer_profiles__status='rejected').distinct().count()
-        rejected = max(rejected_onboarding, rejected_profiles)  # Use the higher count
+        # Get rejected count (from profile status)
+        # Note: 'rejected' status doesn't exist in DesignerProfile, so we use 0
+        # If you add 'rejected' status later, uncomment the line below
+        # rejected_profiles = designers.filter(created_designer_profiles__status='rejected').distinct().count()
+        rejected = 0  # No rejected status in current system
         
         # Return stats in format expected by frontend
         stats_data = {
@@ -1764,18 +1763,12 @@ def bulk_update_designer_status(request):
 @swagger_auto_schema(
     method='get',
     operation_summary="Designer Onboarding List",
-    operation_description="Get list of designer onboarding requests with filtering (SuperAdmin and Moderator access).",
+    operation_description="Get list of designers with onboarding status (SuperAdmin and Moderator access).",
     manual_parameters=[
         openapi.Parameter(
             'status',
             openapi.IN_QUERY,
-            description='Filter by onboarding status (pending, approved, rejected)',
-            type=openapi.TYPE_STRING
-        ),
-        openapi.Parameter(
-            'verification_status',
-            openapi.IN_QUERY,
-            description='Filter by verification status (superadmin_verified, moderator_verified, both_verified)',
+            description='Filter by designer status (pending, verified, suspended)',
             type=openapi.TYPE_STRING
         ),
         openapi.Parameter(
@@ -1792,7 +1785,7 @@ def bulk_update_designer_status(request):
         )
     ],
     responses={
-        200: openapi.Response(description="Onboarding requests retrieved successfully"),
+        200: openapi.Response(description="Designers retrieved successfully"),
         403: openapi.Response(description="Access denied - admin privileges required")
     },
     tags=['CoreAdmin Designer Management']
@@ -1801,7 +1794,8 @@ def bulk_update_designer_status(request):
 @permission_classes([IsAuthenticated])
 def designer_onboarding_list(request):
     """
-    Get list of designer onboarding requests with filtering.
+    Get list of designers with onboarding status filtering.
+    Uses DesignerProfile.status instead of DesignerOnboardingStatus.
     """
     try:
         admin_profile = request.user.admin_profile
@@ -1810,45 +1804,46 @@ def designer_onboarding_list(request):
             'error': 'Admin profile required'
         }, status=status.HTTP_403_FORBIDDEN)
     
-    # Get onboarding requests
-    from .models import DesignerOnboardingStatus
-    onboarding_requests = DesignerOnboardingStatus.objects.select_related('designer').all()
+    # Get designers with profiles
+    from Profiles.models import DesignerProfile
+    from django.contrib.auth.models import User
     
-    # Apply filters
+    designers = User.objects.filter(
+        created_designer_profiles__isnull=False
+    ).select_related().distinct()
+    
+    # Apply status filter
     status_filter = request.GET.get('status')
     if status_filter:
-        onboarding_requests = onboarding_requests.filter(status=status_filter)
-    
-    verification_status = request.GET.get('verification_status')
-    if verification_status == 'superadmin_verified':
-        onboarding_requests = onboarding_requests.filter(superadmin_verified=True, moderator_verified=False)
-    elif verification_status == 'moderator_verified':
-        onboarding_requests = onboarding_requests.filter(moderator_verified=True, superadmin_verified=False)
-    elif verification_status == 'both_verified':
-        onboarding_requests = onboarding_requests.filter(superadmin_verified=True, moderator_verified=True)
+        # Map old status values to new ones
+        status_mapping = {
+            'pending': 'pending',
+            'approved': 'verified',
+            'rejected': 'pending'  # Rejected designers are still pending in new system
+        }
+        mapped_status = status_mapping.get(status_filter, status_filter)
+        designers = designers.filter(created_designer_profiles__status=mapped_status)
     
     # Search functionality
     search_query = request.GET.get('search')
     if search_query:
-        onboarding_requests = onboarding_requests.filter(
-            Q(designer__first_name__icontains=search_query) |
-            Q(designer__last_name__icontains=search_query) |
-            Q(designer__email__icontains=search_query)
+        designers = designers.filter(
+            Q(first_name__icontains=search_query) |
+            Q(last_name__icontains=search_query) |
+            Q(email__icontains=search_query) |
+            Q(username__icontains=search_query)
         )
     
     # Order by creation date
-    onboarding_requests = onboarding_requests.order_by('-created_at')
+    designers = designers.order_by('-date_joined')
     
     # Pagination
     from rest_framework.pagination import PageNumberPagination
     paginator = PageNumberPagination()
-    paginated_requests = paginator.paginate_queryset(onboarding_requests, request)
+    paginated_designers = paginator.paginate_queryset(designers, request)
     
-    # Use appropriate serializer based on admin role
-    if admin_profile.admin_group == 'superadmin':
-        serializer = DesignerOnboardingDetailSerializer(paginated_requests, many=True)
-    else:
-        serializer = DesignerOnboardingListSerializer(paginated_requests, many=True)
+    # Use DesignerDetailSerializer
+    serializer = DesignerDetailSerializer(paginated_designers, many=True)
     
     # Log activity
     AdminActivityLog.log_activity(
@@ -1896,8 +1891,6 @@ def designer_onboarding_detail(request, designer_id):
         }, status=status.HTTP_404_NOT_FOUND)
     
     try:
-        from .models import DesignerOnboardingStatus
-        from common.relations import get_related
         from Profiles.models import DesignerProfile, Studio, StudioBusinessDetails
         from Authentication.models import Email, MobileNumber
         from MediaFiles.models import Media, Relation
@@ -1909,33 +1902,20 @@ def designer_onboarding_detail(request, designer_id):
         except DesignerProfile.DoesNotExist:
             designer_profile = None
         
-        # Try to get onboarding status using relation system
-        onboarding_statuses = get_related(designer, 'User:DesignerOnboardingStatus', DesignerOnboardingStatus)
-        onboarding = onboarding_statuses.first()
-        
-        # Build response data
+        # Build response data using DesignerProfile status
         response_data = {
             'designer_id': designer_id,
             'designer_name': designer.get_full_name() or designer.username,
             'designer_email': designer.email,
+            'status': designer_profile.status if designer_profile else 'pending',
+            'designer_profile_status': designer_profile.status if designer_profile else 'pending',
+            'onboarding_completed': designer_profile.onboarding_completed if designer_profile else False,
+            # Legacy fields for backward compatibility (always False since we're not using multi-step verification)
+            'superadmin_verified': False,
+            'moderator_verified': False,
+            'final_approval': designer_profile.status == 'verified' if designer_profile else False,
+            'rejection_reason': None,
         }
-        
-        # Add onboarding status if exists
-        if onboarding:
-            if admin_profile.admin_group == 'superadmin':
-                serializer = DesignerOnboardingDetailSerializer(onboarding)
-            else:
-                serializer = DesignerOnboardingSerializer(onboarding)
-            response_data.update(serializer.data)
-        else:
-            # Default status values
-            response_data.update({
-                'status': 'pending',
-                'superadmin_verified': False,
-                'moderator_verified': False,
-                'final_approval': False,
-                'rejection_reason': None,
-            })
         
         # Get Step 1 data (Personal Details)
         step1_data = {}
@@ -2175,16 +2155,16 @@ def designer_onboarding_detail(request, designer_id):
 
 @swagger_auto_schema(
     method='post',
-    operation_summary="Verify Designer Onboarding",
-    operation_description="Verify designer onboarding request (SuperAdmin and Moderator access).",
+    operation_summary="Verify Designer Onboarding (Deprecated)",
+    operation_description="This endpoint is deprecated. Use designer_update_status instead. Updates designer profile status directly.",
     request_body=openapi.Schema(
         type=openapi.TYPE_OBJECT,
         properties={
             'verification_type': openapi.Schema(
                 type=openapi.TYPE_STRING,
-                description='Type of verification',
-                enum=['superadmin', 'moderator', 'final_approval', 'reject'],
-                example='superadmin'
+                description='Type of verification (final_approval to approve, reject to reject)',
+                enum=['final_approval', 'reject'],
+                example='final_approval'
             ),
             'notes': openapi.Schema(
                 type=openapi.TYPE_STRING,
@@ -2200,8 +2180,8 @@ def designer_onboarding_detail(request, designer_id):
         required=['verification_type']
     ),
     responses={
-        200: openapi.Response(description="Onboarding verification updated successfully"),
-        404: openapi.Response(description="Onboarding request not found"),
+        200: openapi.Response(description="Designer status updated successfully"),
+        404: openapi.Response(description="Designer not found"),
         403: openapi.Response(description="Access denied - admin privileges required")
     },
     tags=['CoreAdmin Designer Management']
@@ -2211,6 +2191,8 @@ def designer_onboarding_detail(request, designer_id):
 def verify_designer_onboarding(request, designer_id):
     """
     Verify designer onboarding request.
+    DEPRECATED: This endpoint is kept for backward compatibility but now uses DesignerProfile.status.
+    Use designer_update_status endpoint instead.
     """
     try:
         admin_profile = request.user.admin_profile
@@ -2220,11 +2202,16 @@ def verify_designer_onboarding(request, designer_id):
         }, status=status.HTTP_403_FORBIDDEN)
     
     try:
-        from .models import DesignerOnboardingStatus
-        onboarding = DesignerOnboardingStatus.objects.select_related('designer').get(designer_id=designer_id)
-    except DesignerOnboardingStatus.DoesNotExist:
+        designer = User.objects.get(id=designer_id)
+    except User.DoesNotExist:
         return Response({
-            'error': 'Onboarding request not found'
+            'error': 'Designer not found'
+        }, status=status.HTTP_404_NOT_FOUND)
+    
+    profile = designer.created_designer_profiles.first()
+    if not profile:
+        return Response({
+            'error': 'User is not a designer'
         }, status=status.HTTP_404_NOT_FOUND)
     
     serializer = DesignerOnboardingVerificationSerializer(data=request.data)
@@ -2235,76 +2222,56 @@ def verify_designer_onboarding(request, designer_id):
     notes = serializer.validated_data.get('notes', '')
     rejection_reason = serializer.validated_data.get('rejection_reason', '')
     
-    # Check permissions
-    if verification_type == 'superadmin' and admin_profile.admin_group != 'superadmin':
+    # Check permissions - only superadmin can approve/reject
+    if admin_profile.admin_group != 'superadmin':
         return Response({
             'error': 'Access denied. Superadmin privileges required.'
         }, status=status.HTTP_403_FORBIDDEN)
     
-    if verification_type == 'final_approval' and admin_profile.admin_group != 'superadmin':
-        return Response({
-            'error': 'Access denied. Superadmin privileges required.'
-        }, status=status.HTTP_403_FORBIDDEN)
-    
-    # Process verification
-    if verification_type == 'superadmin':
-        onboarding.superadmin_verified = True
-        onboarding.superadmin_verified_by = request.user
-        onboarding.superadmin_verified_at = timezone.now()
-        onboarding.save()
+    # Process verification - map to DesignerProfile.status
+    if verification_type == 'final_approval':
+        profile.status = 'verified'
+        profile.updated_by = request.user
+        profile.save()
         
-        message = "Superadmin verification completed"
+        # Also activate user account
+        designer.is_active = True
+        designer.save()
         
-    elif verification_type == 'moderator':
-        onboarding.moderator_verified = True
-        onboarding.moderator_verified_by = request.user
-        onboarding.moderator_verified_at = timezone.now()
-        onboarding.save()
-        
-        message = "Moderator verification completed"
-        
-    elif verification_type == 'final_approval':
-        if not onboarding.can_be_approved():
-            return Response({
-                'error': 'Both superadmin and moderator verifications required for final approval'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
-        success = onboarding.approve_onboarding(request.user)
-        if success:
-            message = "Onboarding approved successfully"
-            # TODO: Send approval email to designer
-        else:
-            return Response({
-                'error': 'Failed to approve onboarding'
-            }, status=status.HTTP_400_BAD_REQUEST)
+        message = "Designer approved successfully"
         
     elif verification_type == 'reject':
-        success = onboarding.reject_onboarding(request.user, rejection_reason)
-        if success:
-            message = "Onboarding rejected successfully"
-            # TODO: Send rejection email to designer
-        else:
-            return Response({
-                'error': 'Failed to reject onboarding'
-            }, status=status.HTTP_400_BAD_REQUEST)
+        # Note: DesignerProfile doesn't have 'rejected' status, so we keep as 'pending'
+        # If you want to track rejections, you could add a 'rejected' status or use a separate field
+        profile.status = 'pending'  # Keep as pending since rejected status doesn't exist
+        profile.updated_by = request.user
+        profile.save()
+        
+        message = f"Designer rejected: {rejection_reason}"
+    else:
+        # Legacy verification types (superadmin, moderator) - no longer used
+        return Response({
+            'error': f'Verification type "{verification_type}" is no longer supported. Use "final_approval" or "reject".'
+        }, status=status.HTTP_400_BAD_REQUEST)
     
     # Log activity
     AdminActivityLog.log_activity(
         user=request.user,
         activity_type='user_management',
-        description=f'{verification_type} verification for designer: {onboarding.designer.get_full_name()}',
+        description=f'{verification_type} for designer: {designer.get_full_name()}',
         request=request,
         metadata={
             'designer_id': designer_id,
             'verification_type': verification_type,
             'notes': notes,
-            'rejection_reason': rejection_reason
+            'rejection_reason': rejection_reason,
+            'new_status': profile.status
         }
     )
     
     return Response({
         'message': message,
-        'onboarding': DesignerOnboardingSerializer(onboarding).data
+        'designer': DesignerDetailSerializer(designer).data
     }, status=status.HTTP_200_OK)
 
 

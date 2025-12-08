@@ -6,7 +6,7 @@ from django.core.exceptions import ValidationError
 from .models import (
     AdminPermissionGroup, AdminUserProfile, AdminActivityLog, AdminSession,
     DesignApproval, DesignAnalytics, CopyrightReport, Refund, RefundLog,
-    FinancialReport, DesignerOnboardingStatus,
+    FinancialReport,
     DesignerAccountSuspension, DesignerNotification, CustomerAccountStatus,
     CustomerViewHistory, CustomerDownloadHistory, CustomerNotification,
     AdminNotification, AdminNotificationCampaign, SystemConfig
@@ -705,55 +705,14 @@ class FinancialReportAdmin(admin.ModelAdmin):
     )
 
 
-@admin.register(DesignerOnboardingStatus)
-class DesignerOnboardingStatusAdmin(admin.ModelAdmin):
-    """
-    Admin interface for DesignerOnboardingStatus model.
-    Manages designer onboarding status and verification process.
-    """
-    list_display = ['id', 'designer_id', 'status', 'superadmin_verified', 'moderator_verified', 'final_approval', 'created_at']
-    list_filter = ['status', 'superadmin_verified', 'moderator_verified', 'final_approval', 'created_at', 'updated_at']
-    search_fields = ['designer_id', 'rejection_reason']
-    readonly_fields = ['created_at', 'updated_at', 'approved_at', 'rejected_at', 'superadmin_verified_at', 'moderator_verified_at']
-    list_editable = ['status', 'superadmin_verified', 'moderator_verified', 'final_approval']
-    ordering = ['-created_at']
-    list_per_page = 25
-    
-    fieldsets = (
-        ('Designer Information', {
-            'fields': ('designer_id', 'status')
-        }),
-        ('Verification Status', {
-            'fields': ('superadmin_verified', 'moderator_verified', 'final_approval', 'superadmin_verified_by_id', 'superadmin_verified_at', 'moderator_verified_by_id', 'moderator_verified_at')
-        }),
-        ('Approval Details', {
-            'fields': ('approved_by_id', 'approved_at'),
-            'classes': ('collapse',)
-        }),
-        ('Rejection Details', {
-            'fields': ('rejection_reason', 'rejected_by_id', 'rejected_at'),
-            'classes': ('collapse',)
-        }),
-        ('Bank Account Details', {
-            'fields': ('bank_account_number', 'bank_ifsc_code', 'bank_account_holder_name'),
-            'classes': ('collapse',),
-            'description': 'Bank account details (encrypted)'
-        }),
-        ('Contact Details', {
-            'fields': ('contact_phone', 'contact_address'),
-            'classes': ('collapse',),
-            'description': 'Contact details (hidden from moderators)'
-        }),
-        ('Financial Details', {
-            'fields': ('pan_number', 'aadhar_number'),
-            'classes': ('collapse',),
-            'description': 'Financial details (hidden from moderators)'
-        }),
-        ('Timestamps', {
-            'fields': ('created_at', 'updated_at'),
-            'classes': ('collapse',)
-        }),
-    )
+# DesignerOnboardingStatus model is deprecated - using DesignerProfile.status instead
+# @admin.register(DesignerOnboardingStatus)
+# class DesignerOnboardingStatusAdmin(admin.ModelAdmin):
+#     """
+#     Admin interface for DesignerOnboardingStatus model.
+#     DEPRECATED: This model is no longer used. Use DesignerProfile.status instead.
+#     """
+#     pass
 
 
 @admin.register(DesignerAccountSuspension)

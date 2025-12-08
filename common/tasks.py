@@ -490,8 +490,7 @@ def process_monthly_settlements(self):
         from decimal import Decimal
         from django.contrib.auth.models import User
         from Wallet.models import Wallet, SettlementRequest
-        from CoreAdmin.models import DesignerOnboardingStatus
-        from common.relations import get_related
+        from Profiles.models import DesignerProfile
         from Authentication.user_relations import get_user_wallets
         
         # Get current date in Asia/Kolkata timezone
@@ -518,19 +517,20 @@ def process_monthly_settlements(self):
                 first_day_current = date(current_date.year, current_date.month, 1)
                 period_end = first_day_current - timedelta(days=1)
         
-        # Get all active designers
-        designers = User.objects.filter(is_active=True).distinct()
+        # Get all active verified designers
+        designers = User.objects.filter(
+            is_active=True,
+            created_designer_profiles__status='verified'
+        ).distinct()
         
         created_count = 0
         skipped_count = 0
         
         for designer in designers:
             try:
-                # Check if designer has verified Razorpay account
-                onboarding_statuses = get_related(designer, 'User:DesignerOnboardingStatus', DesignerOnboardingStatus)
-                onboarding = onboarding_statuses.first()
-                
-                if not onboarding:
+                # Verify designer profile exists and is verified
+                designer_profile = DesignerProfile.objects.filter(created_by=designer, status='verified').first()
+                if not designer_profile:
                     skipped_count += 1
                     continue
                 

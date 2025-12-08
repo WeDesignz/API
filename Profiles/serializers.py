@@ -782,7 +782,7 @@ from Wallet.models import Wallet, WalletTransaction, WalletWithdrawalRequest
 from Authentication.user_relations import get_user_wallets
 from common.relations import get_related
 from CoreAdmin.models import (
-    DesignerOnboardingStatus, DesignerAccountSuspension,
+    DesignerAccountSuspension,
     DesignerNotification, AdminUserProfile
 )
 
@@ -1070,63 +1070,23 @@ class DesignerSearchSerializer(serializers.Serializer):
 
 # Enhanced Designer Management Serializers
 
-class DesignerOnboardingSerializer(serializers.ModelSerializer):
-    """
-    Serializer for designer onboarding status.
-    """
-    designer_name = serializers.CharField(source='designer.get_full_name', read_only=True)
-    designer_email = serializers.CharField(source='designer.email', read_only=True)
-    status_display = serializers.CharField(source='get_status_display', read_only=True)
-    
-    # Verification details
-    superadmin_verified_by_name = serializers.CharField(source='superadmin_verified_by.get_full_name', read_only=True)
-    moderator_verified_by_name = serializers.CharField(source='moderator_verified_by.get_full_name', read_only=True)
-    approved_by_name = serializers.CharField(source='approved_by.get_full_name', read_only=True)
-    rejected_by_name = serializers.CharField(source='rejected_by.get_full_name', read_only=True)
-    
-    class Meta:
-        model = DesignerOnboardingStatus
-        fields = [
-            'id', 'designer', 'designer_name', 'designer_email', 'status', 'status_display',
-            'superadmin_verified', 'moderator_verified', 'final_approval',
-            'rejection_reason', 'rejected_by', 'rejected_by_name', 'rejected_at',
-            'approved_by', 'approved_by_name', 'approved_at',
-            'superadmin_verified_by', 'superadmin_verified_by_name', 'superadmin_verified_at',
-            'moderator_verified_by', 'moderator_verified_by_name', 'moderator_verified_at',
-            'bank_ifsc_code', 'bank_account_holder_name',
-            'created_at', 'updated_at'
-        ]
-        read_only_fields = '__all__'
+# DEPRECATED: DesignerOnboardingStatus model is no longer used
+# These serializers are kept for backward compatibility but should not be used
+# Use DesignerDetailSerializer instead
 
+# class DesignerOnboardingSerializer(serializers.ModelSerializer):
+#     """
+#     DEPRECATED: Use DesignerDetailSerializer instead.
+#     Serializer for designer onboarding status.
+#     """
+#     pass
 
-class DesignerOnboardingDetailSerializer(serializers.ModelSerializer):
-    """
-    Detailed serializer for designer onboarding with sensitive information (SuperAdmin only).
-    """
-    designer_name = serializers.CharField(source='designer.get_full_name', read_only=True)
-    designer_email = serializers.CharField(source='designer.email', read_only=True)
-    status_display = serializers.CharField(source='get_status_display', read_only=True)
-    
-    # Verification details
-    superadmin_verified_by_name = serializers.CharField(source='superadmin_verified_by.get_full_name', read_only=True)
-    moderator_verified_by_name = serializers.CharField(source='moderator_verified_by.get_full_name', read_only=True)
-    approved_by_name = serializers.CharField(source='approved_by.get_full_name', read_only=True)
-    rejected_by_name = serializers.CharField(source='rejected_by.get_full_name', read_only=True)
-    
-    class Meta:
-        model = DesignerOnboardingStatus
-        fields = [
-            'id', 'designer', 'designer_name', 'designer_email', 'status', 'status_display',
-            'superadmin_verified', 'moderator_verified', 'final_approval',
-            'rejection_reason', 'rejected_by', 'rejected_by_name', 'rejected_at',
-            'approved_by', 'approved_by_name', 'approved_at',
-            'superadmin_verified_by', 'superadmin_verified_by_name', 'superadmin_verified_at',
-            'moderator_verified_by', 'moderator_verified_by_name', 'moderator_verified_at',
-            'bank_account_number', 'bank_ifsc_code', 'bank_account_holder_name',
-            'contact_phone', 'contact_address', 'pan_number', 'aadhar_number',
-            'created_at', 'updated_at'
-        ]
-        read_only_fields = '__all__'
+# class DesignerOnboardingDetailSerializer(serializers.ModelSerializer):
+#     """
+#     DEPRECATED: Use DesignerDetailSerializer instead.
+#     Detailed serializer for designer onboarding with sensitive information (SuperAdmin only).
+#     """
+#     pass
 
 
 class DesignerAccountSuspensionSerializer(serializers.ModelSerializer):
@@ -1230,33 +1190,13 @@ class DesignerWalletSummarySerializer(serializers.Serializer):
     can_request_payout = serializers.BooleanField()
 
 
-class DesignerOnboardingListSerializer(serializers.ModelSerializer):
-    """
-    Serializer for designer onboarding list view.
-    """
-    designer_name = serializers.CharField(source='designer.get_full_name', read_only=True)
-    designer_email = serializers.CharField(source='designer.email', read_only=True)
-    status_display = serializers.CharField(source='get_status_display', read_only=True)
-    verification_progress = serializers.SerializerMethodField()
-    
-    class Meta:
-        model = DesignerOnboardingStatus
-        fields = [
-            'id', 'designer', 'designer_name', 'designer_email', 'status', 'status_display',
-            'superadmin_verified', 'moderator_verified', 'final_approval',
-            'verification_progress',
-            'created_at', 'updated_at'
-        ]
-        read_only_fields = '__all__'
-    
-    def get_verification_progress(self, obj):
-        """Calculate verification progress percentage"""
-        progress = 0
-        if obj.superadmin_verified:
-            progress += 50
-        if obj.moderator_verified:
-            progress += 50
-        return progress
+# DEPRECATED: DesignerOnboardingStatus model is no longer used
+# class DesignerOnboardingListSerializer(serializers.ModelSerializer):
+#     """
+#     DEPRECATED: Use DesignerDetailSerializer instead.
+#     Serializer for designer onboarding list view.
+#     """
+#     pass
 
 
 class DesignProcessingTaskSerializer(serializers.ModelSerializer):

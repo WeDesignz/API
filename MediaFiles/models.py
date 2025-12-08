@@ -72,7 +72,6 @@ class Relation(models.Model):
         ('User:CustomOrderRequest', 'User and Custom Order Request'),
         ('User:DesignerAccountSuspension', 'User and Designer Account Suspension'),
         ('User:DesignerNotification', 'User and Designer Notification'),
-        ('User:DesignerOnboardingStatus', 'User and Designer Onboarding Status'),
         ('User:DesignerProfile', 'User and Designer Profile'),
         ('User:Email', 'User and Email'),
         ('User:FeedbackReview', 'User and Feedback Review'),
