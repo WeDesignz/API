@@ -2933,9 +2933,85 @@ def designer_dashboard(request):
     total_approved = products.filter(status='active').count()
     total_rejected = products.filter(status='inactive').count()  # Rejected designs have status='inactive'
     
-    # TODO: Get downloads, views, purchases from analytics
-    # For now, using placeholder values
-    total_downloads = 0  # TODO: Calculate from analytics
+    # Calculate download statistics
+    from CoreAdmin.models import CustomerDownloadHistory
+    from Plans.models import Subscription
+    from django.contrib.auth.models import User
+    from common.relations import get_related
+    
+    # Get product IDs for this designer
+    product_ids = list(products.values_list('id', flat=True))
+    
+    # Initialize download statistics
+    total_downloads = 0
+    individual_purchases = 0
+    downloads_by_plan = {
+        'basic': 0,
+        'prime': 0,
+        'premium': 0
+    }
+    
+    if has_full_access and product_ids:
+        # Get all downloads for these products (only design downloads, not PDFs)
+        downloads = CustomerDownloadHistory.objects.filter(
+            item_id__in=product_ids,
+            download_type='design'
+        )
+        
+        total_downloads = downloads.count()
+        
+        # Process each download to categorize
+        for download in downloads.iterator(chunk_size=100):
+            try:
+                # Get customer from download
+                customer = download.customer
+                if not customer:
+                    # If no customer, count as individual purchase
+                    individual_purchases += 1
+                    continue
+                
+                # Check if download_source indicates direct purchase
+                download_source = download.download_source or ''
+                is_direct_purchase = download_source.lower() in ['order', 'cart', 'purchase']
+                
+                # Get active subscription at time of download
+                active_subscription = None
+                if not is_direct_purchase:
+                    # Check subscription active at download time
+                    active_subscription = Subscription.objects.filter(
+                        created_by=customer,
+                        status='active',
+                        created_at__lte=download.downloaded_at
+                    ).order_by('-created_at').first()
+                    
+                    # If no subscription at download time, check current subscription
+                    if not active_subscription:
+                        active_subscription = Subscription.objects.filter(
+                            created_by=customer,
+                            status='active'
+                        ).order_by('-created_at').first()
+                
+                # Categorize download
+                if is_direct_purchase or not active_subscription:
+                    # Individual purchase (direct order/cart purchase or no subscription)
+                    individual_purchases += 1
+                elif active_subscription and active_subscription.plan:
+                    # Subscription-based download - categorize by plan
+                    plan_name = active_subscription.plan.plan_name
+                    if plan_name in downloads_by_plan:
+                        downloads_by_plan[plan_name] += 1
+                    else:
+                        # Unknown plan type, count as individual purchase
+                        individual_purchases += 1
+                else:
+                    # No subscription found, count as individual purchase
+                    individual_purchases += 1
+            except Exception as e:
+                # If there's any error, count as individual purchase
+                individual_purchases += 1
+                continue
+    
+    # TODO: Get views, purchases from analytics
     total_views = 0      # TODO: Calculate from analytics
     total_purchases = 0  # TODO: Calculate from analytics
     
@@ -2972,6 +3048,12 @@ def designer_dashboard(request):
             'total_approved': total_approved,
             'total_rejected': total_rejected,
             'total_downloads': total_downloads if has_full_access else 0,
+            'individual_purchases': individual_purchases if has_full_access else 0,
+            'downloads_by_plan': downloads_by_plan if has_full_access else {
+                'basic': 0,
+                'prime': 0,
+                'premium': 0
+            },
             'total_views': total_views if has_full_access else 0,
             'total_purchases': total_purchases if has_full_access else 0,
             'monthly_earnings': monthly_earnings,
