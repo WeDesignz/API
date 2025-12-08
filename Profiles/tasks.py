@@ -95,9 +95,9 @@ def process_design_upload_task(self, task_id, zip_file_path):
             # Column 5: subcategory
             # Column 6: plan
             # Column 7: color
-            # Column 8: price
-            # Column 9: visible
-            # Column 10: tags
+            # Column 8: visible
+            # Column 9: tags
+            # Note: Price is now managed globally via SystemConfig, not from metadata
             logger.info(f"Task {task_id}: Reading metadata file...")
             metadata_data = zip_ref.read(metadata_file)
             metadata_buffer = io.BytesIO(metadata_data)
@@ -124,9 +124,8 @@ def process_design_upload_task(self, task_id, zip_file_path):
                             'subcategory': str(row[4].value).strip() if len(row) > 4 and row[4].value else '',
                             'plan': str(row[5].value).strip() if len(row) > 5 and row[5].value else '',
                             'color': str(row[6].value).strip() if len(row) > 6 and row[6].value else '',
-                            'price': str(row[7].value).strip() if len(row) > 7 and row[7].value else '',
-                            'visible': str(row[8].value).strip() if len(row) > 8 and row[8].value else '',
-                            'tags': str(row[9].value).strip() if len(row) > 9 and row[9].value else '',
+                            'visible': str(row[7].value).strip() if len(row) > 7 and row[7].value else '',
+                            'tags': str(row[8].value).strip() if len(row) > 8 and row[8].value else '',
                         }
                         metadata_dict[folder_name] = row_data
                         row_count += 1
@@ -322,7 +321,7 @@ def process_design_upload_task(self, task_id, zip_file_path):
                         # Map Plan value (column 6)
                         plan_value = metadata.get('plan', '').strip() if metadata.get('plan') else ''
                         plan_mapping = {
-                            '0': 'basic',
+                            '0': 'free',
                             '1': 'basic',
                             '2': 'prime',
                             '3': 'premium',
@@ -331,14 +330,15 @@ def process_design_upload_task(self, task_id, zip_file_path):
                         }
                         product_plan_type = plan_mapping.get(str(plan_value).strip(), 'basic')
                         
-                        # Get price (column 8)
-                        price_value = metadata.get('price', '').strip() if metadata.get('price') else ''
-                        try:
-                            price = float(str(price_value).strip()) if price_value else None
-                        except (ValueError, TypeError):
+                        # Price is now managed globally via SystemConfig
+                        # Use global design price for paid designs, None for free designs
+                        from common.business_config import BusinessConfig
+                        if product_plan_type == 'free':
                             price = None
+                        else:
+                            price = BusinessConfig.get_design_price()
                         
-                        # Get visibility (column 9)
+                        # Get visibility (column 8, previously column 9)
                         visible_value = metadata.get('visible', '1').strip() if metadata.get('visible') else '1'
                         visibility_status = 'show' if str(visible_value).strip() == '1' else 'hide'
                         
@@ -443,7 +443,7 @@ def process_design_upload_task(self, task_id, zip_file_path):
                         
                         logger.info(f"Task {task_id}: Media files processed, processing tags...")
                         
-                        # Process Tags (column 10)
+                        # Process Tags (column 9, previously column 10)
                         tags_str = metadata.get('tags', '').strip() if metadata.get('tags') else ''
                         if tags_str:
                             tag_names = [tag.strip() for tag in tags_str.split(',') if tag.strip()]

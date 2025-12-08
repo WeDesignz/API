@@ -310,6 +310,7 @@ def generate_pdf_task(self, pdf_download_id):
                 'page_number': len(included_products) + 1,  # Use actual count for PDF pages
                 'original_position': original_position,  # Track original position in sequence
                 'title': product.title,
+                'product_number': product.product_number or f"WD{product.id}",  # Add product number with fallback
                 'image_path': image_path
             })
             mockup_paths.append(image_path)
@@ -339,6 +340,7 @@ def generate_pdf_task(self, pdf_download_id):
                 
                 product_id = product_info['product_id']
                 product_title = product_info['title']
+                product_number = product_info.get('product_number', f"WD{product_id}")  # Get product number from dict
                 image_path = product_info['image_path']
                 
                 if image_path and os.path.exists(image_path):
@@ -348,35 +350,53 @@ def generate_pdf_task(self, pdf_download_id):
                         img_width, img_height = img.size
                         
                         # Calculate scaling to fit page (with margins)
+                        # Reserve space at top for product number (60 points)
                         available_width = page_width - (2 * margin)
-                        available_height = page_height - (2 * margin)
+                        available_height = page_height - (2 * margin) - 60
                         
                         # Calculate scale to fit image within available space
                         scale_x = available_width / img_width
                         scale_y = available_height / img_height
                         scale = min(scale_x, scale_y)
                         
-                        # Calculate centered position
+                        # Calculate centered position for image (below product number)
                         scaled_width = img_width * scale
                         scaled_height = img_height * scale
                         x = (page_width - scaled_width) / 2
-                        y = (page_height - scaled_height) / 2
+                        y = (page_height - scaled_height) / 2 - 30  # Offset down to make room for product number
                         
-                        # Draw image
+                        # Draw product number at the top (centered)
+                        c.setFont("Helvetica-Bold", 24)
+                        text_width = c.stringWidth(product_number, "Helvetica-Bold", 24)
+                        text_x = (page_width - text_width) / 2
+                        text_y = page_height - margin - 30
+                        c.drawString(text_x, text_y, product_number)
+                        
+                        # Draw image below product number
                         c.drawImage(image_path, x, y, width=scaled_width, height=scaled_height, preserveAspectRatio=True)
-                        logger.info(f'Added image for product {product_id} on page {idx}')
+                        logger.info(f'Added product number {product_number} and image for product {product_id} on page {idx}')
                     except Exception as e:
                         logger.error(f'Error adding image for product {product_id}: {e}', exc_info=True)
+                        # Draw product number even if image fails
+                        c.setFont("Helvetica-Bold", 24)
+                        text_width = c.stringWidth(product_number, "Helvetica-Bold", 24)
+                        text_x = (page_width - text_width) / 2
+                        text_y = page_height - margin - 30
+                        c.drawString(text_x, text_y, product_number)
                         # Draw placeholder text if image fails
                         c.setFont("Helvetica", 16)
-                        c.drawString(margin, page_height - margin - 50, f"Product: {product_title}")
                         c.drawString(margin, page_height - margin - 80, "Image not available")
                 else:
                     # This shouldn't happen since we filter out products without valid images
                     # But handle it gracefully just in case
                     logger.warning(f'No image path for product {product_id} in included_products')
+                    # Draw product number even if image is missing
+                    c.setFont("Helvetica-Bold", 24)
+                    text_width = c.stringWidth(product_number, "Helvetica-Bold", 24)
+                    text_x = (page_width - text_width) / 2
+                    text_y = page_height - margin - 30
+                    c.drawString(text_x, text_y, product_number)
                     c.setFont("Helvetica", 16)
-                    c.drawString(margin, page_height - margin - 50, f"Product: {product_title}")
                     c.drawString(margin, page_height - margin - 80, "No mockup image available")
             
             # Save PDF

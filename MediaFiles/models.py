@@ -73,7 +73,6 @@ class Relation(models.Model):
         ('User:DesignerAccountSuspension', 'User and Designer Account Suspension'),
         ('User:DesignerNotification', 'User and Designer Notification'),
         ('User:DesignerOnboardingStatus', 'User and Designer Onboarding Status'),
-        ('User:DesignerPayoutRequest', 'User and Designer Payout Request'),
         ('User:DesignerProfile', 'User and Designer Profile'),
         ('User:Email', 'User and Email'),
         ('User:FeedbackReview', 'User and Feedback Review'),

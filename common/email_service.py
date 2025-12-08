@@ -3,6 +3,7 @@ from django.template.loader import render_to_string
 from django.conf import settings
 from django.contrib.auth.models import User
 from django.utils import timezone
+from datetime import date
 import logging
 
 logger = logging.getLogger(__name__)
@@ -938,4 +939,96 @@ WeDesignz Team
             return True
         except Exception as e:
             logger.error(f"Failed to send designer invoice email to {invoice.user.email}: {str(e)}", exc_info=True)
+            return False
+    
+    @staticmethod
+    def send_designer_monthly_bill_email(invoice: 'Invoice', period_start: date, period_end: date):
+        """
+        Send monthly designer bill email with PDF attachment.
+        Used when designer opts in for settlement.
+        """
+        try:
+            from django.core.mail import EmailMultiAlternatives
+            from django.template.loader import render_to_string
+            from django.conf import settings
+            import os
+            
+            subject = f"Monthly Bill - {invoice.invoice_number} - WeDesignz"
+            
+            # Prepare context for email template
+            context = {
+                'designer_name': invoice.user.get_full_name() or invoice.user.username,
+                'invoice_number': invoice.invoice_number,
+                'period_start': period_start.strftime('%B %d, %Y'),
+                'period_end': period_end.strftime('%B %d, %Y'),
+                'total_amount': float(invoice.total_amount),
+                'gst_amount': float(invoice.gst_amount),
+                'commission_amount': float(invoice.commission_amount),
+                'site_url': settings.SITE_URL,
+            }
+            
+            # Render HTML email
+            try:
+                html_content = render_to_string('emails/designer_monthly_bill.html', context)
+            except:
+                # Fallback to simple HTML if template doesn't exist
+                html_content = f"""
+                <html>
+                <body>
+                    <h2>Monthly Bill - {invoice.invoice_number}</h2>
+                    <p>Dear {context['designer_name']},</p>
+                    <p>Your monthly bill for the period {context['period_start']} to {context['period_end']} has been generated.</p>
+                    <p><strong>Bill Number:</strong> {invoice.invoice_number}</p>
+                    <p><strong>Total Amount:</strong> ₹{context['total_amount']:.2f}</p>
+                    <p><strong>GST:</strong> ₹{context['gst_amount']:.2f}</p>
+                    <p><strong>Platform Commission:</strong> ₹{context['commission_amount']:.2f}</p>
+                    <p>Please find your detailed bill attached as PDF.</p>
+                    <p>This bill is generated as part of your settlement process. Your earnings will be settled on Day 6 of the month.</p>
+                    <p>Visit {settings.SITE_URL}/designer-console to view your wallet and settlement details.</p>
+                    <p>Best regards,<br>WeDesignz Team</p>
+                </body>
+                </html>
+                """
+            
+            # Plain text version
+            text_content = f"""
+Monthly Bill - {invoice.invoice_number}
+
+Dear {context['designer_name']},
+
+Your monthly bill for the period {context['period_start']} to {context['period_end']} has been generated.
+
+Bill Number: {invoice.invoice_number}
+Total Amount: ₹{context['total_amount']:.2f}
+GST: ₹{context['gst_amount']:.2f}
+Platform Commission: ₹{context['commission_amount']:.2f}
+
+Please find your detailed bill attached as PDF.
+
+This bill is generated as part of your settlement process. Your earnings will be settled on Day 6 of the month.
+
+Visit {settings.SITE_URL}/designer-console to view your wallet and settlement details.
+
+Best regards,
+WeDesignz Team
+"""
+            
+            msg = EmailMultiAlternatives(subject, text_content, settings.DEFAULT_FROM_EMAIL, [invoice.user.email])
+            msg.attach_alternative(html_content, "text/html")
+            
+            # Attach PDF bill if it exists
+            if invoice.pdf_file_path and os.path.exists(invoice.pdf_file_path):
+                with open(invoice.pdf_file_path, 'rb') as pdf:
+                    msg.attach(
+                        f'bill_{invoice.invoice_number}.pdf',
+                        pdf.read(),
+                        'application/pdf'
+                    )
+            
+            msg.send()
+            
+            logger.info(f"Monthly designer bill email sent to {invoice.user.email} for bill {invoice.invoice_number}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to send monthly designer bill email to {invoice.user.email}: {str(e)}", exc_info=True)
             return False

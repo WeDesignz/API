@@ -6,7 +6,7 @@ from django.core.exceptions import ValidationError
 from .models import (
     AdminPermissionGroup, AdminUserProfile, AdminActivityLog, AdminSession,
     DesignApproval, DesignAnalytics, CopyrightReport, Refund, RefundLog,
-    FinancialReport, DesignerOnboardingStatus, DesignerPayoutRequest,
+    FinancialReport, DesignerOnboardingStatus,
     DesignerAccountSuspension, DesignerNotification, CustomerAccountStatus,
     CustomerViewHistory, CustomerDownloadHistory, CustomerNotification,
     AdminNotification, AdminNotificationCampaign, SystemConfig
@@ -324,7 +324,7 @@ class SystemConfigAdmin(admin.ModelAdmin):
     Only one instance should exist.
     """
     list_display = [
-        'id', 'commission_rate', 'gst_percentage', 'minimum_required_designs',
+        'id', 'commission_rate', 'gst_percentage', 'design_price', 'minimum_required_designs',
         'maintenance_mode', 'updated_at'
     ]
     list_filter = ['maintenance_mode', 'updated_at', 'created_at']
@@ -335,6 +335,7 @@ class SystemConfigAdmin(admin.ModelAdmin):
             'fields': (
                 'commission_rate',
                 'gst_percentage',
+                'design_price',
                 'custom_order_time_slot_hours',
                 'minimum_required_designs',
             )
@@ -710,9 +711,9 @@ class DesignerOnboardingStatusAdmin(admin.ModelAdmin):
     Admin interface for DesignerOnboardingStatus model.
     Manages designer onboarding status and verification process.
     """
-    list_display = ['id', 'designer_id', 'status', 'superadmin_verified', 'moderator_verified', 'final_approval', 'razorpay_account_verified', 'created_at']
-    list_filter = ['status', 'superadmin_verified', 'moderator_verified', 'final_approval', 'razorpay_account_verified', 'created_at', 'updated_at']
-    search_fields = ['designer_id', 'rejection_reason', 'razorpay_linked_account_id']
+    list_display = ['id', 'designer_id', 'status', 'superadmin_verified', 'moderator_verified', 'final_approval', 'created_at']
+    list_filter = ['status', 'superadmin_verified', 'moderator_verified', 'final_approval', 'created_at', 'updated_at']
+    search_fields = ['designer_id', 'rejection_reason']
     readonly_fields = ['created_at', 'updated_at', 'approved_at', 'rejected_at', 'superadmin_verified_at', 'moderator_verified_at']
     list_editable = ['status', 'superadmin_verified', 'moderator_verified', 'final_approval']
     ordering = ['-created_at']
@@ -724,10 +725,6 @@ class DesignerOnboardingStatusAdmin(admin.ModelAdmin):
         }),
         ('Verification Status', {
             'fields': ('superadmin_verified', 'moderator_verified', 'final_approval', 'superadmin_verified_by_id', 'superadmin_verified_at', 'moderator_verified_by_id', 'moderator_verified_at')
-        }),
-        ('Razorpay Integration', {
-            'fields': ('razorpay_linked_account_id', 'razorpay_account_verified'),
-            'classes': ('collapse',)
         }),
         ('Approval Details', {
             'fields': ('approved_by_id', 'approved_at'),
@@ -751,47 +748,6 @@ class DesignerOnboardingStatusAdmin(admin.ModelAdmin):
             'fields': ('pan_number', 'aadhar_number'),
             'classes': ('collapse',),
             'description': 'Financial details (hidden from moderators)'
-        }),
-        ('Timestamps', {
-            'fields': ('created_at', 'updated_at'),
-            'classes': ('collapse',)
-        }),
-    )
-
-
-@admin.register(DesignerPayoutRequest)
-class DesignerPayoutRequestAdmin(admin.ModelAdmin):
-    """
-    Admin interface for DesignerPayoutRequest model.
-    Manages designer payout requests and processing.
-    """
-    list_display = ['id', 'designer_id', 'amount', 'status', 'scheduled_for', 'processed_at', 'razorpay_payout_id', 'created_at']
-    list_filter = ['status', 'created_at', 'processed_at', 'scheduled_for']
-    search_fields = ['designer_id', 'razorpay_payout_id', 'razorpay_reference_id', 'processing_notes', 'failure_reason']
-    readonly_fields = ['created_at', 'updated_at', 'processed_at']
-    list_editable = ['status']
-    ordering = ['-created_at']
-    list_per_page = 25
-    
-    fieldsets = (
-        ('Payout Information', {
-            'fields': ('designer_id', 'amount', 'status')
-        }),
-        ('Scheduling', {
-            'fields': ('scheduled_for', 'processed_at'),
-            'classes': ('collapse',)
-        }),
-        ('Razorpay Integration', {
-            'fields': ('razorpay_payout_id', 'razorpay_reference_id'),
-            'classes': ('collapse',)
-        }),
-        ('Processing Details', {
-            'fields': ('processing_notes', 'failure_reason', 'approved_by_id', 'approved_at'),
-            'classes': ('collapse',)
-        }),
-        ('Celery Task Tracking', {
-            'fields': ('celery_task_id',),
-            'classes': ('collapse',)
         }),
         ('Timestamps', {
             'fields': ('created_at', 'updated_at'),

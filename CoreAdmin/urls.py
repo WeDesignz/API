@@ -37,8 +37,6 @@ urlpatterns = [
     path('designers/onboarding/', views.designer_onboarding_list, name='designer_onboarding_list'),
     path('designers/<int:designer_id>/onboarding/', views.designer_onboarding_detail, name='designer_onboarding_detail'),
     path('designers/<int:designer_id>/onboarding/verify/', views.verify_designer_onboarding, name='verify_designer_onboarding'),
-    path('designers/payouts/', views.designer_payout_requests, name='designer_payout_requests'),
-    path('designers/payouts/process/', views.process_designer_payouts, name='process_designer_payouts'),
     path('designers/<int:designer_id>/account-action/', views.designer_account_action, name='designer_account_action'),
     path('designers/<int:designer_id>/wallet-summary/', views.designer_wallet_summary, name='designer_wallet_summary'),
     

@@ -837,7 +837,8 @@ def settlement_status(request):
     import pytz
     from Wallet.models import SettlementRequest
     from CoreAdmin.models import DesignerOnboardingStatus
-    from common.relations import get_related, get_user_wallets
+    from common.relations import get_related
+    from Authentication.user_relations import get_user_wallets
     
     # Get current date in Asia/Kolkata timezone
     kolkata_tz = pytz.timezone('Asia/Kolkata')
@@ -864,9 +865,13 @@ def settlement_status(request):
     current_wallet_balance = wallets.first().balance if wallets.exists() else 0
     
     # Check if bank details are provided (required for settlement)
-    onboarding_statuses = get_related(request.user, 'User:DesignerOnboardingStatus', DesignerOnboardingStatus)
-    onboarding = onboarding_statuses.first()
-    has_bank_details = onboarding and onboarding.bank_account_number and onboarding.bank_ifsc_code and onboarding.bank_account_holder_name if onboarding else False
+    # Get bank details from StudioBusinessDetails
+    from Profiles.models import Studio, StudioBusinessDetails
+    studio = Studio.objects.filter(created_by=request.user).first()
+    has_bank_details = False
+    if studio:
+        business_details = StudioBusinessDetails.objects.filter(studio=studio).first()
+        has_bank_details = business_details and business_details.bank_account_number and business_details.bank_ifsc_code and business_details.bank_account_holder_name if business_details else False
     
     settlement_data = {
         'settlement_window_active': settlement_window_active,
@@ -968,10 +973,17 @@ def accept_settlement(request):
         }, status=status.HTTP_404_NOT_FOUND)
     
     # Check if bank details are provided
-    onboarding_statuses = get_related(request.user, 'User:DesignerOnboardingStatus', DesignerOnboardingStatus)
-    onboarding = onboarding_statuses.first()
+    # Get bank details from StudioBusinessDetails
+    from Profiles.models import Studio, StudioBusinessDetails
+    studio = Studio.objects.filter(created_by=request.user).first()
     
-    if not onboarding or not onboarding.bank_account_number or not onboarding.bank_ifsc_code or not onboarding.bank_account_holder_name:
+    if not studio:
+        return Response({
+            'error': 'Studio not found. Please complete onboarding first.'
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    business_details = StudioBusinessDetails.objects.filter(studio=studio).first()
+    if not business_details or not business_details.bank_account_number or not business_details.bank_ifsc_code or not business_details.bank_account_holder_name:
         return Response({
             'error': 'Bank account details are incomplete. Please provide bank account number, IFSC code, and account holder name.'
         }, status=status.HTTP_400_BAD_REQUEST)
@@ -982,6 +994,25 @@ def accept_settlement(request):
         settlement_request.opted_in_at = timezone.now()
         settlement_request.status = 'opted_in'
         settlement_request.save()
+        
+        # Schedule async task to generate and send monthly bill
+        try:
+            from common.tasks import generate_and_send_designer_bill_async
+            import logging
+            logger = logging.getLogger(__name__)
+            
+            generate_and_send_designer_bill_async.delay(
+                designer_id=request.user.id,
+                settlement_period_start=settlement_request.settlement_period_start.isoformat(),
+                settlement_period_end=settlement_request.settlement_period_end.isoformat(),
+                settlement_request_id=settlement_request.id
+            )
+            logger.info(f"Scheduled bill generation task for designer {request.user.id} for settlement {settlement_request.id}")
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f'Failed to queue bill generation task for designer {request.user.id}: {str(e)}', exc_info=True)
+            # Don't fail the settlement opt-in if bill generation fails
         
         return Response({
             'message': 'Settlement accepted successfully',
@@ -1293,14 +1324,19 @@ def download_settlement_sheet(request):
                 if not designer:
                     continue
                 
-                # Get onboarding status for bank details
-                onboarding_statuses = get_related(designer, 'User:DesignerOnboardingStatus', DesignerOnboardingStatus)
-                onboarding = onboarding_statuses.first()
+                # Get bank details from StudioBusinessDetails
+                from Profiles.models import Studio, StudioBusinessDetails
+                studio = Studio.objects.filter(created_by=designer).first()
+                bank_account_number = ''
+                bank_ifsc_code = ''
+                bank_account_holder_name = ''
                 
-                # Get bank details (may be encrypted, but we'll display as-is)
-                bank_account_number = onboarding.bank_account_number if onboarding else ''
-                bank_ifsc_code = onboarding.bank_ifsc_code if onboarding else ''
-                bank_account_holder_name = onboarding.bank_account_holder_name if onboarding else ''
+                if studio:
+                    business_details = StudioBusinessDetails.objects.filter(studio=studio).first()
+                    if business_details:
+                        bank_account_number = business_details.bank_account_number or ''
+                        bank_ifsc_code = business_details.bank_ifsc_code or ''
+                        bank_account_holder_name = business_details.bank_account_holder_name or ''
                 
                 # Mask account number for security (show last 4 digits)
                 if bank_account_number:

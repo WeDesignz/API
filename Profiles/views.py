@@ -1644,13 +1644,16 @@ def designer_onboarding_step3(request):
 @swagger_auto_schema(
     method='post',
     operation_summary='Designer Onboarding Step4',
-    operation_description='Designer Onboarding Step4 endpoint for bulk design upload with validation',
+    operation_description='Designer Onboarding Step4 endpoint for bank details or bulk design upload with validation',
     request_body=openapi.Schema(
         type=openapi.TYPE_OBJECT,
         properties={
+            'bank_account_number': openapi.Schema(type=openapi.TYPE_STRING, description='Bank account number'),
+            'bank_ifsc_code': openapi.Schema(type=openapi.TYPE_STRING, description='IFSC code'),
+            'bank_account_holder_name': openapi.Schema(type=openapi.TYPE_STRING, description='Account holder name'),
+            'account_type': openapi.Schema(type=openapi.TYPE_STRING, description='Account type (savings/current)'),
             'zip_file': openapi.Schema(type=openapi.TYPE_STRING, format=openapi.FORMAT_BINARY, description='Zip file containing designs')
-        },
-        required=['zip_file']
+        }
     ),
     responses={
         200: openapi.Response(description='Success'),
@@ -1662,7 +1665,89 @@ def designer_onboarding_step3(request):
 @permission_classes([IsAuthenticated])
 def designer_onboarding_step4(request):
     """
-    Designer Onboarding Step 4: Upload Designs.
+    Designer Onboarding Step 4: Bank Details or Upload Designs.
+    If bank details are provided (JSON), saves to StudioBusinessDetails.
+    If zip_file is provided, validates zip file structure, metadata.xlsx, and design folders.
+    """
+    from django.db import transaction
+    
+    # Check if this is a bank details request (JSON data with bank fields)
+    if 'bank_account_number' in request.data or 'bank_ifsc_code' in request.data:
+        # Handle bank details
+        return save_bank_details(request)
+    
+    # Otherwise, handle design upload (zip file)
+    return handle_design_upload(request)
+
+
+def save_bank_details(request):
+    """
+    Save bank details to StudioBusinessDetails.
+    """
+    from django.db import transaction
+    
+    # Validate required fields
+    required_fields = ['bank_account_number', 'bank_ifsc_code', 'bank_account_holder_name', 'account_type']
+    for field in required_fields:
+        if field not in request.data:
+            return Response({
+                'error': f'{field} is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+    
+    try:
+        with transaction.atomic():
+            # Get designer profile to check if individual
+            designer_profile = DesignerProfile.objects.get(created_by=request.user)
+            
+            # Get or find studio (should exist from Step 2 or Step 3)
+            studio = Studio.objects.filter(created_by=request.user).first()
+            
+            if not studio:
+                return Response({
+                    'error': 'Studio not found. Please complete previous onboarding steps first.'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Get or create business details
+            business_details, created = StudioBusinessDetails.objects.get_or_create(
+                studio=studio,
+                defaults={'created_by': request.user}
+            )
+            
+            # Update bank details
+            business_details.bank_account_number = request.data['bank_account_number']
+            business_details.bank_ifsc_code = request.data['bank_ifsc_code']
+            business_details.bank_account_holder_name = request.data['bank_account_holder_name']
+            business_details.account_type = request.data['account_type']
+            business_details.updated_by = request.user
+            business_details.save()
+            
+            return Response({
+                'message': 'Bank details saved successfully',
+                'data': {
+                    'bank_account_number': business_details.bank_account_number,  # Note: In production, you might want to mask this
+                    'bank_ifsc_code': business_details.bank_ifsc_code,
+                    'bank_account_holder_name': business_details.bank_account_holder_name,
+                    'account_type': business_details.account_type,
+                    'business_details_id': business_details.id
+                }
+            }, status=status.HTTP_200_OK)
+            
+    except DesignerProfile.DoesNotExist:
+        return Response({
+            'error': 'Designer profile not found. Please complete Step 1 first.'
+        }, status=status.HTTP_400_BAD_REQUEST)
+    except Exception as e:
+        import traceback
+        error_traceback = traceback.format_exc()
+        return Response({
+            'error': f'Failed to save bank details: {str(e)}',
+            'traceback': error_traceback if settings.DEBUG else None
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+def handle_design_upload(request):
+    """
+    Handle design upload (zip file).
     Validates zip file structure, metadata.xlsx, and design folders.
     """
     import zipfile
@@ -2441,6 +2526,55 @@ def get_designer_onboarding_step3(request):
 
 @swagger_auto_schema(
     method='get',
+    operation_summary='Get Designer Onboarding Step4',
+    operation_description='Get saved Step 4 (bank details) data for prefill',
+    responses={
+        200: openapi.Response(description='Success'),
+        404: openapi.Response(description='No data found')
+    },
+    tags=['API']
+)
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_designer_onboarding_step4(request):
+    """
+    Get saved Step 4 (bank details) data for prefill.
+    Works for both individuals and companies.
+    """
+    try:
+        # Find the studio for this designer
+        studio = Studio.objects.filter(created_by=request.user).first()
+        
+        if not studio:
+            return Response({
+                'data': None,
+                'message': 'No Step 4 data found. Please complete previous steps first.'
+            }, status=status.HTTP_404_NOT_FOUND)
+        
+        business_details = StudioBusinessDetails.objects.filter(studio=studio).first()
+        if not business_details or not business_details.bank_account_number:
+            return Response({
+                'data': None,
+                'message': 'No Step 4 data found'
+            }, status=status.HTTP_404_NOT_FOUND)
+        
+        return Response({
+            'data': {
+                'bank_account_number': business_details.bank_account_number,
+                'bank_ifsc_code': business_details.bank_ifsc_code,
+                'bank_account_holder_name': business_details.bank_account_holder_name,
+                'account_type': business_details.account_type
+            }
+        }, status=status.HTTP_200_OK)
+        
+    except Exception as e:
+        return Response({
+            'error': f'Failed to retrieve Step 4 data: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@swagger_auto_schema(
+    method='get',
     operation_summary='Designer Onboarding Status',
     operation_description='Designer Onboarding Status endpoint',
     responses={
@@ -2509,7 +2643,6 @@ def designer_onboarding_status(request):
             'studio_created': False,  # Members don't own studios
             'is_studio_member': True,
             'business_details_completed': False,  # Not applicable
-            'razorpay_account_verified': False,  # Not applicable
             'onboarding_completed': False,  # Members don't need onboarding
             'profile_type': 'member',
             'is_studio_owner': False,
@@ -2648,7 +2781,6 @@ def designer_onboarding_status(request):
             'studio_created': studio is not None,
             'is_studio_member': is_studio_member,
             'business_details_completed': False,
-            'razorpay_account_verified': False,
             'onboarding_completed': designer_profile.onboarding_completed,  # Use the boolean field
             # Profile type information
             'profile_type': designer_profile.profile_type,
@@ -2675,8 +2807,6 @@ def designer_onboarding_status(request):
             try:
                 business_details = StudioBusinessDetails.objects.get(studio=studio)
                 onboarding_status['business_details_completed'] = True
-                # TODO: Check Razorpay account verification status
-                # onboarding_status['razorpay_account_verified'] = razorpay_service.get_account_verification_status(studio)
             except StudioBusinessDetails.DoesNotExist:
                 pass
         

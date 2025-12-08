@@ -24,9 +24,9 @@ from .serializers import (
 from Profiles.serializers import (
     DesignerManagementSerializer, DesignerDetailSerializer, DesignerWalletSerializer,
     DesignerTransactionSerializer, DesignerWithdrawalSerializer, DesignerOnboardingSerializer,
-    DesignerOnboardingDetailSerializer, DesignerOnboardingListSerializer, DesignerPayoutRequestSerializer,
+    DesignerOnboardingDetailSerializer, DesignerOnboardingListSerializer,
     DesignerAccountSuspensionSerializer, DesignerNotificationSerializer, DesignerOnboardingVerificationSerializer,
-    DesignerPayoutProcessSerializer, DesignerAccountActionSerializer, DesignerWalletSummarySerializer
+    DesignerAccountActionSerializer, DesignerWalletSummarySerializer
 )
 from Authentication.serializers import (
     CustomerListSerializer, CustomerDetailSerializer, CustomerHistorySerializer,
@@ -1612,29 +1612,10 @@ def designer_analytics(request):
         rejected_profiles = designers.filter(created_designer_profiles__status='rejected').distinct().count()
         rejected = max(rejected_onboarding, rejected_profiles)  # Use the higher count
         
-        # Get Razorpay pending count (designers with onboarding but razorpay not verified)
-        # Count designers without verified razorpay accounts
-        try:
-            # Count designers who have onboarding status but razorpay not verified
-            razorpay_pending = DesignerOnboardingStatus.objects.filter(
-                razorpay_account_verified=False
-            ).count()
-            # Also count designers who don't have onboarding status yet
-            designers_with_onboarding = DesignerOnboardingStatus.objects.values_list('designer_id', flat=True).distinct()
-            designers_without_onboarding = designers.exclude(id__in=designers_with_onboarding).count()
-            razorpay_pending += designers_without_onboarding
-        except Exception as e:
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.error(f'Error calculating razorpay_pending: {e}')
-            # Fallback: assume all pending designers need razorpay setup
-            razorpay_pending = pending_approval
-        
         # Return stats in format expected by frontend
         stats_data = {
             'total_designers': total_designers,
             'pending_approval': pending_approval,
-            'razorpay_pending': razorpay_pending,
             'rejected': rejected
         }
         
@@ -1953,8 +1934,6 @@ def designer_onboarding_detail(request, designer_id):
                 'superadmin_verified': False,
                 'moderator_verified': False,
                 'final_approval': False,
-                'razorpay_account_verified': False,
-                'razorpay_linked_account_id': None,
                 'rejection_reason': None,
             })
         
@@ -2330,196 +2309,6 @@ def verify_designer_onboarding(request, designer_id):
 
 
 @swagger_auto_schema(
-    method='get',
-    operation_summary="Designer Payout Requests",
-    operation_description="Get list of designer payout requests (SuperAdmin and Moderator access).",
-    manual_parameters=[
-        openapi.Parameter(
-            'status',
-            openapi.IN_QUERY,
-            description='Filter by payout status (pending, processing, completed, failed)',
-            type=openapi.TYPE_STRING
-        ),
-        openapi.Parameter(
-            'designer_id',
-            openapi.IN_QUERY,
-            description='Filter by specific designer ID',
-            type=openapi.TYPE_INTEGER
-        ),
-        openapi.Parameter(
-            'page',
-            openapi.IN_QUERY,
-            description='Page number',
-            type=openapi.TYPE_INTEGER
-        )
-    ],
-    responses={
-        200: openapi.Response(description="Payout requests retrieved successfully"),
-        403: openapi.Response(description="Access denied - admin privileges required")
-    },
-    tags=['CoreAdmin Designer Management']
-)
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])
-def designer_payout_requests(request):
-    """
-    Get list of designer payout requests.
-    """
-    try:
-        admin_profile = request.user.admin_profile
-    except AdminUserProfile.DoesNotExist:
-        return Response({
-            'error': 'Admin profile required'
-        }, status=status.HTTP_403_FORBIDDEN)
-    
-    from .models import DesignerPayoutRequest
-    payout_requests = DesignerPayoutRequest.objects.select_related('designer', 'approved_by').all()
-    
-    # Apply filters
-    status_filter = request.GET.get('status')
-    if status_filter:
-        payout_requests = payout_requests.filter(status=status_filter)
-    
-    designer_id = request.GET.get('designer_id')
-    if designer_id:
-        payout_requests = payout_requests.filter(designer_id=designer_id)
-    
-    # Order by creation date
-    payout_requests = payout_requests.order_by('-created_at')
-    
-    # Pagination
-    from rest_framework.pagination import PageNumberPagination
-    paginator = PageNumberPagination()
-    paginated_requests = paginator.paginate_queryset(payout_requests, request)
-    
-    serializer = DesignerPayoutRequestSerializer(paginated_requests, many=True)
-    
-    # Log activity
-    AdminActivityLog.log_activity(
-        user=request.user,
-        activity_type='user_management',
-        description='Viewed designer payout requests',
-        request=request,
-        metadata={'filters': request.GET.dict()}
-    )
-    
-    return paginator.get_paginated_response(serializer.data)
-
-
-@swagger_auto_schema(
-    method='post',
-    operation_summary="Process Designer Payouts",
-    operation_description="Process or schedule designer payouts (SuperAdmin only).",
-    request_body=openapi.Schema(
-        type=openapi.TYPE_OBJECT,
-        properties={
-            'payout_ids': openapi.Schema(
-                type=openapi.TYPE_ARRAY,
-                items=openapi.Schema(type=openapi.TYPE_INTEGER),
-                description='List of payout request IDs to process',
-                example=[1, 2, 3]
-            ),
-            'scheduled_for': openapi.Schema(
-                type=openapi.TYPE_STRING,
-                format=openapi.FORMAT_DATETIME,
-                description='Schedule payout for later (optional)',
-                example='2024-01-25T10:00:00Z'
-            ),
-            'processing_notes': openapi.Schema(
-                type=openapi.TYPE_STRING,
-                description='Processing notes',
-                example='Bulk payout processing'
-            )
-        },
-        required=['payout_ids']
-    ),
-    responses={
-        200: openapi.Response(description="Payouts processed successfully"),
-        403: openapi.Response(description="Access denied - superadmin required")
-    },
-    tags=['CoreAdmin Designer Management']
-)
-@api_view(['POST'])
-@permission_classes([IsAuthenticated])
-def process_designer_payouts(request):
-    """
-    Process or schedule designer payouts (SuperAdmin only).
-    """
-    try:
-        admin_profile = request.user.admin_profile
-    except AdminUserProfile.DoesNotExist:
-        return Response({
-            'error': 'Admin profile required'
-        }, status=status.HTTP_403_FORBIDDEN)
-    
-    # Only superadmins can process payouts
-    if admin_profile.admin_group != 'superadmin':
-        return Response({
-            'error': 'Access denied. Superadmin privileges required.'
-        }, status=status.HTTP_403_FORBIDDEN)
-    
-    serializer = DesignerPayoutProcessSerializer(data=request.data)
-    if not serializer.is_valid():
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-    
-    payout_ids = serializer.validated_data['payout_ids']
-    scheduled_for = serializer.validated_data.get('scheduled_for')
-    processing_notes = serializer.validated_data.get('processing_notes', '')
-    
-    from .models import DesignerPayoutRequest
-    payouts = DesignerPayoutRequest.objects.filter(id__in=payout_ids)
-    
-    processed_count = 0
-    failed_payouts = []
-    
-    for payout in payouts:
-        try:
-            # Mark as approved and ready for processing
-            success = payout.process_payout(request.user)
-            if success:
-                payout.processing_notes = processing_notes
-                payout.scheduled_for = scheduled_for
-                payout.save()
-                
-                # TODO: Enqueue Celery task for payout processing
-                # from payments.tasks import execute_payout
-                # task = execute_payout.apply_async(
-                #     args=[payout.id],
-                #     eta=scheduled_for
-                # )
-                # payout.celery_task_id = task.id
-                # payout.save()
-                
-                processed_count += 1
-            else:
-                failed_payouts.append(f"Payout {payout.id} cannot be processed")
-                
-        except Exception as e:
-            failed_payouts.append(f"Error processing payout {payout.id}: {str(e)}")
-    
-    # Log activity
-    AdminActivityLog.log_activity(
-        user=request.user,
-        activity_type='user_management',
-        description=f'Processed {processed_count} designer payouts',
-        request=request,
-        metadata={
-            'payout_ids': payout_ids,
-            'scheduled_for': scheduled_for,
-            'processing_notes': processing_notes,
-            'processed_count': processed_count,
-            'failed_payouts': failed_payouts
-        }
-    )
-    
-    return Response({
-        'message': f'Successfully processed {processed_count} payouts',
-        'processed_count': processed_count,
-        'failed_payouts': failed_payouts
-    }, status=status.HTTP_200_OK)
-
-
-@swagger_auto_schema(
     method='post',
     operation_summary="Suspend/Delete Designer Account",
     operation_description="Suspend or delete designer account (SuperAdmin only).",
@@ -2673,7 +2462,6 @@ def designer_wallet_summary(request, designer_id):
                 'total_earnings': 0,
                 'pending_payout': 0,
                 'available_balance': 0,
-                'razorpay_account_verified': False,
                 'can_request_payout': False
             }
         }, status=status.HTTP_200_OK)
@@ -2686,24 +2474,13 @@ def designer_wallet_summary(request, designer_id):
         wallet_transaction_type='credit'
     ).aggregate(total=Sum('amount'))['total'] or 0
     
-    from .models import DesignerPayoutRequest
-    pending_payouts = DesignerPayoutRequest.objects.filter(
-        designer=designer,
-        status='pending'
-    ).aggregate(total=Sum('amount'))['total'] or 0
-    
-    # Check Razorpay account verification
-    razorpay_verified = False
-    if hasattr(designer, 'onboarding_status'):
-        razorpay_verified = designer.onboarding_status.razorpay_account_verified
-    
+    # Payouts are manual now, so can_request_payout is based on balance only
     wallet_summary = {
         'wallet_balance': float(primary_wallet.balance),
         'total_earnings': float(total_earnings),
-        'pending_payout': float(pending_payouts),
-        'available_balance': float(primary_wallet.balance) - float(pending_payouts),
-        'razorpay_account_verified': razorpay_verified,
-        'can_request_payout': razorpay_verified and float(primary_wallet.balance) > 0
+        'pending_payout': 0,  # No longer tracking pending payouts separately
+        'available_balance': float(primary_wallet.balance),
+        'can_request_payout': float(primary_wallet.balance) > 0
     }
     
     # Log activity
@@ -7223,6 +7000,7 @@ def get_system_config(request):
         return Response({
             'commission_rate': config.commission_rate,
             'gst_percentage': config.gst_percentage,
+            'design_price': float(config.design_price) if config.design_price else 50.00,
             'custom_order_time_slot_hours': config.custom_order_time_slot_hours,
             'minimum_required_designs': config.minimum_required_designs,
             'maintenance_mode': config.maintenance_mode,
@@ -7259,6 +7037,9 @@ def update_system_config(request):
             config.commission_rate = float(request.data['commission_rate'])
         if 'gst_percentage' in request.data:
             config.gst_percentage = float(request.data['gst_percentage'])
+        if 'design_price' in request.data:
+            from decimal import Decimal
+            config.design_price = Decimal(str(request.data['design_price']))
         if 'custom_order_time_slot_hours' in request.data:
             config.custom_order_time_slot_hours = int(request.data['custom_order_time_slot_hours'])
         if 'minimum_required_designs' in request.data:

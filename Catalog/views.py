@@ -1393,14 +1393,12 @@ def upload_design(request):
         # All paid designs are available to all subscription plans.
         product_plan_type = request.data.get('product_plan_type', 'free')
         
-        # Handle price - only set if paid (basic)
+        # Handle price - use global price from config if paid (basic)
+        # Designers can no longer set individual prices; all paid designs use the global price
         price_value = None
-        if product_plan_type == 'basic' and request.data.get('price'):
-            try:
-                from decimal import Decimal
-                price_value = Decimal(str(request.data.get('price')))
-            except (ValueError, TypeError):
-                pass
+        if product_plan_type == 'basic':
+            from common.business_config import BusinessConfig
+            price_value = BusinessConfig.get_design_price()
         
         # Determine studio for design association
         # For studio members, get studio from membership
@@ -2086,17 +2084,16 @@ def design_detail(request, design_id):
                     update_data['description'] = request.data['description']
                 if 'category_id' in request.data:
                     update_data['category_id'] = request.data['category_id']
-                if 'price' in request.data:
-                    price_value = request.data['price']
-                    if price_value == '' or price_value is None:
-                        update_data['price'] = None
-                    else:
-                        try:
-                            update_data['price'] = float(price_value)
-                        except (ValueError, TypeError):
-                            pass
+                # Price is now managed globally via SystemConfig, so we don't allow designers to update it directly
+                # If product_plan_type changes, update price accordingly
                 if 'product_plan_type' in request.data:
                     update_data['product_plan_type'] = request.data['product_plan_type']
+                    # Update price based on plan type using global config
+                    from common.business_config import BusinessConfig
+                    if request.data['product_plan_type'] == 'basic':
+                        update_data['price'] = BusinessConfig.get_design_price()
+                    elif request.data['product_plan_type'] == 'free':
+                        update_data['price'] = None
                 if 'color' in request.data:
                     update_data['color'] = request.data['color']
                 

@@ -491,7 +491,8 @@ def process_monthly_settlements(self):
         from django.contrib.auth.models import User
         from Wallet.models import Wallet, SettlementRequest
         from CoreAdmin.models import DesignerOnboardingStatus
-        from common.relations import get_related, get_user_wallets
+        from common.relations import get_related
+        from Authentication.user_relations import get_user_wallets
         
         # Get current date in Asia/Kolkata timezone
         kolkata_tz = pytz.timezone('Asia/Kolkata')
@@ -529,7 +530,7 @@ def process_monthly_settlements(self):
                 onboarding_statuses = get_related(designer, 'User:DesignerOnboardingStatus', DesignerOnboardingStatus)
                 onboarding = onboarding_statuses.first()
                 
-                if not onboarding or not onboarding.razorpay_account_verified:
+                if not onboarding:
                     skipped_count += 1
                     continue
                 
@@ -605,7 +606,7 @@ def process_settlement_payouts(self):
         from decimal import Decimal
         from django.contrib.auth.models import User
         from Wallet.models import Wallet, SettlementRequest, WalletTransaction
-        from common.relations import get_user_wallets
+        from Authentication.user_relations import get_user_wallets
         
         # Get current date in Asia/Kolkata timezone
         kolkata_tz = pytz.timezone('Asia/Kolkata')
@@ -956,6 +957,121 @@ def send_designer_subscription_invoice_email_async(self, invoice_id, subscriptio
         return f"Subscription {subscription_id} not found"
     except Exception as e:
         logger.error(f"Failed to send designer subscription invoice email for invoice {invoice_id}: {str(e)}", exc_info=True)
+        raise self.retry(exc=e, countdown=60, max_retries=3)
+
+
+@shared_task(bind=True, name='common.tasks.generate_and_send_designer_bill_async')
+def generate_and_send_designer_bill_async(self, designer_id, settlement_period_start, settlement_period_end, settlement_request_id):
+    """
+    Generate monthly designer bill and send via email when designer opts in for settlement.
+    This task is triggered when a designer accepts settlement during the settlement window.
+    """
+    try:
+        from django.contrib.auth.models import User
+        from Orders.models import Order, Invoice
+        from Orders.invoice_service import create_monthly_designer_bill, calculate_order_breakdown
+        from datetime import date
+        from collections import defaultdict
+        from decimal import Decimal
+        
+        designer = User.objects.get(id=designer_id)
+        period_start = date.fromisoformat(settlement_period_start)
+        period_end = date.fromisoformat(settlement_period_end)
+        
+        logger.info(f"Generating monthly bill for designer {designer_id} for period {period_start} to {period_end}")
+        
+        # Get all successful orders in the period
+        orders = Order.objects.filter(
+            status='success',
+            created_at__date__gte=period_start,
+            created_at__date__lte=period_end
+        ).exclude(product_ids__isnull=True).exclude(product_ids='')
+        
+        if not orders.exists():
+            logger.warning(f'No orders found for designer {designer_id} in period {period_start} to {period_end}')
+            return f"No orders found for designer {designer_id}"
+        
+        # Initialize purchase type breakdowns
+        purchase_type_breakdowns = {
+            'individual': {
+                'gst_amount': Decimal('0'),
+                'commission_amount': Decimal('0'),
+                'product_total': Decimal('0'),
+                'design_count': 0,
+                'orders': []
+            },
+            'basic': {
+                'gst_amount': Decimal('0'),
+                'commission_amount': Decimal('0'),
+                'product_total': Decimal('0'),
+                'design_count': 0,
+                'orders': []
+            },
+            'prime': {
+                'gst_amount': Decimal('0'),
+                'commission_amount': Decimal('0'),
+                'product_total': Decimal('0'),
+                'design_count': 0,
+                'orders': []
+            },
+            'premium': {
+                'gst_amount': Decimal('0'),
+                'commission_amount': Decimal('0'),
+                'product_total': Decimal('0'),
+                'design_count': 0,
+                'orders': []
+            }
+        }
+        
+        # Process each order and categorize by purchase type
+        for order in orders:
+            breakdown = calculate_order_breakdown(order)
+            if breakdown.get('designer_breakdown') and designer_id in breakdown['designer_breakdown']:
+                dbreakdown = breakdown['designer_breakdown'][designer_id]
+                
+                # Determine purchase type
+                purchase_type = 'individual'
+                if order.subscription and order.subscription.plan:
+                    plan_name = order.subscription.plan.plan_name
+                    if plan_name in ['basic', 'prime', 'premium']:
+                        purchase_type = plan_name
+                
+                # Count designs/products for this purchase type
+                design_count = len(dbreakdown.get('products', []))
+                
+                # Add to appropriate category
+                purchase_type_breakdowns[purchase_type]['gst_amount'] += Decimal(str(dbreakdown['gst_amount']))
+                purchase_type_breakdowns[purchase_type]['commission_amount'] += Decimal(str(dbreakdown['commission_amount']))
+                purchase_type_breakdowns[purchase_type]['product_total'] += Decimal(str(dbreakdown['product_total']))
+                purchase_type_breakdowns[purchase_type]['design_count'] += design_count
+                purchase_type_breakdowns[purchase_type]['orders'].append(order)
+        
+        # Remove empty categories
+        purchase_type_breakdowns = {
+            k: v for k, v in purchase_type_breakdowns.items()
+            if v['gst_amount'] > 0 or v['commission_amount'] > 0
+        }
+        
+        if not purchase_type_breakdowns:
+            logger.warning(f'No valid breakdown data for designer {designer_id} in period {period_start} to {period_end}')
+            return f"No valid breakdown data for designer {designer_id}"
+        
+        # Generate monthly bill
+        invoice = create_monthly_designer_bill(designer, purchase_type_breakdowns, period_start, period_end)
+        
+        logger.info(f"Generated bill {invoice.invoice_number} for designer {designer_id}")
+        
+        # Send email with bill
+        EmailService.send_designer_monthly_bill_email(invoice, period_start, period_end)
+        
+        logger.info(f"Generated and sent bill {invoice.invoice_number} to designer {designer_id}")
+        return f"Bill {invoice.invoice_number} generated and sent to designer {designer_id}"
+        
+    except User.DoesNotExist:
+        logger.error(f"Designer {designer_id} not found")
+        return f"Designer {designer_id} not found"
+    except Exception as e:
+        logger.error(f"Failed to generate bill for designer {designer_id}: {str(e)}", exc_info=True)
         raise self.retry(exc=e, countdown=60, max_retries=3)
 
 
