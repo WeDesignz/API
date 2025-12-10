@@ -739,19 +739,42 @@ def get_user_address(user: User) -> Dict[str, str]:
         
         address_line2 = ", ".join(city_state_parts) if city_state_parts else ""
     
-    # Try to get GST number from StudioBusinessDetails (if user is a designer)
+    # Try to get GST number and address from StudioBusinessDetails (if user is a designer)
     try:
         designer_profile = DesignerProfile.objects.filter(created_by=user).first()
         if designer_profile:
             studio = Studio.objects.filter(created_by=user).first()
             if studio:
                 business_details = StudioBusinessDetails.objects.filter(studio=studio).first()
-                if business_details and business_details.gst_number:
-                    gst_number = business_details.gst_number
-                if business_details and business_details.legal_business_name:
-                    company_name = business_details.legal_business_name
-    except:
-        pass
+                if business_details:
+                    # Get GST number
+                    if business_details.gst_number:
+                        gst_number = business_details.gst_number
+                    # Get business name
+                    if business_details.legal_business_name:
+                        company_name = business_details.legal_business_name
+                    # Get business address from registered_addresses_json if available
+                    if not address_line1 and business_details.registered_addresses_json:
+                        registered_addresses = business_details.registered_addresses_json
+                        # Try to get registered address (usually stored as a dict)
+                        if isinstance(registered_addresses, dict):
+                            # Check for common address field names
+                            if registered_addresses.get('address_line1') or registered_addresses.get('address'):
+                                address_line1 = registered_addresses.get('address_line1') or registered_addresses.get('address', '')
+                            if registered_addresses.get('city') or registered_addresses.get('state') or registered_addresses.get('pincode'):
+                                city_state_parts = []
+                                if registered_addresses.get('city'):
+                                    city_state_parts.append(registered_addresses['city'])
+                                if registered_addresses.get('state'):
+                                    city_state_parts.append(registered_addresses['state'])
+                                if registered_addresses.get('pincode'):
+                                    city_state_parts.append(registered_addresses['pincode'])
+                                if city_state_parts:
+                                    address_line2 = ", ".join(city_state_parts)
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f'Error getting designer business address: {str(e)}', exc_info=True)
     
     return {
         "client_company": company_name,
@@ -954,22 +977,24 @@ def create_designer_invoice(order: Order, designer: User, breakdown: Dict[str, A
     invoice.pdf_file_path = pdf_path
     invoice.save()
     
-    # Send email to designer asynchronously
-    try:
-        from common.tasks import send_designer_invoice_email_async
-        # Prepare breakdown data for serialization
-        breakdown_data = {
-            'product_total': float(breakdown['product_total']),
-            'gst_amount': float(breakdown['gst_amount']),
-            'commission_amount': float(breakdown['commission_amount']),
-            'wallet_amount': float(breakdown['wallet_amount']),
-            'product_ids': [p.id for p in breakdown['products']],  # Store product IDs to fetch in task
-        }
-        send_designer_invoice_email_async.delay(invoice.id, order.id, breakdown_data)
-    except Exception as e:
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.error(f'Failed to queue designer invoice email: {str(e)}', exc_info=True)
+    # DISABLED: Individual order invoice emails are no longer sent to designers.
+    # Designers receive monthly settlement bills which include all orders.
+    # Email sending is disabled to avoid duplicate notifications.
+    # try:
+    #     from common.tasks import send_designer_invoice_email_async
+    #     # Prepare breakdown data for serialization
+    #     breakdown_data = {
+    #         'product_total': float(breakdown['product_total']),
+    #         'gst_amount': float(breakdown['gst_amount']),
+    #         'commission_amount': float(breakdown['commission_amount']),
+    #         'wallet_amount': float(breakdown['wallet_amount']),
+    #         'product_ids': [p.id for p in breakdown['products']],  # Store product IDs to fetch in task
+    #     }
+    #     send_designer_invoice_email_async.delay(invoice.id, order.id, breakdown_data)
+    # except Exception as e:
+    #     import logging
+    #     logger = logging.getLogger(__name__)
+    #     logger.error(f'Failed to queue designer invoice email: {str(e)}', exc_info=True)
     
     return invoice
 

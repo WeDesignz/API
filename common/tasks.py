@@ -1046,6 +1046,37 @@ def generate_and_send_designer_bill_async(self, designer_id, settlement_period_s
                 purchase_type_breakdowns[purchase_type]['design_count'] += design_count
                 purchase_type_breakdowns[purchase_type]['orders'].append(order)
         
+        # Include subscription settlement invoices for this period
+        # Subscription settlements create separate invoices with subscription field set
+        subscription_invoices = Invoice.objects.filter(
+            user_id=designer_id,
+            invoice_type='designer',
+            subscription__isnull=False,
+            invoice_date__gte=period_start,
+            invoice_date__lte=period_end
+        ).select_related('subscription', 'subscription__plan')
+        
+        for sub_invoice in subscription_invoices:
+            if sub_invoice.subscription and sub_invoice.subscription.plan:
+                plan_name = sub_invoice.subscription.plan.plan_name
+                if plan_name in ['basic', 'prime', 'premium']:
+                    purchase_type = plan_name
+                    
+                    # Get design count from invoice data if available
+                    design_count = 0
+                    if sub_invoice.invoice_data and 'items' in sub_invoice.invoice_data:
+                        # Try to get quantity from first item
+                        items = sub_invoice.invoice_data.get('items', [])
+                        if items:
+                            design_count = items[0].get('quantity', 0)
+                    
+                    # Add subscription settlement amounts to appropriate category
+                    purchase_type_breakdowns[purchase_type]['gst_amount'] += Decimal(str(sub_invoice.gst_amount))
+                    purchase_type_breakdowns[purchase_type]['commission_amount'] += Decimal(str(sub_invoice.commission_amount))
+                    purchase_type_breakdowns[purchase_type]['product_total'] += Decimal(str(sub_invoice.subtotal))
+                    purchase_type_breakdowns[purchase_type]['design_count'] += design_count
+                    # Note: subscription invoices don't have orders, so we skip adding to orders list
+        
         # Remove empty categories
         purchase_type_breakdowns = {
             k: v for k, v in purchase_type_breakdowns.items()

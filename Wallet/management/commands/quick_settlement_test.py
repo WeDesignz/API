@@ -150,9 +150,11 @@ class Command(BaseCommand):
                 result = process_settlement_payouts()
                 self.stdout.write(self.style.SUCCESS(f'✓ {result}'))
             
-            # Show processed settlements
-            settlements.refresh_from_db()
-            processed = settlements.filter(status__in=['processing', 'completed'])
+            # Show processed settlements - refetch to get updated status
+            processed = SettlementRequest.objects.filter(
+                settlement_period_start=period_start,
+                status__in=['processing', 'completed']
+            )
             self.stdout.write(f'\n✓ Processed {processed.count()} settlements')
             for settlement in processed:
                 designer_name = settlement.designer.username if settlement.designer else f"ID {settlement.designer_id}"

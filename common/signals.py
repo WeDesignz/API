@@ -400,15 +400,17 @@ def send_settlement_notification(sender, instance, created, **kwargs):
 
 
 # Design Sale Signals
-@receiver(post_save, sender=Order)
-def send_design_sale_notification(sender, instance, created, **kwargs):
-    """Send notification to designer when their design is sold."""
-    if instance.status == 'success':
-        try:
-            # Send notification asynchronously using Celery to avoid blocking the request
-            send_design_sale_notification_async.delay(instance.id)
-        except Exception as e:
-            logger.error(f"Failed to queue design sale notification for order {instance.id}: {str(e)}")
+# DISABLED: Design sale notification email is no longer sent.
+# Designers receive wallet transaction emails which include design sale information.
+# @receiver(post_save, sender=Order)
+# def send_design_sale_notification(sender, instance, created, **kwargs):
+#     """Send notification to designer when their design is sold."""
+#     if instance.status == 'success':
+#         try:
+#             # Send notification asynchronously using Celery to avoid blocking the request
+#             send_design_sale_notification_async.delay(instance.id)
+#         except Exception as e:
+#             logger.error(f"Failed to queue design sale notification for order {instance.id}: {str(e)}")
 
 
 # Custom order comments now use OrderComment model - signals handled in Orders app
