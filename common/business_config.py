@@ -80,6 +80,17 @@ class BusinessConfig:
         return amount * (gst_percentage / Decimal('100'))
     
     @staticmethod
+    def get_design_price():
+        """Get the global design price per design.
+        Reads from SystemConfig, falls back to environment variable if not set.
+        """
+        config = BusinessConfig._get_system_config()
+        if config and config.design_price is not None:
+            return Decimal(str(config.design_price))
+        # Fallback to environment variable
+        return Decimal(str(getattr(settings, 'DESIGN_PRICE', 50.00)))
+    
+    @staticmethod
     def get_delivery_promise_text():
         """Get formatted delivery promise text."""
         hours = BusinessConfig.get_custom_order_time_slot_hours()

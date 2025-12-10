@@ -338,6 +338,13 @@ class StudioBusinessDetails(models.Model):
     gst_number = models.CharField(max_length=20, blank=True, null=True)
     msme_udyam_number = models.CharField(max_length=50, blank=True, null=True)
     msme_certificate_annexure = models.URLField(blank=True, null=True)
+    
+    # Bank account details (encrypted)
+    bank_account_number = models.TextField(blank=True, null=True, help_text='Bank account number (encrypted)')
+    bank_ifsc_code = models.CharField(max_length=20, blank=True, null=True, help_text='IFSC code')
+    bank_account_holder_name = models.CharField(max_length=255, blank=True, null=True, help_text='Account holder name as per bank records')
+    account_type = models.CharField(max_length=20, choices=[('savings', 'Savings'), ('current', 'Current')], blank=True, null=True, help_text='Account type')
+    
     created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='created_studio_business_details')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='updated_studio_business_details', null=True, blank=True)

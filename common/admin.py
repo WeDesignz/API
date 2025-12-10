@@ -130,7 +130,7 @@ class TaskResultAdmin(PaginatedAdminMixin, admin.ModelAdmin):
 
 
 # Pinterest Integration Admin
-from .models import PinterestIntegration, PinterestPost
+from .models import PinterestIntegration, PinterestPost, InstagramIntegration, InstagramPost
 
 
 @admin.register(PinterestIntegration)
@@ -179,8 +179,8 @@ class PinterestIntegrationAdmin(admin.ModelAdmin):
         return not PinterestIntegration.objects.exists()
     
     def has_delete_permission(self, request, obj=None):
-        # Prevent deletion of the singleton
-        return False
+        # Allow deletion for re-authorization
+        return True
 
 
 @admin.register(PinterestPost)
@@ -258,3 +258,132 @@ class PinterestPostAdmin(PaginatedAdminMixin, admin.ModelAdmin):
             messages.error(request, 'Pinterest post not found')
         
         return redirect('admin:common_pinterestpost_changelist')
+
+
+# Instagram Integration Admin
+
+@admin.register(InstagramIntegration)
+class InstagramIntegrationAdmin(admin.ModelAdmin):
+    list_display = [
+        'is_enabled', 'is_configured', 'is_token_valid', 'username', 
+        'last_successful_post', 'last_error_at'
+    ]
+    list_filter = ['is_enabled', 'last_successful_post', 'last_error_at']
+    readonly_fields = [
+        'access_token', 'refresh_token', 'token_expires_at', 'user_id', 'username',
+        'last_successful_post', 'last_error', 'last_error_at',
+        'created_at', 'updated_at', 'created_by'
+    ]
+    
+    fieldsets = (
+        ('Configuration', {
+            'fields': ('is_enabled',)
+        }),
+        ('OAuth Tokens', {
+            'fields': ('access_token', 'refresh_token', 'token_expires_at', 'user_id', 'username'),
+            'classes': ('collapse',)
+        }),
+        ('Status Tracking', {
+            'fields': ('last_successful_post', 'last_error', 'last_error_at'),
+            'classes': ('collapse',)
+        }),
+        ('Metadata', {
+            'fields': ('created_at', 'updated_at', 'created_by'),
+            'classes': ('collapse',)
+        }),
+    )
+    
+    def is_configured(self, obj):
+        return bool(obj.access_token)
+    is_configured.boolean = True
+    is_configured.short_description = 'Configured'
+    
+    def is_token_valid(self, obj):
+        return obj.is_token_valid()
+    is_token_valid.boolean = True
+    is_token_valid.short_description = 'Token Valid'
+    
+    def has_add_permission(self, request):
+        # Only allow one instance (singleton)
+        return not InstagramIntegration.objects.exists()
+    
+    def has_delete_permission(self, request, obj=None):
+        # Allow deletion for re-authorization
+        return True
+
+
+@admin.register(InstagramPost)
+class InstagramPostAdmin(PaginatedAdminMixin, admin.ModelAdmin):
+    list_display = [
+        'product', 'post_type', 'media_type', 'status', 'post_id', 'retry_count', 
+        'created_at', 'posted_at', 'last_retry_at', 'action_buttons'
+    ]
+    list_filter = ['status', 'post_type', 'media_type', 'created_at', 'posted_at']
+    search_fields = ['product__title', 'product__product_number', 'post_id', 'caption', 'error_message']
+    readonly_fields = [
+        'product', 'media_type', 'caption', 'post_type', 'post_id', 'media_id', 'post_url', 
+        'error_message', 'retry_count',
+        'created_at', 'posted_at', 'last_retry_at'
+    ]
+    ordering = ['-created_at']
+    list_per_page = 25
+    
+    fieldsets = (
+        ('Product Information', {
+            'fields': ('product',)
+        }),
+        ('Post Configuration', {
+            'fields': ('post_type', 'media_type', 'caption')
+        }),
+        ('Instagram Status', {
+            'fields': ('status', 'post_id', 'media_id', 'post_url')
+        }),
+        ('Error Tracking', {
+            'fields': ('error_message', 'retry_count', 'last_retry_at'),
+            'classes': ('collapse',)
+        }),
+        ('Timestamps', {
+            'fields': ('created_at', 'posted_at'),
+            'classes': ('collapse',)
+        }),
+    )
+    
+    def action_buttons(self, obj):
+        if obj.status == 'failed':
+            return format_html(
+                '<a href="/admin/common/instagrampost/{}/retry/" class="button">Retry</a>',
+                obj.id
+            )
+        return '-'
+    action_buttons.short_description = 'Actions'
+    
+    def get_urls(self):
+        from django.urls import path
+        urls = super().get_urls()
+        custom_urls = [
+            path(
+                '<int:post_id>/retry/',
+                self.admin_site.admin_view(self.retry_post),
+                name='common_instagrampost_retry',
+            ),
+        ]
+        return custom_urls + urls
+    
+    def retry_post(self, request, post_id):
+        """Retry a failed Instagram post."""
+        from django.shortcuts import redirect
+        from django.contrib import messages
+        from .models import InstagramPost
+        from .tasks import post_to_instagram
+        
+        try:
+            post = InstagramPost.objects.get(id=post_id)
+            if post.status != 'failed':
+                messages.warning(request, f'Post is not in failed status. Current status: {post.get_status_display()}')
+            else:
+                post_to_instagram.delay(post.id)
+                messages.success(request, f'Retry queued for Instagram post: {post.product.title}')
+        except InstagramPost.DoesNotExist:
+            messages.error(request, 'Instagram post not found')
+        
+        return redirect('admin:common_instagrampost_changelist')

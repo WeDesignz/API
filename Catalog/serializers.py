@@ -173,6 +173,7 @@ class ProductSerializer(serializers.ModelSerializer):
     plans = serializers.SerializerMethodField()
     counters = serializers.SerializerMethodField()
     uploaded_by_member = serializers.SerializerMethodField()
+    studio_wedesignz_auto_name = serializers.SerializerMethodField()
     
     class Meta:
         model = Product
@@ -180,7 +181,7 @@ class ProductSerializer(serializers.ModelSerializer):
             'id', 'product_metadata', 'title', 'description', 'category', 'category_id', 'category_name', 'parent_category_name',
             'status', 'product_plan_type', 'product_number', 'studio_design_number', 'color', 'price',
             'visibility_status', 'created_by', 'created_at', 'updated_by', 'updated_at',
-            'created_by_id', 'updated_by_id', 'media', 'tags', 'plans', 'counters', 'uploaded_by_member'
+            'created_by_id', 'updated_by_id', 'media', 'tags', 'plans', 'counters', 'uploaded_by_member', 'studio_wedesignz_auto_name'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
     
@@ -227,6 +228,24 @@ class ProductSerializer(serializers.ModelSerializer):
                 }
             except User.DoesNotExist:
                 return None
+        return None
+    
+    def get_studio_wedesignz_auto_name(self, obj):
+        """
+        Get the studio's WeDesignz auto name for the product creator.
+        Returns None if the creator doesn't have a studio.
+        """
+        if not obj or not obj.created_by:
+            return None
+        
+        try:
+            from Profiles.models import Studio
+            studio = Studio.objects.filter(created_by=obj.created_by).first()
+            if studio and studio.wedesignz_auto_name:
+                return studio.wedesignz_auto_name
+        except Exception:
+            pass
+        
         return None
     
     def get_media(self, obj):
@@ -1455,7 +1474,7 @@ class DesignDetailSerializer(serializers.ModelSerializer):
             if obj.created_by:
                 from Profiles.models import DesignerProfile
                 try:
-                    designer_profile = DesignerProfile.objects.filter(user=obj.created_by).first()
+                    designer_profile = DesignerProfile.objects.filter(created_by=obj.created_by).first()
                     return {
                         'id': obj.created_by.id,
                         'name': obj.created_by.get_full_name() or obj.created_by.username,

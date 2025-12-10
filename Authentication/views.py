@@ -399,8 +399,7 @@ def logout(request):
 @permission_classes([AllowAny])
 def verify_email(request):
     """
-    Verify email with OTP.
-    DUMMY MODE: Accepts sample OTP 123456 for email verification (for testing).
+    Verify email with OTP sent via email.
     """
     serializer = EmailVerificationSerializer(data=request.data)
     
@@ -439,25 +438,38 @@ def verify_email(request):
 @swagger_auto_schema(
     method='post',
     operation_summary="Request Password Reset",
-    operation_description="Request password reset by sending OTP to user's verified email address.",
+    operation_description="Request password reset by sending OTP to user's verified email address or WhatsApp.",
     request_body=openapi.Schema(
         type=openapi.TYPE_OBJECT,
         properties={
             'email': openapi.Schema(
                 type=openapi.TYPE_STRING,
                 format=openapi.FORMAT_EMAIL,
-                description='User email address',
+                description='User email address (required when delivery_method is email)',
                 example='john.doe@example.com'
+            ),
+            'delivery_method': openapi.Schema(
+                type=openapi.TYPE_STRING,
+                description='OTP delivery method',
+                example='email',
+                enum=['email', 'whatsapp'],
+                default='email'
+            ),
+            'phone_number': openapi.Schema(
+                type=openapi.TYPE_STRING,
+                description='10-digit phone number (required when delivery_method is whatsapp)',
+                example='9876543210'
             )
         },
-        required=['email']
+        required=[]
     ),
     responses={
         200: openapi.Response(
             description="Password reset OTP sent successfully",
             examples={
                 "application/json": {
-                    "message": "Password reset OTP sent to your email"
+                    "message": "OTP sent to your verified email address",
+                    "delivery_method": "email"
                 }
             }
         ),
@@ -469,17 +481,53 @@ def verify_email(request):
 @permission_classes([AllowAny])
 def request_password_reset(request):
     """
-    Request password reset - send OTP to verified email.
+    Request password reset - send OTP to verified email or WhatsApp.
     """
     serializer = PasswordResetRequestSerializer(data=request.data)
     
     if serializer.is_valid():
-        email = serializer.validated_data['email']
-        user = User.objects.get(email=email)
+        delivery_method = serializer.validated_data.get('delivery_method', 'email')
         
         # Generate and send OTP
         otp = generate_otp()
         expires_at = timezone.now() + timedelta(minutes=10)
+        
+        if delivery_method == 'whatsapp':
+            user = serializer.validated_data.get('user')
+            mobile_number = serializer.validated_data.get('mobile_number')
+            
+            if user and mobile_number:
+                # Format phone number with country code if needed
+                # Ensure it starts with country code (default to +91 for India)
+                if not mobile_number.startswith('+'):
+                    # Extract digits only
+                    digits_only = ''.join(filter(str.isdigit, mobile_number))
+                    # If it's 10 digits, add +91
+                    if len(digits_only) == 10:
+                        mobile_number = '+91' + digits_only
+                    else:
+                        mobile_number = '+' + digits_only
+                
+                # Create mobile OTP
+                OTP.objects.create(
+                    otp=otp,
+                    otp_type='M',
+                    otp_for='password_reset',
+                    expires_at=expires_at,
+                    created_by=user
+                )
+                
+                # Send OTP via WhatsApp
+                send_otp_sms(mobile_number, otp, "Password Reset")
+                
+                return Response({
+                    'message': f'OTP sent to your WhatsApp ({mobile_number})',
+                    'delivery_method': 'whatsapp'
+                }, status=status.HTTP_200_OK)
+        
+        # Default: Send via email
+        email = serializer.validated_data['email']
+        user = User.objects.get(email=email)
         
         OTP.objects.create(
             otp=otp,
@@ -493,10 +541,142 @@ def request_password_reset(request):
         send_otp_email(email, otp, "Password Reset")
         
         return Response({
-            'message': 'OTP sent to your verified email address'
+            'message': 'OTP sent to your verified email address',
+            'delivery_method': 'email'
         }, status=status.HTTP_200_OK)
     
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@swagger_auto_schema(
+    method='post',
+    operation_summary="Verify Password Reset OTP",
+    operation_description="Verify OTP for password reset without setting password.",
+    request_body=openapi.Schema(
+        type=openapi.TYPE_OBJECT,
+        properties={
+            'email': openapi.Schema(
+                type=openapi.TYPE_STRING,
+                format=openapi.FORMAT_EMAIL,
+                description='User email address (required when OTP was sent via email)',
+                example='john.doe@example.com'
+            ),
+            'phone_number': openapi.Schema(
+                type=openapi.TYPE_STRING,
+                description='10-digit phone number (required when OTP was sent via WhatsApp)',
+                example='9876543210'
+            ),
+            'otp': openapi.Schema(
+                type=openapi.TYPE_STRING,
+                description='6-digit OTP received via email or WhatsApp',
+                example='123456'
+            )
+        },
+        required=['otp']
+    ),
+    responses={
+        200: openapi.Response(
+            description="OTP verified successfully",
+            examples={
+                "application/json": {
+                    "message": "OTP verified successfully",
+                    "verified": True
+                }
+            }
+        ),
+        400: openapi.Response(description="Bad request - invalid OTP")
+    },
+    tags=['Authentication']
+)
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def verify_password_reset_otp(request):
+    """
+    Verify OTP for password reset without setting password.
+    """
+    
+    email = request.data.get('email')
+    phone_number = request.data.get('phone_number')
+    otp = request.data.get('otp')
+    
+    if not otp:
+        return Response({
+            'error': 'OTP is required'
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    user = None
+    
+    # Find user by email or phone number
+    if email:
+        try:
+            user = User.objects.get(email=email)
+        except User.DoesNotExist:
+            return Response({
+                'error': 'User with this email does not exist.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+    elif phone_number:
+        phone_digits = ''.join(filter(str.isdigit, phone_number))
+        if len(phone_digits) != 10:
+            return Response({
+                'error': 'Phone number must be exactly 10 digits.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        verified_mobiles = MobileNumber.objects.filter(is_verified=True)
+        mobile_obj = None
+        for mobile in verified_mobiles:
+            stored_digits = ''.join(filter(str.isdigit, mobile.mobile_number))
+            if len(stored_digits) >= 10 and stored_digits[-10:] == phone_digits:
+                mobile_obj = mobile
+                break
+        
+        if not mobile_obj:
+            return Response({
+                'error': 'User with this phone number does not exist.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        user = mobile_obj.created_by
+    else:
+        return Response({
+            'error': 'Either email or phone number is required.'
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    # Try to find OTP from either email or mobile
+    otp_obj = None
+    try:
+        otp_obj = OTP.objects.get(
+            otp=otp,
+            otp_type='E',
+            otp_for='password_reset',
+            created_by=user,
+            is_verified=False
+        )
+    except OTP.DoesNotExist:
+        try:
+            otp_obj = OTP.objects.get(
+                otp=otp,
+                otp_type='M',
+                otp_for='password_reset',
+                created_by=user,
+                is_verified=False
+            )
+        except OTP.DoesNotExist:
+            return Response({
+                'error': 'Invalid OTP. Please check the code and try again.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+    
+    if otp_obj.is_expired():
+        return Response({
+            'error': 'OTP has expired. Please request a new OTP.'
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    # Mark OTP as verified (but don't delete it yet - we'll use it in password reset)
+    otp_obj.is_verified = True
+    otp_obj.save()
+    
+    return Response({
+        'message': 'OTP verified successfully',
+        'verified': True
+    }, status=status.HTTP_200_OK)
 
 
 @swagger_auto_schema(
@@ -509,12 +689,17 @@ def request_password_reset(request):
             'email': openapi.Schema(
                 type=openapi.TYPE_STRING,
                 format=openapi.FORMAT_EMAIL,
-                description='User email address',
+                description='User email address (required when OTP was sent via email)',
                 example='john.doe@example.com'
+            ),
+            'phone_number': openapi.Schema(
+                type=openapi.TYPE_STRING,
+                description='10-digit phone number (required when OTP was sent via WhatsApp)',
+                example='9876543210'
             ),
             'otp': openapi.Schema(
                 type=openapi.TYPE_STRING,
-                description='6-digit OTP received via email',
+                description='6-digit OTP received via email or WhatsApp',
                 example='123456'
             ),
             'new_password': openapi.Schema(
@@ -528,7 +713,7 @@ def request_password_reset(request):
                 example='newpassword123'
             )
         },
-        required=['email', 'otp', 'new_password', 'confirm_password']
+        required=['otp', 'new_password', 'confirm_password']
     ),
     responses={
         200: openapi.Response(
@@ -556,13 +741,13 @@ def confirm_password_reset(request):
         otp_obj = serializer.validated_data['otp_obj']
         new_password = serializer.validated_data['new_password']
         
-        # Mark OTP as verified
-        otp_obj.is_verified = True
-        otp_obj.save()
-        
+        # OTP is already verified from the previous step, just update password
         # Update password
         user.set_password(new_password)
         user.save()
+        
+        # Delete OTP after successful password reset
+        otp_obj.delete()
         
         return Response({
             'message': 'Password reset successfully'
@@ -635,7 +820,7 @@ def add_mobile_number(request):
                 created_by=request.user
             )
             
-            # Send OTP SMS (demo mode - just prints to console)
+            # Send OTP via WhatsApp
             send_otp_sms(mobile_number, otp, "Mobile Verification")
             
             return Response({
@@ -674,7 +859,7 @@ def add_mobile_number(request):
 @swagger_auto_schema(
     method='post',
     operation_summary="Verify Mobile Number",
-    operation_description="Verify mobile number using OTP sent via SMS.",
+    operation_description="Verify mobile number using OTP sent via WhatsApp.",
     request_body=openapi.Schema(
         type=openapi.TYPE_OBJECT,
         properties={
@@ -685,7 +870,7 @@ def add_mobile_number(request):
             ),
             'otp': openapi.Schema(
                 type=openapi.TYPE_STRING,
-                description='6-digit OTP received via SMS',
+                description='6-digit OTP received via WhatsApp',
                 example='123456'
             )
         },
@@ -708,86 +893,19 @@ def add_mobile_number(request):
 @permission_classes([IsAuthenticated])
 def verify_mobile_number(request):
     """
-    Verify mobile number with OTP.
-    DUMMY MODE: Accepts any 6-digit OTP for mobile verification (SMS API not available).
+    Verify mobile number with OTP sent via WhatsApp.
     """
-    mobile_number = request.data.get('mobile_number')
-    otp = request.data.get('otp')
-    
-    if not mobile_number or not otp:
-        return Response({
-            'error': 'Mobile number and OTP are required'
-        }, status=status.HTTP_400_BAD_REQUEST)
-    
-    # DUMMY MODE: Accept demo OTP 123456 for mobile verification
-    if otp == '123456':
-        try:
-            mobile_obj = MobileNumber.objects.get(
-                mobile_number=mobile_number,
-                created_by=request.user
-            )
-            
-            # Mark mobile number as verified (dummy mode - demo OTP)
-            mobile_obj.is_verified = True
-            mobile_obj.save()
-            
-            # Delete any pending OTP records for this mobile verification
-            try:
-                OTP.objects.filter(
-                    otp_type='M',
-                    otp_for='mobile_verification',
-                    created_by=request.user
-                ).delete()
-            except:
-                pass  # OTP might not exist, that's okay in dummy mode
-            
-            return Response({
-                'message': 'Mobile number verified successfully'
-            }, status=status.HTTP_200_OK)
-        except MobileNumber.DoesNotExist:
-            return Response({
-                'error': 'Mobile number not found for this user'
-            }, status=status.HTTP_400_BAD_REQUEST)
-    
-    # If not demo OTP, check for any 6-digit OTP (fallback)
-    if len(otp) == 6 and otp.isdigit():
-        try:
-            mobile_obj = MobileNumber.objects.get(
-                mobile_number=mobile_number,
-                created_by=request.user
-            )
-            
-            # Mark mobile number as verified (dummy mode - no actual OTP validation)
-            mobile_obj.is_verified = True
-            mobile_obj.save()
-            
-            # Delete any pending OTP records for this mobile verification
-            try:
-                OTP.objects.filter(
-                    otp_type='M',
-                    otp_for='mobile_verification',
-                    created_by=request.user
-                ).delete()
-            except:
-                pass  # OTP might not exist, that's okay in dummy mode
-            
-            return Response({
-                'message': 'Mobile number verified successfully (dummy mode)'
-            }, status=status.HTTP_200_OK)
-        except MobileNumber.DoesNotExist:
-            return Response({
-                'error': 'Mobile number not found for this user'
-            }, status=status.HTTP_400_BAD_REQUEST)
-    
-    # Fallback to real validation if dummy mode fails
     serializer = MobileVerificationSerializer(data=request.data)
     
     if serializer.is_valid():
         mobile_obj = serializer.validated_data['mobile_obj']
         otp_obj = serializer.validated_data.get('otp_obj')
         
-        # Delete OTP record after successful verification
+        # Mark OTP as verified
         if otp_obj:
+            otp_obj.is_verified = True
+            otp_obj.save()
+            # Delete OTP record after successful verification
             otp_obj.delete()
         
         # Mark mobile number as verified
@@ -978,6 +1096,12 @@ def update_mobile_number(request, mobile_id):
                 description='Purpose of OTP',
                 example='email_verification',
                 enum=['email_verification', 'mobile_verification', 'password_reset']
+            ),
+            'delivery_method': openapi.Schema(
+                type=openapi.TYPE_STRING,
+                description='OTP delivery method (for password reset)',
+                example='email',
+                enum=['email', 'whatsapp']
             )
         },
         required=['otp_for']
@@ -1048,10 +1172,10 @@ def resend_otp(request):
                     'error': 'Mobile number not found'
                 }, status=status.HTTP_400_BAD_REQUEST)
             
-            # Only send WhatsApp for mobile verification, not password reset
-            if otp_for != 'mobile_verification':
+            # Check if mobile is verified for password reset
+            if otp_for == 'password_reset' and not mobile_obj.is_verified:
                 return Response({
-                    'error': 'WhatsApp OTP is only available for mobile verification. Please use email for other verifications.'
+                    'error': 'Mobile number must be verified to receive password reset OTP via WhatsApp. Please use email instead.'
                 }, status=status.HTTP_400_BAD_REQUEST)
             
             # Generate and send OTP
@@ -1066,8 +1190,11 @@ def resend_otp(request):
                 created_by=mobile_obj.created_by
             )
             
-            # Send OTP via WhatsApp (only for mobile verification)
-            send_otp_sms(mobile_number, otp, "Mobile Verification")
+            # Send OTP via WhatsApp
+            if otp_for == 'password_reset':
+                send_otp_sms(mobile_number, otp, "Password Reset")
+            else:
+                send_otp_sms(mobile_number, otp, "Mobile Verification")
             
             return Response({
                 'message': f'OTP sent to {mobile_number}'

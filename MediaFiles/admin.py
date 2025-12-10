@@ -171,8 +171,6 @@ class RelationAdmin(admin.ModelAdmin):
             'CustomerViewHistory': ('Profiles', 'CustomerViewHistory'),
             'DesignerAccountSuspension': ('Profiles', 'DesignerAccountSuspension'),
             'DesignerNotification': ('Profiles', 'DesignerNotification'),
-            'DesignerOnboardingStatus': ('Profiles', 'DesignerOnboardingStatus'),
-            'DesignerPayoutRequest': ('Profiles', 'DesignerPayoutRequest'),
             'Notification': ('Profiles', 'Notification'),
             'PromotionUsage': ('Orders', 'PromotionUsage'),
             'StudioMember': ('Profiles', 'StudioMember'),

@@ -288,7 +288,8 @@ class StudioBusinessDetailsSerializer(serializers.ModelSerializer):
             'legal_business_name', 'business_type', 'business_category',
             'business_sub_category', 'business_model', 'registered_addresses_json',
             'pan_number', 'pan_card', 'gst_number', 'msme_udyam_number',
-            'msme_certificate_annexure', 'created_by', 'created_at',
+            'msme_certificate_annexure', 'bank_account_number', 'bank_ifsc_code',
+            'bank_account_holder_name', 'account_type', 'created_by', 'created_at',
             'updated_by', 'updated_at', 'created_by_id', 'updated_by_id'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
@@ -781,7 +782,7 @@ from Wallet.models import Wallet, WalletTransaction, WalletWithdrawalRequest
 from Authentication.user_relations import get_user_wallets
 from common.relations import get_related
 from CoreAdmin.models import (
-    DesignerOnboardingStatus, DesignerPayoutRequest, DesignerAccountSuspension,
+    DesignerAccountSuspension,
     DesignerNotification, AdminUserProfile
 )
 
@@ -790,9 +791,9 @@ class DesignerManagementSerializer(serializers.ModelSerializer):
     """
     Serializer for designer management list view.
     """
-    designer_status = serializers.CharField(source='designerprofile.status', read_only=True)
-    designer_bio = serializers.CharField(source='designerprofile.bio', read_only=True)
-    skill_tags = serializers.JSONField(source='designerprofile.skill_tags', read_only=True)
+    designer_status = serializers.SerializerMethodField()
+    designer_bio = serializers.SerializerMethodField()
+    skill_tags = serializers.SerializerMethodField()
     joined_date = serializers.DateTimeField(source='date_joined', read_only=True)
     last_login = serializers.DateTimeField(read_only=True)
     total_earnings = serializers.SerializerMethodField()
@@ -806,6 +807,21 @@ class DesignerManagementSerializer(serializers.ModelSerializer):
             'is_active', 'designer_status', 'designer_bio', 'skill_tags',
             'joined_date', 'last_login', 'total_earnings', 'pending_withdrawals', 'wallet_balance'
         ]
+    
+    def get_designer_status(self, obj):
+        """Get designer profile status"""
+        profile = obj.created_designer_profiles.first()
+        return profile.status if profile else None
+    
+    def get_designer_bio(self, obj):
+        """Get designer profile bio"""
+        profile = obj.created_designer_profiles.first()
+        return profile.bio if profile else None
+    
+    def get_skill_tags(self, obj):
+        """Get designer profile skill tags"""
+        profile = obj.created_designer_profiles.first()
+        return profile.skill_tags if profile else []
     
     def get_total_earnings(self, obj):
         """Calculate total lifetime earnings for the designer"""
@@ -865,7 +881,11 @@ class DesignerDetailSerializer(serializers.ModelSerializer):
     def get_designer_profile(self, obj):
         """Get designer profile information"""
         try:
-            profile = obj.designerprofile
+            # Use the correct reverse relation name from DesignerProfile model
+            # DesignerProfile has related_name='created_designer_profiles'
+            profile = obj.created_designer_profiles.first()
+            if not profile:
+                return None
             return {
                 'id': profile.id,
                 'bio': profile.bio,
@@ -876,7 +896,7 @@ class DesignerDetailSerializer(serializers.ModelSerializer):
                 'updated_at': profile.updated_at,
                 'media_count': len(profile.get_media())
             }
-        except DesignerProfile.DoesNotExist:
+        except (DesignerProfile.DoesNotExist, AttributeError):
             return None
     
     def get_wallet_info(self, obj):
@@ -1050,85 +1070,23 @@ class DesignerSearchSerializer(serializers.Serializer):
 
 # Enhanced Designer Management Serializers
 
-class DesignerOnboardingSerializer(serializers.ModelSerializer):
-    """
-    Serializer for designer onboarding status.
-    """
-    designer_name = serializers.CharField(source='designer.get_full_name', read_only=True)
-    designer_email = serializers.CharField(source='designer.email', read_only=True)
-    status_display = serializers.CharField(source='get_status_display', read_only=True)
-    
-    # Verification details
-    superadmin_verified_by_name = serializers.CharField(source='superadmin_verified_by.get_full_name', read_only=True)
-    moderator_verified_by_name = serializers.CharField(source='moderator_verified_by.get_full_name', read_only=True)
-    approved_by_name = serializers.CharField(source='approved_by.get_full_name', read_only=True)
-    rejected_by_name = serializers.CharField(source='rejected_by.get_full_name', read_only=True)
-    
-    class Meta:
-        model = DesignerOnboardingStatus
-        fields = [
-            'id', 'designer', 'designer_name', 'designer_email', 'status', 'status_display',
-            'superadmin_verified', 'moderator_verified', 'final_approval',
-            'razorpay_linked_account_id', 'razorpay_account_verified',
-            'rejection_reason', 'rejected_by', 'rejected_by_name', 'rejected_at',
-            'approved_by', 'approved_by_name', 'approved_at',
-            'superadmin_verified_by', 'superadmin_verified_by_name', 'superadmin_verified_at',
-            'moderator_verified_by', 'moderator_verified_by_name', 'moderator_verified_at',
-            'bank_ifsc_code', 'bank_account_holder_name',
-            'created_at', 'updated_at'
-        ]
-        read_only_fields = '__all__'
+# DEPRECATED: DesignerOnboardingStatus model is no longer used
+# These serializers are kept for backward compatibility but should not be used
+# Use DesignerDetailSerializer instead
 
+# class DesignerOnboardingSerializer(serializers.ModelSerializer):
+#     """
+#     DEPRECATED: Use DesignerDetailSerializer instead.
+#     Serializer for designer onboarding status.
+#     """
+#     pass
 
-class DesignerOnboardingDetailSerializer(serializers.ModelSerializer):
-    """
-    Detailed serializer for designer onboarding with sensitive information (SuperAdmin only).
-    """
-    designer_name = serializers.CharField(source='designer.get_full_name', read_only=True)
-    designer_email = serializers.CharField(source='designer.email', read_only=True)
-    status_display = serializers.CharField(source='get_status_display', read_only=True)
-    
-    # Verification details
-    superadmin_verified_by_name = serializers.CharField(source='superadmin_verified_by.get_full_name', read_only=True)
-    moderator_verified_by_name = serializers.CharField(source='moderator_verified_by.get_full_name', read_only=True)
-    approved_by_name = serializers.CharField(source='approved_by.get_full_name', read_only=True)
-    rejected_by_name = serializers.CharField(source='rejected_by.get_full_name', read_only=True)
-    
-    class Meta:
-        model = DesignerOnboardingStatus
-        fields = [
-            'id', 'designer', 'designer_name', 'designer_email', 'status', 'status_display',
-            'superadmin_verified', 'moderator_verified', 'final_approval',
-            'razorpay_linked_account_id', 'razorpay_account_verified',
-            'rejection_reason', 'rejected_by', 'rejected_by_name', 'rejected_at',
-            'approved_by', 'approved_by_name', 'approved_at',
-            'superadmin_verified_by', 'superadmin_verified_by_name', 'superadmin_verified_at',
-            'moderator_verified_by', 'moderator_verified_by_name', 'moderator_verified_at',
-            'bank_account_number', 'bank_ifsc_code', 'bank_account_holder_name',
-            'contact_phone', 'contact_address', 'pan_number', 'aadhar_number',
-            'created_at', 'updated_at'
-        ]
-        read_only_fields = '__all__'
-
-
-class DesignerPayoutRequestSerializer(serializers.ModelSerializer):
-    """
-    Serializer for designer payout requests.
-    """
-    designer_name = serializers.CharField(source='designer.get_full_name', read_only=True)
-    designer_email = serializers.CharField(source='designer.email', read_only=True)
-    status_display = serializers.CharField(source='get_status_display', read_only=True)
-    approved_by_name = serializers.CharField(source='approved_by.get_full_name', read_only=True)
-    
-    class Meta:
-        model = DesignerPayoutRequest
-        fields = [
-            'id', 'designer', 'designer_name', 'designer_email', 'amount', 'status', 'status_display',
-            'scheduled_for', 'processed_at', 'razorpay_payout_id', 'razorpay_reference_id',
-            'processing_notes', 'failure_reason', 'approved_by', 'approved_by_name', 'approved_at',
-            'celery_task_id', 'created_at', 'updated_at'
-        ]
-        read_only_fields = '__all__'
+# class DesignerOnboardingDetailSerializer(serializers.ModelSerializer):
+#     """
+#     DEPRECATED: Use DesignerDetailSerializer instead.
+#     Detailed serializer for designer onboarding with sensitive information (SuperAdmin only).
+#     """
+#     pass
 
 
 class DesignerAccountSuspensionSerializer(serializers.ModelSerializer):
@@ -1199,36 +1157,6 @@ class DesignerOnboardingVerificationSerializer(serializers.Serializer):
         return data
 
 
-class DesignerPayoutProcessSerializer(serializers.Serializer):
-    """
-    Serializer for processing designer payouts.
-    """
-    payout_ids = serializers.ListField(
-        child=serializers.IntegerField(),
-        min_length=1,
-        help_text="List of payout request IDs to process"
-    )
-    scheduled_for = serializers.DateTimeField(required=False, allow_null=True)
-    processing_notes = serializers.CharField(max_length=500, required=False, allow_blank=True)
-    
-    def validate_payout_ids(self, value):
-        """Validate that payout IDs exist and can be processed"""
-        if not value:
-            raise serializers.ValidationError("At least one payout ID is required.")
-        
-        # Check if all payout IDs exist
-        existing_payouts = DesignerPayoutRequest.objects.filter(id__in=value)
-        if existing_payouts.count() != len(value):
-            raise serializers.ValidationError("One or more payout IDs do not exist.")
-        
-        # Check if all payouts can be processed
-        for payout in existing_payouts:
-            if not payout.can_be_processed():
-                raise serializers.ValidationError(f"Payout {payout.id} cannot be processed.")
-        
-        return value
-
-
 class DesignerAccountActionSerializer(serializers.Serializer):
     """
     Serializer for designer account actions (suspend/delete).
@@ -1259,37 +1187,16 @@ class DesignerWalletSummarySerializer(serializers.Serializer):
     total_earnings = serializers.DecimalField(max_digits=10, decimal_places=2)
     pending_payout = serializers.DecimalField(max_digits=10, decimal_places=2)
     available_balance = serializers.DecimalField(max_digits=10, decimal_places=2)
-    razorpay_account_verified = serializers.BooleanField()
     can_request_payout = serializers.BooleanField()
 
 
-class DesignerOnboardingListSerializer(serializers.ModelSerializer):
-    """
-    Serializer for designer onboarding list view.
-    """
-    designer_name = serializers.CharField(source='designer.get_full_name', read_only=True)
-    designer_email = serializers.CharField(source='designer.email', read_only=True)
-    status_display = serializers.CharField(source='get_status_display', read_only=True)
-    verification_progress = serializers.SerializerMethodField()
-    
-    class Meta:
-        model = DesignerOnboardingStatus
-        fields = [
-            'id', 'designer', 'designer_name', 'designer_email', 'status', 'status_display',
-            'superadmin_verified', 'moderator_verified', 'final_approval',
-            'razorpay_account_verified', 'verification_progress',
-            'created_at', 'updated_at'
-        ]
-        read_only_fields = '__all__'
-    
-    def get_verification_progress(self, obj):
-        """Calculate verification progress percentage"""
-        progress = 0
-        if obj.superadmin_verified:
-            progress += 50
-        if obj.moderator_verified:
-            progress += 50
-        return progress
+# DEPRECATED: DesignerOnboardingStatus model is no longer used
+# class DesignerOnboardingListSerializer(serializers.ModelSerializer):
+#     """
+#     DEPRECATED: Use DesignerDetailSerializer instead.
+#     Serializer for designer onboarding list view.
+#     """
+#     pass
 
 
 class DesignProcessingTaskSerializer(serializers.ModelSerializer):

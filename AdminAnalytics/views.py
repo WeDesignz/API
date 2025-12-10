@@ -69,7 +69,8 @@ def dashboard_summary(request):
         from Orders.models import Order
         from Plans.models import Subscription
         from Catalog.models import Product
-        from CoreAdmin.models import DesignApproval, DesignerOnboardingStatus
+        from CoreAdmin.models import DesignApproval
+        from Profiles.models import DesignerProfile
         from CustomRequests.models import CustomOrderRequest
         from Feedback.models import SupportThread, ReportIssue
         from Wallet.models import Wallet
@@ -201,7 +202,8 @@ def dashboard_summary(request):
             ).distinct().count()
             
             # Pending Tasks
-            pending_designer_approvals = DesignerOnboardingStatus.objects.filter(
+            from Profiles.models import DesignerProfile
+            pending_designer_approvals = DesignerProfile.objects.filter(
                 status='pending'
             ).count()
             
@@ -326,17 +328,16 @@ def dashboard_summary(request):
             today = now.date()
             
             # Today's Activity
-            designers_approved_today = DesignerOnboardingStatus.objects.filter(
-                approved_by_id=moderator_id,
-                approved_at__gte=today_start,
-                approved_at__lte=today_end
+            from Profiles.models import DesignerProfile
+            # Count designers whose status was updated to 'verified' today
+            designers_approved_today = DesignerProfile.objects.filter(
+                status='verified',
+                updated_at__gte=today_start,
+                updated_at__lte=today_end
             ).count()
             
-            designers_rejected_today = DesignerOnboardingStatus.objects.filter(
-                rejected_by_id=moderator_id,
-                rejected_at__gte=today_start,
-                rejected_at__lte=today_end
-            ).count()
+            # Note: 'rejected' status doesn't exist in DesignerProfile
+            designers_rejected_today = 0
             
             designs_approved_today = DesignApproval.objects.filter(
                 approved_by_id=moderator_id,
@@ -367,9 +368,9 @@ def dashboard_summary(request):
             ).count()
             
             # Pending Tasks
-            pending_designer_approvals = DesignerOnboardingStatus.objects.filter(
-                status='pending',
-                moderator_verified=False
+            from Profiles.models import DesignerProfile
+            pending_designer_approvals = DesignerProfile.objects.filter(
+                status='pending'
             ).count()
             
             pending_design_reviews = Product.objects.filter(
@@ -1291,7 +1292,8 @@ def moderator_daily_report(request, moderator_id):
         from django.contrib.auth.models import User
         from datetime import datetime, timedelta
         from django.db.models import Q, Count
-        from CoreAdmin.models import DesignApproval, DesignerOnboardingStatus
+        from CoreAdmin.models import DesignApproval
+        from Profiles.models import DesignerProfile
         from CustomRequests.models import CustomOrderRequest
         from Feedback.models import SupportThread, ReportIssue
         from Coupons.models import Coupon, CouponUsage
@@ -1330,34 +1332,30 @@ def moderator_daily_report(request, moderator_id):
         end_datetime = start_datetime + timedelta(days=1) - timedelta(microseconds=1)
         
         # 1. Designers Approved/Rejected
-        designers_approved = DesignerOnboardingStatus.objects.filter(
-            approved_by_id=moderator_id,
-            approved_at__gte=start_datetime,
-            approved_at__lte=end_datetime
+        # Count designers whose status was updated to 'verified' today by this moderator
+        # Note: We track by updated_at and updated_by, but DesignerProfile doesn't have approved_by
+        # So we count all designers updated to verified today (may not be accurate per moderator)
+        designers_approved = DesignerProfile.objects.filter(
+            status='verified',
+            updated_at__gte=start_datetime,
+            updated_at__lte=end_datetime,
+            updated_by_id=moderator_id
         ).count()
         
-        designers_rejected = DesignerOnboardingStatus.objects.filter(
-            rejected_by_id=moderator_id,
-            rejected_at__gte=start_datetime,
-            rejected_at__lte=end_datetime
-        ).count()
+        # Note: 'rejected' status doesn't exist in DesignerProfile
+        designers_rejected = 0
         
         # Get detailed list
-        designers_approved_list = DesignerOnboardingStatus.objects.filter(
-            approved_by_id=moderator_id,
-            approved_at__gte=start_datetime,
-            approved_at__lte=end_datetime
-        ).select_related('designer').values(
-            'id', 'designer_id', 'approved_at'
+        designers_approved_list = DesignerProfile.objects.filter(
+            status='verified',
+            updated_at__gte=start_datetime,
+            updated_at__lte=end_datetime,
+            updated_by_id=moderator_id
+        ).select_related('created_by').values(
+            'id', 'created_by_id', 'updated_at'
         )[:50]  # Limit to 50 for performance
         
-        designers_rejected_list = DesignerOnboardingStatus.objects.filter(
-            rejected_by_id=moderator_id,
-            rejected_at__gte=start_datetime,
-            rejected_at__lte=end_datetime
-        ).select_related('designer').values(
-            'id', 'designer_id', 'rejected_at', 'rejection_reason'
-        )[:50]
+        designers_rejected_list = []  # No rejected status
         
         # 2. Designs Approved/Rejected
         designs_approved = DesignApproval.objects.filter(

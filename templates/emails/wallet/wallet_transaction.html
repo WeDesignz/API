@@ -285,7 +285,13 @@
         
         <div class="content">
             <div class="greeting">Hello {{ user.first_name|default:user.username }}!</div>
-            <p class="intro-text">Your wallet transaction has been processed successfully. Here are the details:</p>
+            <p class="intro-text">
+                {% if transaction.wallet_transaction_type == 'credit' %}
+                    Great news! A customer has purchased your design(s). Your earnings have been credited to your wallet. Here are the details:
+                {% else %}
+                    Your wallet transaction has been processed successfully. Here are the details:
+                {% endif %}
+            </p>
             
             <div class="transaction-details">
                 <h3>Transaction Details</h3>

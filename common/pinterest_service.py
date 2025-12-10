@@ -209,6 +209,150 @@ class PinterestService:
             logger.error(f"Failed to get Pinterest boards: {error_msg}")
             return None
     
+    @classmethod
+    def create_board_with_token(cls, access_token, name="Design Gallery", description="WeDesignz designs", privacy="PUBLIC"):
+        """
+        Create a new Pinterest board using an access token.
+        This doesn't require board_id to be set, so it can be used during initial setup.
+        
+        Args:
+            access_token: Pinterest OAuth access token
+            name: Board name (default: "Design Gallery")
+            description: Board description
+            privacy: Board privacy (PUBLIC or SECRET)
+        
+        Returns:
+            dict: Board data if successful, None otherwise
+        """
+        url = f"{cls.get_api_base_url()}/boards"
+        
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "name": name,
+            "description": description,
+            "privacy": privacy
+        }
+        
+        try:
+            response = requests.post(url, json=payload, headers=headers, timeout=30)
+            response.raise_for_status()
+            
+            board_data = response.json()
+            logger.info(f"Pinterest board created successfully: {board_data.get('id')}")
+            
+            return board_data
+            
+        except requests.exceptions.RequestException as e:
+            error_msg = str(e)
+            if hasattr(e, 'response') and e.response is not None:
+                try:
+                    error_data = e.response.json()
+                    error_msg = error_data.get('message', error_data.get('error_description', str(e)))
+                    logger.error(f"Pinterest API Error: {error_data}")
+                except:
+                    logger.error(f"Response: {e.response.text}")
+            
+            logger.error(f"Failed to create Pinterest board: {error_msg}")
+            return None
+    
+    @classmethod
+    def update_board_with_token(cls, access_token, board_id, name=None, description=None, privacy=None):
+        """
+        Update a Pinterest board using an access token.
+        
+        Args:
+            access_token: Pinterest OAuth access token
+            board_id: Board ID to update
+            name: New board name (optional)
+            description: New board description (optional)
+            privacy: New privacy setting - PUBLIC or SECRET (optional)
+        
+        Returns:
+            dict: Updated board data if successful, None otherwise
+        """
+        url = f"{cls.get_api_base_url()}/boards/{board_id}"
+        
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json"
+        }
+        
+        payload = {}
+        if name is not None:
+            payload["name"] = name
+        if description is not None:
+            payload["description"] = description
+        if privacy is not None:
+            payload["privacy"] = privacy
+        
+        if not payload:
+            logger.warning("No fields to update for Pinterest board")
+            return None
+        
+        try:
+            response = requests.patch(url, json=payload, headers=headers, timeout=30)
+            response.raise_for_status()
+            
+            board_data = response.json()
+            logger.info(f"Pinterest board updated successfully: {board_data.get('id')}")
+            
+            return board_data
+            
+        except requests.exceptions.RequestException as e:
+            error_msg = str(e)
+            if hasattr(e, 'response') and e.response is not None:
+                try:
+                    error_data = e.response.json()
+                    error_msg = error_data.get('message', error_data.get('error_description', str(e)))
+                    logger.error(f"Pinterest API Error: {error_data}")
+                except:
+                    logger.error(f"Response: {e.response.text}")
+            
+            logger.error(f"Failed to update Pinterest board: {error_msg}")
+            return None
+    
+    @classmethod
+    def delete_board_with_token(cls, access_token, board_id):
+        """
+        Delete a Pinterest board using an access token.
+        
+        Args:
+            access_token: Pinterest OAuth access token
+            board_id: Board ID to delete
+        
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        url = f"{cls.get_api_base_url()}/boards/{board_id}"
+        
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+        }
+        
+        try:
+            response = requests.delete(url, headers=headers, timeout=30)
+            response.raise_for_status()
+            
+            logger.info(f"Pinterest board deleted successfully: {board_id}")
+            return True
+            
+        except requests.exceptions.RequestException as e:
+            error_msg = str(e)
+            if hasattr(e, 'response') and e.response is not None:
+                try:
+                    error_data = e.response.json()
+                    error_msg = error_data.get('message', error_data.get('error_description', str(e)))
+                    logger.error(f"Pinterest API Error: {error_data}")
+                except:
+                    logger.error(f"Response: {e.response.text}")
+            
+            logger.error(f"Failed to delete Pinterest board: {error_msg}")
+            return False
+    
     def refresh_access_token(self):
         """
         Refresh the access token using refresh token.

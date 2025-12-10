@@ -24,6 +24,7 @@ urlpatterns = [
     path('get-designer-onboarding-step1/', views.get_designer_onboarding_step1, name='get_designer_onboarding_step1'),
     path('get-designer-onboarding-step2/', views.get_designer_onboarding_step2, name='get_designer_onboarding_step2'),
     path('get-designer-onboarding-step3/', views.get_designer_onboarding_step3, name='get_designer_onboarding_step3'),
+    path('get-designer-onboarding-step4/', views.get_designer_onboarding_step4, name='get_designer_onboarding_step4'),
     
     # Studios
     path('studios/', views.studios_list, name='studios_list'),

@@ -1167,10 +1167,6 @@ class DesignerOnboardingStatus(models.Model):
     moderator_verified = models.BooleanField(default=False)
     final_approval = models.BooleanField(default=False)
     
-    # Razorpay integration
-    razorpay_linked_account_id = models.CharField(max_length=100, blank=True, null=True)
-    razorpay_account_verified = models.BooleanField(default=False)
-    
     # Rejection details
     rejection_reason = models.TextField(blank=True, null=True)
     rejected_by_id = models.IntegerField(null=True, blank=True)
@@ -1251,107 +1247,6 @@ class DesignerOnboardingStatus(models.Model):
         self.rejection_reason = reason
         self.rejected_by_id = rejected_by.pk
         self.rejected_at = timezone.now()
-        self.save()
-        return True
-
-
-class DesignerPayoutRequest(models.Model):
-    """
-    Model to track designer payout requests and processing.
-    """
-    PAYOUT_STATUS_CHOICES = [
-        ('pending', 'Pending'),
-        ('processing', 'Processing'),
-        ('completed', 'Completed'),
-        ('failed', 'Failed'),
-        ('cancelled', 'Cancelled'),
-    ]
-    
-    # Using relation system instead of direct ForeignKey
-    designer_id = models.IntegerField()  # Will be linked via relation
-    amount = models.DecimalField(max_digits=10, decimal_places=2)
-    status = models.CharField(max_length=20, choices=PAYOUT_STATUS_CHOICES, default='pending')
-    
-    # Scheduling
-    scheduled_for = models.DateTimeField(null=True, blank=True)
-    processed_at = models.DateTimeField(null=True, blank=True)
-    
-    # Razorpay integration
-    razorpay_payout_id = models.CharField(max_length=100, blank=True, null=True)
-    razorpay_reference_id = models.CharField(max_length=100, blank=True, null=True)
-    
-    # Processing details
-    processing_notes = models.TextField(blank=True, null=True)
-    failure_reason = models.TextField(blank=True, null=True)
-    
-    # Admin tracking
-    approved_by_id = models.IntegerField(null=True, blank=True)
-    approved_at = models.DateTimeField(null=True, blank=True)
-    
-    # Celery task tracking
-    celery_task_id = models.CharField(max_length=100, blank=True, null=True)
-    
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-    
-    class Meta:
-        db_table = 'designer_payout_request'
-        verbose_name = 'Designer Payout Request'
-        verbose_name_plural = 'Designer Payout Requests'
-        ordering = ['-created_at']
-    
-    def __str__(self):
-        return f"Designer Payout Request {self.pk} - {self.amount} - {self.get_status_display()}"
-    
-    @property
-    def designer(self):
-        """Get the related designer via relation system"""
-        from django.contrib.auth.models import User
-        from common.relations import get_related
-        try:
-            # Create a temporary object with the designer_id
-            temp_obj = type('TempObj', (), {'pk': self.designer_id})()
-            users = get_related(temp_obj, 'User:DesignerPayoutRequest', User)
-            return users.first()
-        except:
-            return None
-    
-    def set_designer(self, designer):
-        """Set the related designer via relation system"""
-        from common.relations import attach_relation
-        attach_relation('User:DesignerPayoutRequest', designer, self)
-    
-    def can_be_processed(self):
-        """Check if payout can be processed"""
-        try:
-            designer = self.designer
-            if not designer:
-                return False
-            
-            # Get onboarding status via relation
-            from common.relations import get_related
-            onboarding_statuses = get_related(designer, 'User:DesignerOnboardingStatus', DesignerOnboardingStatus)
-            onboarding = onboarding_statuses.first()
-            
-            if not onboarding:
-                return False
-                
-            return (
-                self.status == 'pending' and 
-                onboarding.razorpay_account_verified and
-                onboarding.status == 'approved'
-            )
-        except:
-            return False
-    
-    def process_payout(self, approved_by):
-        """Mark payout as approved and ready for processing"""
-        if not self.can_be_processed():
-            return False
-        
-        self.status = 'processing'
-        self.approved_by_id = approved_by.pk
-        self.approved_at = timezone.now()
         self.save()
         return True
 
@@ -2006,6 +1901,7 @@ class SystemConfig(models.Model):
     # Business settings
     commission_rate = models.FloatField(default=15.0)
     gst_percentage = models.FloatField(default=18.0)
+    design_price = models.DecimalField(max_digits=10, decimal_places=2, default=50.00, help_text="Global price per design (all paid designs will use this price)")
     custom_order_time_slot_hours = models.IntegerField(default=1)
     minimum_required_designs = models.IntegerField(default=50)
     maintenance_mode = models.BooleanField(default=False)

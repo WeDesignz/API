@@ -223,8 +223,6 @@ RELATION_TYPES = {
     'User:CustomOrderRequest',
     'User:DesignerAccountSuspension',
     'User:DesignerNotification',
-    'User:DesignerOnboardingStatus',
-    'User:DesignerPayoutRequest',
     'User:DesignerProfile',
     'User:Email',
     'User:FeedbackReview',

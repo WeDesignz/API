@@ -1,7 +1,6 @@
 import requests
 import logging
 from django.conf import settings
-from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
@@ -107,7 +106,7 @@ class WhatsAppService:
     @staticmethod
     def send_otp_message(phone_number, otp_code, purpose="verification"):
         """
-        Send OTP via WhatsApp with properly formatted message.
+        Send OTP via WhatsApp using approved template.
         Only used for mobile verification OTPs.
         
         Args:
@@ -119,32 +118,40 @@ class WhatsAppService:
             bool: True if successful, False otherwise
         """
         try:
-            # Clean, simple message format
-            message = f"""Your WeDesignz verification code is: {otp_code}
-
-This code is valid for 10 minutes.
-
-Do not share this code with anyone. WeDesignz will never ask for your OTP.
-
-Thank you,
-WeDesignz Team"""
-
-            return WhatsAppService.send_message(phone_number, message)
+            # Use approved template instead of free-form message
+            template_name = getattr(settings, 'WHATSAPP_OTP_TEMPLATE_NAME', 'otp_template')
+            
+            # Pass OTP code as the first parameter ({{1}} in template body)
+            parameters = [otp_code]
+            
+            # Button also requires OTP as text parameter (not URL)
+            # Template has button at index 0 that expects OTP as text
+            button_parameters = [otp_code]
+            
+            return WhatsAppService.send_template_message(
+                phone_number=phone_number,
+                template_name=template_name,
+                parameters=parameters,
+                button_parameters=button_parameters
+            )
             
         except Exception as e:
             logger.error(f"Failed to send OTP via WhatsApp to {phone_number}: {str(e)}")
             return False
     
     @staticmethod
-    def send_template_message(phone_number, template_name, parameters=None):
+    def send_template_message(phone_number, template_name, parameters=None, button_parameters=None):
         """
         Send a WhatsApp template message (for approved templates).
         
         Args:
             phone_number: Recipient phone number
             template_name: Name of the approved template
-            parameters: List of parameters for the template
-            
+            parameters: List of parameters for the template body
+            button_parameters: List of parameters for template buttons (if any)
+                For URL buttons, provide the URL as a string
+                For quick reply buttons, provide the button text
+                
         Returns:
             bool: True if successful, False otherwise
         """
@@ -179,16 +186,42 @@ WeDesignz Team"""
                 }
             }
             
-            # Add parameters if provided
+            # Build components array
+            components = []
+            
+            # Add body parameters if provided
             if parameters:
-                payload["template"]["components"] = [
-                    {
-                        "type": "body",
+                components.append({
+                    "type": "body",
+                    "parameters": [
+                        {"type": "text", "text": str(param)} for param in parameters
+                    ]
+                })
+            
+            # Add button parameters if provided
+            # Template requires URL button type (not COPY button)
+            if button_parameters:
+                for index, button_param in enumerate(button_parameters):
+                    button_param_str = str(button_param)
+                    
+                    # URL button format (required by template)
+                    # Index should be string (as per WhatsApp API)
+                    # Parameter type must be "text" with text value in "text" field
+                    components.append({
+                        "type": "button",
+                        "sub_type": "url",
+                        "index": str(index),  # Index as string per WhatsApp API
                         "parameters": [
-                            {"type": "text", "text": str(param)} for param in parameters
+                            {
+                                "type": "text",
+                                "text": button_param_str
+                            }
                         ]
-                    }
-                ]
+                    })
+            
+            # Only add components if we have any
+            if components:
+                payload["template"]["components"] = components
             
             response = requests.post(url, json=payload, headers=headers, timeout=10)
             

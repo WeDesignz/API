@@ -586,7 +586,17 @@ RAZORPAY_WEBHOOK_SECRET = config('RAZORPAY_WEBHOOK_SECRET', default='')
 # WhatsApp Business API Configuration
 WHATSAPP_PHONE_NUMBER_ID = config('WHATSAPP_PHONE_NUMBER_ID', default='')
 WHATSAPP_ACCESS_TOKEN = config('WHATSAPP_ACCESS_TOKEN', default='')
-WHATSAPP_BUSINESS_ACCOUNT_ID = config('WHATSAPP_BUSINESS_ACCOUNT_ID', default='')
+WHATSAPP_OTP_TEMPLATE_NAME = config('WHATSAPP_OTP_TEMPLATE_NAME', default='otp_template')
+
+# Instagram/Facebook Configuration
+INSTAGRAM_APP_ID = config('INSTAGRAM_APP_ID', default='')
+INSTAGRAM_APP_SECRET = config('INSTAGRAM_APP_SECRET', default='')
+INSTAGRAM_ACCESS_TOKEN = config('INSTAGRAM_ACCESS_TOKEN', default='')
+INSTAGRAM_REDIRECT_URI = config('INSTAGRAM_REDIRECT_URI', default='')
+# Also support FACEBOOK_APP_ID and FACEBOOK_APP_SECRET for compatibility
+# If FACEBOOK_APP_ID is not set, fallback to INSTAGRAM_APP_ID
+FACEBOOK_APP_ID = config('FACEBOOK_APP_ID', default='') or INSTAGRAM_APP_ID
+FACEBOOK_APP_SECRET = config('FACEBOOK_APP_SECRET', default='') or INSTAGRAM_APP_SECRET
 
 # Celery Configuration
 CELERY_BROKER_URL = config('CELERY_BROKER_URL', default='redis://localhost:6379/0')
@@ -684,3 +694,80 @@ CORS_ALLOW_HEADERS = [
     'x-csrftoken',
     'x-requested-with',
 ]
+
+# Logging Configuration
+# Create logs directory if it doesn't exist (do this before LOGGING config)
+LOGS_DIR = os.path.join(BASE_DIR, 'logs')
+try:
+    if not os.path.exists(LOGS_DIR):
+        os.makedirs(LOGS_DIR, mode=0o755)
+except (OSError, PermissionError) as e:
+    # If we can't create the directory, just log to console
+    pass
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {
+            'format': '[{levelname}] {asctime} {name} {module} {process:d} {thread:d} {message}',
+            'style': '{',
+        },
+        'simple': {
+            'format': '[{levelname}] {asctime} {name} {message}',
+            'style': '{',
+        },
+    },
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+            'formatter': 'verbose',
+            'stream': 'ext://sys.stderr',  # Output to stderr so Gunicorn/journalctl can capture it reliably
+        },
+    },
+    'root': {
+        'handlers': ['console'],
+        'level': 'INFO',  # Show INFO and above in console
+    },
+    'loggers': {
+        'django': {
+            'handlers': ['console'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'common': {
+            'handlers': ['console'],
+            'level': 'INFO',  # Show INFO level logs for common app
+            'propagate': False,
+        },
+        'common.views': {
+            'handlers': ['console'],
+            'level': 'INFO',  # Show INFO level logs for views
+            'propagate': False,
+        },
+        'common.tasks': {
+            'handlers': ['console'],
+            'level': 'INFO',  # Show INFO level logs for tasks
+            'propagate': False,
+        },
+        'common.instagram_service': {
+            'handlers': ['console'],
+            'level': 'INFO',  # Show INFO level logs for Instagram service
+            'propagate': False,
+        },
+    },
+}
+
+# Add file handler only if logs directory exists and is writable
+if os.path.exists(LOGS_DIR) and os.access(LOGS_DIR, os.W_OK):
+    LOGGING['handlers']['file'] = {
+        'class': 'logging.handlers.RotatingFileHandler',
+        'filename': os.path.join(LOGS_DIR, 'django.log'),
+        'maxBytes': 1024 * 1024 * 10,  # 10 MB
+        'backupCount': 5,
+        'formatter': 'verbose',
+    }
+    # Add file handler to all loggers
+    for logger_name in ['django', 'common', 'common.views', 'common.tasks', 'common.instagram_service']:
+        if 'file' not in LOGGING['loggers'][logger_name]['handlers']:
+            LOGGING['loggers'][logger_name]['handlers'].append('file')

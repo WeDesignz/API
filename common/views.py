@@ -9,7 +9,7 @@ from datetime import timedelta
 import requests
 import logging
 
-from .models import PinterestIntegration
+from .models import PinterestIntegration, InstagramIntegration, InstagramPost
 
 logger = logging.getLogger(__name__)
 
@@ -175,7 +175,7 @@ def pinterest_oauth_callback(request):
                     </p>
                     <div class="actions">
                         <a href="/api/pinterest/authorize/" class="btn btn-primary">Try Again</a>
-                        <a href="{admin_webapp_url}/settings?tab=pinterest" class="btn btn-secondary">Go to Settings</a>
+                        <a href="{admin_webapp_url}/settings" class="btn btn-secondary">Go to Settings</a>
                     </div>
                 </div>
             </body>
@@ -284,7 +284,7 @@ def pinterest_oauth_callback(request):
                     </p>
                     <div class="actions">
                         <a href="/api/pinterest/authorize/" class="btn btn-primary">Try Again</a>
-                        <a href="{admin_webapp_url}/settings?tab=pinterest" class="btn btn-secondary">Go to Settings</a>
+                        <a href="{admin_webapp_url}/settings" class="btn btn-secondary">Go to Settings</a>
                     </div>
                 </div>
             </body>
@@ -531,7 +531,7 @@ def pinterest_oauth_callback(request):
                         </div>
                         <div class="actions">
                             <a href="/api/pinterest/authorize/" class="btn btn-primary">Try Again</a>
-                            <a href="{admin_webapp_url}/settings?tab=pinterest" class="btn btn-secondary">Go to Settings</a>
+                            <a href="{admin_webapp_url}/settings" class="btn btn-secondary">Go to Settings</a>
                         </div>
                     </div>
                 </body>
@@ -570,38 +570,96 @@ def pinterest_oauth_callback(request):
         except Exception as e:
             logger.warning(f"Could not queue retry for failed posts: {str(e)}")
         
-        # Try to get boards to help user select board
+        # Try to get boards and auto-select or create one
         boards_info = ""
+        auto_selected_board = None
         try:
             from .pinterest_service import PinterestService
-            service = PinterestService()
-            boards = service.get_boards()
-            if boards:
-                boards_info = "<h3>Your Pinterest Boards:</h3><ul>"
+            
+            # Fetch existing boards
+            boards = PinterestService.get_boards_with_token(integration.access_token)
+            
+            if boards and len(boards) > 0:
+                # Boards exist: auto-select the first one
+                first_board = boards[0]
+                board_id = str(first_board.get('id', ''))
+                board_name = first_board.get('name', 'Unknown')
+                
+                # Auto-select the first board
+                integration.board_id = board_id
+                integration.board_name = board_name
+                integration.save()
+                
+                auto_selected_board = first_board
+                logger.info(f"Auto-selected Pinterest board: {board_name} (ID: {board_id})")
+                
+                boards_info = f"<h3>Your Pinterest Boards:</h3><ul>"
                 for board in boards[:10]:  # Show first 10 boards
-                    board_id = board.get('id', '')
-                    board_name = board.get('name', 'Unknown')
-                    boards_info += f"<li><strong>{board_name}</strong> - ID: <code>{board_id}</code></li>"
+                    b_id = board.get('id', '')
+                    b_name = board.get('name', 'Unknown')
+                    selected = "✅ (Auto-selected)" if str(b_id) == str(board_id) else ""
+                    boards_info += f"<li><strong>{b_name}</strong>{selected}<br><code>{b_id}</code></li>"
                 boards_info += "</ul>"
+            else:
+                # No boards exist: create a default one in sandbox mode
+                use_sandbox = getattr(settings, 'PINTEREST_USE_SANDBOX', True)
+                if use_sandbox:
+                    # Create a default board in sandbox
+                    new_board = PinterestService.create_board_with_token(
+                        integration.access_token,
+                        name="Design Gallery",
+                        description="WeDesignz designs"
+                    )
+                    
+                    if new_board:
+                        board_id = str(new_board.get('id', ''))
+                        board_name = new_board.get('name', 'Design Gallery')
+                        
+                        # Auto-select the newly created board
+                        integration.board_id = board_id
+                        integration.board_name = board_name
+                        integration.save()
+                        
+                        auto_selected_board = new_board
+                        logger.info(f"Created and auto-selected Pinterest board: {board_name} (ID: {board_id})")
+                        
+                        boards_info = f"<h3>Created New Board:</h3><ul>"
+                        boards_info += f"<li><strong>{board_name}</strong> ✅ (Auto-selected)<br><code>{board_id}</code></li>"
+                        boards_info += "</ul><p><em>Note: In sandbox mode, boards may not appear in the list but can still be used.</em></p>"
+                    else:
+                        boards_info = "<p><em>Could not create board automatically. Please create a board manually in Pinterest and set it in Settings.</em></p>"
+                else:
+                    boards_info = "<p><em>No boards found. Please create a board in Pinterest and select it in Settings.</em></p>"
+                    
         except Exception as e:
-            logger.warning(f"Could not fetch boards: {str(e)}")
+            logger.warning(f"Could not fetch/create boards: {str(e)}", exc_info=True)
             boards_info = "<p><em>Could not fetch boards. You can get your board ID from Pinterest API later.</em></p>"
         
         # Get admin webapp URL
         admin_webapp_url = getattr(settings, 'ADMIN_WEBAPP_URL', 'https://admin.wedesignz.com')
         
-        # Format boards info with better styling
+        # Format boards info with minimal styling
         boards_html = ""
         if boards_info and "<h3>" in boards_info:
-            # Extract boards from the HTML
-            boards_html = boards_info.replace("<h3>Your Pinterest Boards:</h3>", "<h3 style='margin-top: 24px; color: #495057;'>Your Pinterest Boards:</h3>")
-            boards_html = boards_html.replace("<ul>", "<ul style='list-style: none; padding: 0; margin: 16px 0;'>")
-            boards_html = boards_html.replace("<li>", "<li style='background: #f8f9fa; padding: 12px; margin: 8px 0; border-radius: 6px; border-left: 3px solid #667eea;'>")
-            boards_html = boards_html.replace("<code>", "<code style='background: #e9ecef; padding: 4px 8px; border-radius: 4px; font-size: 12px; font-family: 'Courier New', monospace;'>")
+            # Extract boards from the HTML and format for minimal design
+            boards_html = boards_info
+            boards_html = boards_html.replace("<h3>Your Pinterest Boards:</h3>", "<div class='boards-section'><h3>Your Boards</h3><ul class='board-list'>")
+            boards_html = boards_html.replace("<h3>Created New Board:</h3>", "<div class='boards-section'><h3>Created Board</h3><ul class='board-list'>")
+            # Remove the first <ul> tag (we already added it above)
+            boards_html = boards_html.replace("<ul>", "", 1)
+            boards_html = boards_html.replace("</ul>", "</ul></div>", 1)
+            boards_html = boards_html.replace("<li>", "<li class='board-item'>")
+            boards_html = boards_html.replace("✅ (Auto-selected)", "<span style='color: #0a7c0a; font-size: 11px; margin-left: 8px;'>• Selected</span>")
+            # Handle any remaining </ul> tags
+            boards_html = boards_html.replace("</ul>", "")
+            # Handle any <p> tags that might be in the message
+            if "<p>" in boards_html:
+                boards_html = boards_html.replace("<p><em>", "<p style='color: #666; font-size: 13px; margin-top: 12px;'>")
+                boards_html = boards_html.replace("</em></p>", "</p>")
         elif boards_info:
-            boards_html = f"<div style='background: #fff3cd; border: 1px solid #ffc107; padding: 16px; border-radius: 8px; margin: 24px 0;'>{boards_info}</div>"
+            boards_html = f"<div class='boards-section'><p style='color: #666; font-size: 13px; line-height: 1.5;'>{boards_info.replace('<p>', '').replace('</p>', '').replace('<em>', '').replace('</em>', '')}</p></div>"
         
-        # Display success message with modern UI
+        # Display success message with minimal professional UI
         return HttpResponse(
             f"""
             <!DOCTYPE html>
@@ -609,222 +667,203 @@ def pinterest_oauth_callback(request):
             <head>
                 <meta charset="UTF-8">
                 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <title>Pinterest Authorization Successful</title>
+                <title>Pinterest Connected</title>
                 <style>
                     * {{ margin: 0; padding: 0; box-sizing: border-box; }}
                     body {{
                         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-                        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                        background: #f5f5f5;
                         min-height: 100vh;
                         display: flex;
                         align-items: center;
                         justify-content: center;
                         padding: 20px;
+                        color: #333;
                     }}
                     .container {{
                         background: white;
-                        border-radius: 16px;
-                        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-                        max-width: 700px;
+                        border-radius: 8px;
+                        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+                        max-width: 500px;
                         width: 100%;
-                        padding: 40px;
-                    }}
-                    .success-header {{
-                        text-align: center;
-                        margin-bottom: 32px;
+                        padding: 48px 40px;
                     }}
                     .success-icon {{
-                        width: 100px;
-                        height: 100px;
+                        width: 64px;
+                        height: 64px;
                         margin: 0 auto 24px;
-                        background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+                        background: #BD081C;
                         border-radius: 50%;
                         display: flex;
                         align-items: center;
                         justify-content: center;
-                        font-size: 50px;
-                        animation: scaleIn 0.5s ease;
-                    }}
-                    @keyframes scaleIn {{
-                        from {{ transform: scale(0); }}
-                        to {{ transform: scale(1); }}
+                        color: white;
+                        font-size: 32px;
+                        font-weight: 300;
                     }}
                     h1 {{
-                        color: #28a745;
-                        font-size: 32px;
+                        color: #1a1a1a;
+                        font-size: 24px;
+                        font-weight: 600;
+                        text-align: center;
                         margin-bottom: 8px;
-                        font-weight: 700;
+                        letter-spacing: -0.3px;
                     }}
                     .subtitle {{
-                        color: #6c757d;
-                        font-size: 16px;
+                        color: #666;
+                        font-size: 14px;
+                        text-align: center;
+                        margin-bottom: 32px;
+                        line-height: 1.5;
                     }}
-                    .info-card {{
-                        background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%);
-                        border: 2px solid #4caf50;
-                        border-radius: 12px;
-                        padding: 20px;
+                    .info-section {{
+                        border-top: 1px solid #e5e5e5;
+                        border-bottom: 1px solid #e5e5e5;
+                        padding: 20px 0;
                         margin: 24px 0;
-                    }}
-                    .info-card h2 {{
-                        color: #2e7d32;
-                        font-size: 20px;
-                        margin-bottom: 12px;
-                        display: flex;
-                        align-items: center;
-                        gap: 8px;
                     }}
                     .info-item {{
                         display: flex;
                         justify-content: space-between;
                         align-items: center;
-                        padding: 12px 0;
-                        border-bottom: 1px solid rgba(46, 125, 50, 0.2);
-                    }}
-                    .info-item:last-child {{
-                        border-bottom: none;
+                        padding: 8px 0;
+                        font-size: 14px;
                     }}
                     .info-label {{
-                        color: #2e7d32;
-                        font-weight: 600;
-                        font-size: 14px;
+                        color: #666;
+                        font-weight: 400;
                     }}
                     .info-value {{
-                        color: #1b5e20;
-                        font-size: 14px;
+                        color: #1a1a1a;
+                        font-weight: 500;
+                    }}
+                    .status-badge {{
+                        display: inline-flex;
+                        align-items: center;
+                        gap: 6px;
+                        color: #0a7c0a;
+                        font-size: 13px;
+                        font-weight: 500;
+                    }}
+                    .status-badge::before {{
+                        content: '';
+                        width: 8px;
+                        height: 8px;
+                        background: #0a7c0a;
+                        border-radius: 50%;
                     }}
                     .boards-section {{
-                        background: #f8f9fa;
-                        border-radius: 12px;
-                        padding: 20px;
                         margin: 24px 0;
+                        padding: 20px 0;
                     }}
                     .boards-section h3 {{
-                        color: #495057;
-                        font-size: 18px;
-                        margin-bottom: 16px;
+                        color: #1a1a1a;
+                        font-size: 14px;
+                        font-weight: 600;
+                        margin-bottom: 12px;
+                        text-transform: uppercase;
+                        letter-spacing: 0.5px;
                     }}
-                    .next-steps {{
-                        background: #e3f2fd;
-                        border: 2px solid #2196f3;
-                        border-radius: 12px;
-                        padding: 20px;
-                        margin: 24px 0;
+                    .board-list {{
+                        list-style: none;
+                        margin: 0;
+                        padding: 0;
                     }}
-                    .next-steps h2 {{
-                        color: #1565c0;
-                        font-size: 20px;
-                        margin-bottom: 16px;
-                        display: flex;
-                        align-items: center;
-                        gap: 8px;
-                    }}
-                    .next-steps ol {{
-                        margin-left: 20px;
-                        line-height: 2;
-                        color: #1976d2;
-                    }}
-                    .next-steps li {{
-                        margin-bottom: 8px;
-                    }}
-                    .next-steps code {{
-                        background: #bbdefb;
-                        padding: 4px 8px;
+                    .board-item {{
+                        background: #f9f9f9;
+                        border: 1px solid #e5e5e5;
                         border-radius: 4px;
+                        padding: 12px;
+                        margin-bottom: 8px;
                         font-size: 13px;
-                        font-family: 'Courier New', monospace;
-                        color: #0d47a1;
+                    }}
+                    .board-item strong {{
+                        color: #1a1a1a;
+                        font-weight: 500;
+                        display: block;
+                        margin-bottom: 4px;
+                    }}
+                    .board-item code {{
+                        background: #fff;
+                        padding: 2px 6px;
+                        border-radius: 3px;
+                        font-size: 11px;
+                        font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', monospace;
+                        color: #666;
+                        border: 1px solid #e5e5e5;
                     }}
                     .actions {{
+                        margin-top: 32px;
                         display: flex;
                         flex-direction: column;
-                        gap: 12px;
-                        margin-top: 32px;
+                        gap: 10px;
                     }}
                     .btn {{
-                        display: inline-block;
-                        padding: 16px 32px;
-                        border-radius: 8px;
+                        display: block;
+                        padding: 12px 24px;
+                        border-radius: 4px;
                         text-decoration: none;
-                        font-weight: 600;
-                        font-size: 16px;
-                        transition: all 0.3s ease;
+                        font-weight: 500;
+                        font-size: 14px;
                         text-align: center;
+                        transition: all 0.2s ease;
                         border: none;
                         cursor: pointer;
                     }}
                     .btn-primary {{
-                        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                        background: #BD081C;
                         color: white;
-                        box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
                     }}
                     .btn-primary:hover {{
-                        transform: translateY(-2px);
-                        box-shadow: 0 8px 25px rgba(102, 126, 234, 0.5);
+                        background: #a00716;
                     }}
                     .btn-secondary {{
-                        background: white;
-                        color: #667eea;
-                        border: 2px solid #667eea;
+                        background: transparent;
+                        color: #666;
+                        border: 1px solid #e5e5e5;
                     }}
                     .btn-secondary:hover {{
-                        background: #f8f9ff;
-                        transform: translateY(-2px);
-                    }}
-                    .btn-success {{
-                        background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
-                        color: white;
-                        box-shadow: 0 4px 15px rgba(40, 167, 69, 0.4);
-                    }}
-                    .btn-success:hover {{
-                        transform: translateY(-2px);
-                        box-shadow: 0 8px 25px rgba(40, 167, 69, 0.5);
+                        background: #f9f9f9;
+                        border-color: #d5d5d5;
                     }}
                 </style>
             </head>
             <body>
                 <div class="container">
-                    <div class="success-header">
-                        <div class="success-icon">✅</div>
-                        <h1>Authorization Successful!</h1>
-                        <p class="subtitle">Your Pinterest account has been connected</p>
-                    </div>
+                    <div class="success-icon">✓</div>
+                    <h1>Pinterest Connected</h1>
+                    <p class="subtitle">Your account has been successfully authorized</p>
                     
-                    <div class="info-card">
-                        <h2>📋 Connection Details</h2>
+                    <div class="info-section">
                         <div class="info-item">
                             <span class="info-label">Status</span>
-                            <span class="info-value" style="color: #28a745; font-weight: 600;">✓ Connected</span>
+                            <span class="info-value">
+                                <span class="status-badge">Connected</span>
+                            </span>
                         </div>
                         <div class="info-item">
                             <span class="info-label">Token Expires</span>
-                            <span class="info-value">{token_expires_at.strftime('%B %d, %Y at %I:%M %p') if token_expires_at else 'Not specified'}</span>
+                            <span class="info-value">{token_expires_at.strftime('%b %d, %Y') if token_expires_at else 'Not specified'}</span>
                         </div>
                     </div>
                     
                     {boards_html}
                     
-                    <div class="next-steps">
-                        <h2>🚀 Next Steps</h2>
-                        <ol>
-                            <li>If you see boards above, copy the <strong>Board ID</strong> of the board where you want to post designs</li>
-                            <li>Go to Settings in your Admin Panel and select your Pinterest board</li>
-                            <li>Test by approving a design - it will automatically post to Pinterest!</li>
-                        </ol>
-                    </div>
-                    
                     <div class="actions">
-                        <a href="{admin_webapp_url}/settings?tab=pinterest" class="btn btn-primary">
-                            🎛️ Go to Settings
-                        </a>
-                        <a href="{admin_webapp_url}/designs" class="btn btn-success">
-                            🎨 View Designs
+                        <a href="{admin_webapp_url}/settings" class="btn btn-primary">
+                            Continue to Settings
                         </a>
                         <a href="{admin_webapp_url}" class="btn btn-secondary">
-                            🏠 Go to Dashboard
+                            Go to Dashboard
                         </a>
                     </div>
                 </div>
+                <script>
+                    // Automatically redirect to settings after 5 seconds
+                    setTimeout(function() {{
+                        window.location.href = '{admin_webapp_url}/settings';
+                    }}, 5000);
+                </script>
             </body>
             </html>
             """
@@ -951,7 +990,7 @@ def pinterest_oauth_callback(request):
                     </p>
                     <div class="actions">
                         <a href="/api/pinterest/authorize/" class="btn btn-primary">Try Again</a>
-                        <a href="{admin_webapp_url}/settings?tab=pinterest" class="btn btn-secondary">Go to Settings</a>
+                        <a href="{admin_webapp_url}/settings" class="btn btn-secondary">Go to Settings</a>
                     </div>
                 </div>
             </body>
@@ -1005,12 +1044,35 @@ def pinterest_boards(request):
     
     try:
         from .pinterest_service import PinterestService
+        from django.conf import settings
+        
         boards = PinterestService.get_boards_with_token(integration.access_token)
         
         if boards is None:
             return JsonResponse({
                 'error': 'Failed to fetch boards. Check server logs for details.'
             }, status=500)
+        
+        # If no boards exist and we're in sandbox mode, optionally create one
+        # Check if create_if_empty parameter is passed
+        create_if_empty = request.GET.get('create_if_empty', 'false').lower() == 'true'
+        use_sandbox = getattr(settings, 'PINTEREST_USE_SANDBOX', True)
+        
+        if len(boards) == 0 and create_if_empty and use_sandbox:
+            # Create a default board
+            new_board = PinterestService.create_board_with_token(
+                integration.access_token,
+                name="Design Gallery",
+                description="WeDesignz designs"
+            )
+            
+            if new_board:
+                boards = [new_board]
+                # Auto-select it
+                integration.board_id = str(new_board.get('id', ''))
+                integration.board_name = new_board.get('name', 'Design Gallery')
+                integration.save()
+                logger.info(f"Created and auto-selected board: {integration.board_name} (ID: {integration.board_id})")
         
         return JsonResponse({
             'success': True,
@@ -1046,47 +1108,1429 @@ def pinterest_set_board(request):
         }, status=400)
     
     try:
-        # Verify board exists by fetching boards
         from .pinterest_service import PinterestService
-        boards = PinterestService.get_boards_with_token(integration.access_token)
+        from django.conf import settings
         
-        if boards is None:
+        # Check if we're in sandbox mode
+        use_sandbox = getattr(settings, 'PINTEREST_USE_SANDBOX', True)
+        
+        # Validate board_id is numeric (Pinterest requirement)
+        if not str(board_id).isdigit():
             return JsonResponse({
-                'error': 'Could not verify board. Please check your access token.'
-            }, status=500)
-        
-        # Find the board
-        board_found = None
-        for board in boards:
-            if str(board.get('id')) == str(board_id):
-                board_found = board
-                break
-        
-        if not board_found:
-            return JsonResponse({
-                'error': f'Board ID "{board_id}" not found in your boards.'
+                'error': 'Board ID must be numeric (Pinterest requirement).'
             }, status=400)
         
-        # Set the board
-        integration.board_id = str(board_id)
-        if board_name:
-            integration.board_name = board_name
-        elif board_found.get('name'):
-            integration.board_name = board_found.get('name')
-        integration.save()
-        
-        logger.info(f"Pinterest board set: {integration.board_name} (ID: {integration.board_id})")
-        
-        return JsonResponse({
-            'success': True,
-            'message': 'Board set successfully',
-            'board_id': integration.board_id,
-            'board_name': integration.board_name
-        })
+        # In sandbox mode, skip validation since boards API may return empty
+        if use_sandbox:
+            # Sandbox mode: Allow setting board ID directly
+            integration.board_id = str(board_id)
+            if board_name:
+                integration.board_name = board_name
+            else:
+                # Try to get board name from API if not provided
+                try:
+                    boards = PinterestService.get_boards_with_token(integration.access_token)
+                    if boards:
+                        for board in boards:
+                            if str(board.get('id')) == str(board_id):
+                                integration.board_name = board.get('name', '')
+                                break
+                    if not integration.board_name:
+                        integration.board_name = board_name or f"Board {board_id}"
+                except:
+                    integration.board_name = board_name or f"Board {board_id}"
+            integration.save()
+            
+            logger.info(f"Pinterest board set (sandbox): {integration.board_name} (ID: {integration.board_id})")
+            
+            return JsonResponse({
+                'success': True,
+                'message': 'Board set successfully',
+                'board_id': integration.board_id,
+                'board_name': integration.board_name
+            })
+        else:
+            # Production mode: Validate board exists
+            boards = PinterestService.get_boards_with_token(integration.access_token)
+            
+            if boards is None:
+                return JsonResponse({
+                    'error': 'Could not verify board. Please check your access token.'
+                }, status=500)
+            
+            # Find the board
+            board_found = None
+            for board in boards:
+                if str(board.get('id')) == str(board_id):
+                    board_found = board
+                    break
+            
+            if not board_found:
+                return JsonResponse({
+                    'error': f'Board ID "{board_id}" not found in your boards.'
+                }, status=400)
+            
+            # Set the board
+            integration.board_id = str(board_id)
+            if board_name:
+                integration.board_name = board_name
+            elif board_found.get('name'):
+                integration.board_name = board_found.get('name')
+            integration.save()
+            
+            logger.info(f"Pinterest board set: {integration.board_name} (ID: {integration.board_id})")
+            
+            return JsonResponse({
+                'success': True,
+                'message': 'Board set successfully',
+                'board_id': integration.board_id,
+                'board_name': integration.board_name
+            })
         
     except Exception as e:
         logger.error(f"Error setting Pinterest board: {str(e)}", exc_info=True)
         return JsonResponse({
             'error': f'Error setting board: {str(e)}'
         }, status=500)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def pinterest_create_board(request):
+    """
+    Create a new Pinterest board.
+    """
+    name = request.data.get('name')
+    description = request.data.get('description', '')
+    privacy = request.data.get('privacy', 'PUBLIC')
+    
+    if not name:
+        return JsonResponse({
+            'error': 'Board name is required'
+        }, status=400)
+    
+    if privacy not in ['PUBLIC', 'SECRET']:
+        return JsonResponse({
+            'error': 'Privacy must be PUBLIC or SECRET'
+        }, status=400)
+    
+    integration = PinterestIntegration.get_instance()
+    
+    if not integration.access_token:
+        return JsonResponse({
+            'error': 'Pinterest access token not configured. Please authorize first.'
+        }, status=400)
+    
+    if not integration.is_token_valid():
+        return JsonResponse({
+            'error': 'Pinterest access token expired. Please re-authorize.'
+        }, status=400)
+    
+    try:
+        from .pinterest_service import PinterestService
+        
+        new_board = PinterestService.create_board_with_token(
+            integration.access_token,
+            name=name,
+            description=description,
+            privacy=privacy
+        )
+        
+        if not new_board:
+            return JsonResponse({
+                'error': 'Failed to create board. Check server logs for details.'
+            }, status=500)
+        
+        logger.info(f"Pinterest board created: {new_board.get('name')} (ID: {new_board.get('id')})")
+        
+        return JsonResponse({
+            'success': True,
+            'message': 'Board created successfully',
+            'board': {
+                'id': str(new_board.get('id')),
+                'name': new_board.get('name'),
+                'description': new_board.get('description', ''),
+                'privacy': new_board.get('privacy', 'PUBLIC'),
+                'pin_count': new_board.get('pin_count', 0)
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"Error creating Pinterest board: {str(e)}", exc_info=True)
+        return JsonResponse({
+            'error': f'Error creating board: {str(e)}'
+        }, status=500)
+
+
+@api_view(['PATCH'])
+@permission_classes([AllowAny])
+def pinterest_update_board(request):
+    """
+    Update a Pinterest board.
+    """
+    board_id = request.data.get('board_id')
+    name = request.data.get('name')
+    description = request.data.get('description')
+    privacy = request.data.get('privacy')
+    
+    if not board_id:
+        return JsonResponse({
+            'error': 'board_id is required'
+        }, status=400)
+    
+    if not any([name, description, privacy]):
+        return JsonResponse({
+            'error': 'At least one field (name, description, privacy) must be provided'
+        }, status=400)
+    
+    if privacy and privacy not in ['PUBLIC', 'SECRET']:
+        return JsonResponse({
+            'error': 'Privacy must be PUBLIC or SECRET'
+        }, status=400)
+    
+    integration = PinterestIntegration.get_instance()
+    
+    if not integration.access_token:
+        return JsonResponse({
+            'error': 'Pinterest access token not configured. Please authorize first.'
+        }, status=400)
+    
+    if not integration.is_token_valid():
+        return JsonResponse({
+            'error': 'Pinterest access token expired. Please re-authorize.'
+        }, status=400)
+    
+    try:
+        from .pinterest_service import PinterestService
+        
+        updated_board = PinterestService.update_board_with_token(
+            integration.access_token,
+            board_id,
+            name=name,
+            description=description,
+            privacy=privacy
+        )
+        
+        if not updated_board:
+            return JsonResponse({
+                'error': 'Failed to update board. Check server logs for details.'
+            }, status=500)
+        
+        # If this is the currently selected board, update the integration
+        if str(integration.board_id) == str(board_id):
+            if name:
+                integration.board_name = name
+                integration.save(update_fields=['board_name'])
+        
+        logger.info(f"Pinterest board updated: {updated_board.get('name')} (ID: {updated_board.get('id')})")
+        
+        return JsonResponse({
+            'success': True,
+            'message': 'Board updated successfully',
+            'board': {
+                'id': str(updated_board.get('id')),
+                'name': updated_board.get('name'),
+                'description': updated_board.get('description', ''),
+                'privacy': updated_board.get('privacy', 'PUBLIC'),
+                'pin_count': updated_board.get('pin_count', 0)
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"Error updating Pinterest board: {str(e)}", exc_info=True)
+        return JsonResponse({
+            'error': f'Error updating board: {str(e)}'
+        }, status=500)
+
+
+@api_view(['DELETE'])
+@permission_classes([AllowAny])
+def pinterest_delete_board(request, board_id=None):
+    """
+    Delete a Pinterest board.
+    """
+    # Support both URL parameter and body parameter
+    if not board_id:
+        board_id = request.data.get('board_id')
+    
+    if not board_id:
+        return JsonResponse({
+            'error': 'board_id is required'
+        }, status=400)
+    
+    integration = PinterestIntegration.get_instance()
+    
+    if not integration.access_token:
+        return JsonResponse({
+            'error': 'Pinterest access token not configured. Please authorize first.'
+        }, status=400)
+    
+    if not integration.is_token_valid():
+        return JsonResponse({
+            'error': 'Pinterest access token expired. Please re-authorize.'
+        }, status=400)
+    
+    # Prevent deleting the currently selected board
+    if str(integration.board_id) == str(board_id):
+        return JsonResponse({
+            'error': 'Cannot delete the currently selected board. Please select a different board first.'
+        }, status=400)
+    
+    try:
+        from .pinterest_service import PinterestService
+        
+        success = PinterestService.delete_board_with_token(
+            integration.access_token,
+            board_id
+        )
+        
+        if not success:
+            return JsonResponse({
+                'error': 'Failed to delete board. Check server logs for details.'
+            }, status=500)
+        
+        logger.info(f"Pinterest board deleted: {board_id}")
+        
+        return JsonResponse({
+            'success': True,
+            'message': 'Board deleted successfully'
+        })
+        
+    except Exception as e:
+        logger.error(f"Error deleting Pinterest board: {str(e)}", exc_info=True)
+        return JsonResponse({
+            'error': f'Error deleting board: {str(e)}'
+        }, status=500)
+
+
+# ==================== INSTAGRAM VIEWS ====================
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def instagram_oauth_initiate(request):
+    """
+    Initiate Instagram OAuth flow through Facebook.
+    Redirects user to Facebook authorization page.
+    Note: Instagram uses Facebook's OAuth system.
+    """
+    app_id = getattr(settings, 'FACEBOOK_APP_ID', None) or getattr(settings, 'INSTAGRAM_APP_ID', None)
+    redirect_uri = getattr(settings, 'INSTAGRAM_REDIRECT_URI', None)
+    
+    if not app_id:
+        return JsonResponse({'error': 'Facebook/Instagram App ID not configured'}, status=500)
+    if not redirect_uri:
+        return JsonResponse({'error': 'Instagram Redirect URI not configured'}, status=500)
+    
+    # Build authorization URL for Facebook (Instagram uses Facebook OAuth)
+    from urllib.parse import quote_plus
+    redirect_uri_clean = redirect_uri.rstrip('/')
+    redirect_uri_encoded = quote_plus(redirect_uri_clean)
+    
+    # Instagram Graph API requires these permissions:
+    # - pages_show_list: List Facebook pages (needed for Instagram Business accounts)
+    # - pages_read_engagement: Read page engagement
+    # - business_management: Manage business assets
+    # - instagram_content_publish: Post to Instagram (requires App Review for production)
+    # Note: instagram_basic is deprecated, use pages permissions instead
+    auth_url = (
+        f"https://www.facebook.com/v18.0/dialog/oauth"
+        f"?client_id={app_id}"
+        f"&redirect_uri={redirect_uri_encoded}"
+        f"&response_type=code"
+        f"&scope=pages_show_list,pages_read_engagement,business_management,instagram_content_publish"
+        f"&state=instagram_auth"
+    )
+    
+    logger.info(f"Instagram OAuth authorization URL: client_id={app_id}, redirect_uri={redirect_uri_clean}")
+    logger.info(f"Redirecting to Facebook OAuth for Instagram: {auth_url}")
+    return redirect(auth_url)
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+@csrf_exempt
+def instagram_oauth_callback(request):
+    """
+    Handle Instagram OAuth callback from Facebook.
+    Exchanges authorization code for access token and saves to database.
+    """
+    code = request.GET.get('code')
+    error = request.GET.get('error')
+    error_reason = request.GET.get('error_reason', '')
+    error_description = request.GET.get('error_description', '')
+    
+    # Get admin webapp URL from settings
+    admin_webapp_url = getattr(settings, 'ADMIN_WEBAPP_URL', 'https://admin.wedesignz.com')
+    
+    if error:
+        error_msg = error
+        if error_description:
+            error_msg += f": {error_description}"
+        logger.error(f"Instagram OAuth error: {error_msg}")
+        return HttpResponse(
+            f"""
+            <!DOCTYPE html>
+            <html lang="en">
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>Instagram Authorization Failed</title>
+                <style>
+                    * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+                    body {{
+                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+                        background: linear-gradient(135deg, #E1306C 0%, #C13584 50%, #833AB4 100%);
+                        min-height: 100vh;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        padding: 20px;
+                    }}
+                    .container {{
+                        background: white;
+                        border-radius: 16px;
+                        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+                        max-width: 600px;
+                        width: 100%;
+                        padding: 40px;
+                        text-align: center;
+                    }}
+                    .icon {{
+                        width: 80px;
+                        height: 80px;
+                        margin: 0 auto 24px;
+                        background: #fee;
+                        border-radius: 50%;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        font-size: 40px;
+                    }}
+                    h1 {{
+                        color: #dc3545;
+                        font-size: 28px;
+                        margin-bottom: 16px;
+                        font-weight: 600;
+                    }}
+                    .error-box {{
+                        background: #fee;
+                        border: 2px solid #fcc;
+                        border-radius: 8px;
+                        padding: 16px;
+                        margin: 24px 0;
+                        color: #721c24;
+                    }}
+                    .error-box strong {{
+                        display: block;
+                        margin-bottom: 8px;
+                        font-size: 14px;
+                        text-transform: uppercase;
+                        letter-spacing: 0.5px;
+                    }}
+                    .actions {{
+                        margin-top: 32px;
+                        display: flex;
+                        flex-direction: column;
+                        gap: 12px;
+                    }}
+                    .btn {{
+                        display: inline-block;
+                        padding: 14px 28px;
+                        border-radius: 8px;
+                        text-decoration: none;
+                        font-weight: 600;
+                        font-size: 16px;
+                        transition: all 0.3s ease;
+                        border: none;
+                        cursor: pointer;
+                    }}
+                    .btn-primary {{
+                        background: linear-gradient(135deg, #E1306C 0%, #C13584 50%, #833AB4 100%);
+                        color: white;
+                    }}
+                    .btn-primary:hover {{
+                        transform: translateY(-2px);
+                        box-shadow: 0 8px 20px rgba(225, 48, 108, 0.4);
+                    }}
+                    .btn-secondary {{
+                        background: #f8f9fa;
+                        color: #495057;
+                        border: 2px solid #dee2e6;
+                    }}
+                    .btn-secondary:hover {{
+                        background: #e9ecef;
+                        border-color: #adb5bd;
+                    }}
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <div class="icon">❌</div>
+                    <h1>Authorization Failed</h1>
+                    <div class="error-box">
+                        <strong>Error Details</strong>
+                        {error_msg}
+                    </div>
+                    <p style="color: #6c757d; margin-top: 16px;">
+                        There was an issue authorizing your Instagram account. Please try again.
+                    </p>
+                    <div class="actions">
+                        <a href="/api/common/instagram/authorize/" class="btn btn-primary">Try Again</a>
+                        <a href="{admin_webapp_url}/settings?tab=instagram" class="btn btn-secondary">Go to Settings</a>
+                    </div>
+                </div>
+            </body>
+            </html>
+            """,
+            status=400
+        )
+    
+    if not code:
+        return HttpResponse(
+            f"""
+            <!DOCTYPE html>
+            <html lang="en">
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>Instagram Authorization Failed</title>
+                <style>
+                    * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+                    body {{
+                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+                        background: linear-gradient(135deg, #E1306C 0%, #C13584 50%, #833AB4 100%);
+                        min-height: 100vh;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        padding: 20px;
+                    }}
+                    .container {{
+                        background: white;
+                        border-radius: 16px;
+                        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+                        max-width: 600px;
+                        width: 100%;
+                        padding: 40px;
+                        text-align: center;
+                    }}
+                    .icon {{
+                        width: 80px;
+                        height: 80px;
+                        margin: 0 auto 24px;
+                        background: #fee;
+                        border-radius: 50%;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        font-size: 40px;
+                    }}
+                    h1 {{
+                        color: #dc3545;
+                        font-size: 28px;
+                        margin-bottom: 16px;
+                        font-weight: 600;
+                    }}
+                    .actions {{
+                        margin-top: 32px;
+                        display: flex;
+                        flex-direction: column;
+                        gap: 12px;
+                    }}
+                    .btn {{
+                        display: inline-block;
+                        padding: 14px 28px;
+                        border-radius: 8px;
+                        text-decoration: none;
+                        font-weight: 600;
+                        font-size: 16px;
+                        transition: all 0.3s ease;
+                    }}
+                    .btn-primary {{
+                        background: linear-gradient(135deg, #E1306C 0%, #C13584 50%, #833AB4 100%);
+                        color: white;
+                    }}
+                    .btn-primary:hover {{
+                        transform: translateY(-2px);
+                        box-shadow: 0 8px 20px rgba(225, 48, 108, 0.4);
+                    }}
+                    .btn-secondary {{
+                        background: #f8f9fa;
+                        color: #495057;
+                        border: 2px solid #dee2e6;
+                    }}
+                    .btn-secondary:hover {{
+                        background: #e9ecef;
+                        border-color: #adb5bd;
+                    }}
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <div class="icon">❌</div>
+                    <h1>Authorization Failed</h1>
+                    <p style="color: #6c757d; margin-top: 16px;">
+                        No authorization code received. Please try again.
+                    </p>
+                    <div class="actions">
+                        <a href="/api/common/instagram/authorize/" class="btn btn-primary">Try Again</a>
+                        <a href="{admin_webapp_url}/settings?tab=instagram" class="btn btn-secondary">Go to Settings</a>
+                    </div>
+                </div>
+            </body>
+            </html>
+            """,
+            status=400
+        )
+    
+    # Exchange code for access token
+    app_id = getattr(settings, 'FACEBOOK_APP_ID', None) or getattr(settings, 'INSTAGRAM_APP_ID', None)
+    app_secret = getattr(settings, 'FACEBOOK_APP_SECRET', None) or getattr(settings, 'INSTAGRAM_APP_SECRET', None)
+    redirect_uri = getattr(settings, 'INSTAGRAM_REDIRECT_URI', None)
+    
+    if not app_id or not app_secret:
+        logger.error("Facebook/Instagram App ID or Secret not configured")
+        return HttpResponse(
+            f"""
+            <!DOCTYPE html>
+            <html lang="en">
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>Instagram Configuration Error</title>
+                <style>
+                    body {{
+                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                        background: linear-gradient(135deg, #E1306C 0%, #C13584 50%, #833AB4 100%);
+                        min-height: 100vh;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        padding: 20px;
+                    }}
+                    .container {{
+                        background: white;
+                        border-radius: 16px;
+                        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+                        max-width: 600px;
+                        width: 100%;
+                        padding: 40px;
+                        text-align: center;
+                    }}
+                    h1 {{ color: #dc3545; font-size: 28px; margin-bottom: 16px; }}
+                    p {{ color: #6c757d; margin-top: 16px; }}
+                    .btn {{
+                        display: inline-block;
+                        padding: 14px 28px;
+                        border-radius: 8px;
+                        text-decoration: none;
+                        font-weight: 600;
+                        margin-top: 24px;
+                        background: linear-gradient(135deg, #E1306C 0%, #C13584 50%, #833AB4 100%);
+                        color: white;
+                    }}
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <h1>Configuration Error</h1>
+                    <p>Facebook/Instagram App credentials are not configured. Please contact your administrator.</p>
+                    <a href="{admin_webapp_url}/settings?tab=instagram" class="btn">Go to Settings</a>
+                </div>
+            </body>
+            </html>
+            """,
+            status=500
+        )
+    
+    try:
+        # Step 1: Exchange code for short-lived access token
+        token_url = "https://graph.facebook.com/v18.0/oauth/access_token"
+        token_params = {
+            'client_id': app_id,
+            'client_secret': app_secret,
+            'redirect_uri': redirect_uri.rstrip('/'),
+            'code': code
+        }
+        
+        token_response = requests.get(token_url, params=token_params, timeout=30)
+        token_response.raise_for_status()
+        token_data = token_response.json()
+        
+        short_lived_token = token_data.get('access_token')
+        if not short_lived_token:
+            raise ValueError("No access token in response")
+        
+        # Step 2: Exchange short-lived token for long-lived token (60 days)
+        long_token_url = "https://graph.facebook.com/v18.0/oauth/access_token"
+        long_token_params = {
+            'grant_type': 'fb_exchange_token',
+            'client_id': app_id,
+            'client_secret': app_secret,
+            'fb_exchange_token': short_lived_token
+        }
+        
+        long_token_response = requests.get(long_token_url, params=long_token_params, timeout=30)
+        long_token_response.raise_for_status()
+        long_token_data = long_token_response.json()
+        
+        long_lived_token = long_token_data.get('access_token', short_lived_token)
+        expires_in = long_token_data.get('expires_in', 5184000)  # Default 60 days
+        
+        # Step 3: Get user info to find Instagram Business Account ID
+        user_info_url = "https://graph.facebook.com/v18.0/me"
+        user_info_params = {
+            'fields': 'id,name',
+            'access_token': long_lived_token
+        }
+        
+        user_info_response = requests.get(user_info_url, params=user_info_params, timeout=30)
+        user_info_response.raise_for_status()
+        user_info = user_info_response.json()
+        
+        # Step 4: Get Instagram Business Account ID
+        # First, get pages (Instagram Business accounts are linked to Facebook Pages)
+        # IMPORTANT: We need to request 'access_token' field to get the Page Access Token
+        # The Page Access Token is required for Instagram Graph API calls, not the user's token
+        pages_url = "https://graph.facebook.com/v18.0/me/accounts"
+        pages_params = {
+            'access_token': long_lived_token,
+            'fields': 'id,name,access_token,instagram_business_account'
+        }
+        
+        pages_response = requests.get(pages_url, params=pages_params, timeout=30)
+        pages_response.raise_for_status()
+        pages_data = pages_response.json()
+        
+        # Add detailed logging to debug what's being returned
+        logger.info(f"Pages API response received. Number of pages: {len(pages_data.get('data', []))}")
+        if pages_data.get('data'):
+            logger.info(f"First page sample keys: {list(pages_data['data'][0].keys())}")
+        
+        instagram_account_id = None
+        instagram_username = None
+        page_access_token = None  # This is the token we need for Instagram API
+        page_id = None  # Store the page ID for fallback
+        
+        # Find the Instagram Business Account
+        for page in pages_data.get('data', []):
+            logger.info(f"Processing page: ID={page.get('id')}, name={page.get('name')}")
+            logger.info(f"Page has 'access_token' field: {'access_token' in page}")
+            logger.info(f"Page has 'instagram_business_account': {'instagram_business_account' in page}")
+            
+            if 'instagram_business_account' in page:
+                instagram_account = page['instagram_business_account']
+                instagram_account_id = instagram_account.get('id')
+                page_id = page.get('id')
+                
+                logger.info(f"Found Instagram Business Account ID: {instagram_account_id} for page: {page_id}")
+                
+                # CRITICAL: Get the page access token (required for Instagram Graph API)
+                # The page access token is different from the user's long-lived token
+                page_access_token = page.get('access_token')
+                
+                if not page_access_token:
+                    logger.warning(f"Page {page_id} has Instagram Business Account but no access_token in response")
+                    logger.warning(f"Trying fallback method to get page access token...")
+                    
+                    # FALLBACK: Try to get page access token by querying the page directly
+                    try:
+                        page_token_url = f"https://graph.facebook.com/v18.0/{page_id}"
+                        page_token_params = {
+                            'fields': 'access_token',
+                            'access_token': long_lived_token
+                        }
+                        page_token_response = requests.get(page_token_url, params=page_token_params, timeout=30)
+                        if page_token_response.status_code == 200:
+                            page_token_data = page_token_response.json()
+                            page_access_token = page_token_data.get('access_token')
+                            if page_access_token:
+                                logger.info(f"Successfully retrieved page access token via fallback method")
+                            else:
+                                logger.warning(f"Fallback method returned no access_token")
+                        else:
+                            logger.warning(f"Fallback method failed with status {page_token_response.status_code}: {page_token_response.text[:200]}")
+                    except Exception as e:
+                        logger.warning(f"Fallback method exception: {e}")
+                    
+                    if not page_access_token:
+                        logger.warning(f"Could not get access token for page {page_id}, trying next page...")
+                        continue
+                
+                # Get Instagram account details using the page access token
+                # Note: 'username' field is deprecated in Instagram Graph API v2.0+
+                # We can't retrieve it via API, so we'll leave it as None
+                if instagram_account_id:
+                    # Just verify the account ID is valid by making a simple request
+                    instagram_url = f"https://graph.facebook.com/v18.0/{instagram_account_id}"
+                    instagram_params = {
+                        'fields': 'id',  # Only request 'id' - username is deprecated
+                        'access_token': page_access_token
+                    }
+                    instagram_response = requests.get(instagram_url, params=instagram_params, timeout=30)
+                    if instagram_response.status_code == 200:
+                        instagram_data = instagram_response.json()
+                        # Username is deprecated, so we can't get it from API
+                        instagram_username = None
+                        logger.info(f"Instagram Business Account ID verified successfully")
+                    else:
+                        logger.warning(f"Could not verify Instagram Business Account ID: {instagram_response.text[:200]}")
+                    break
+        
+        # Validate that we have the required page access token
+        if not page_access_token:
+            # Provide more detailed error message
+            pages_list = [p.get('id') for p in pages_data.get('data', [])]
+            error_msg = (
+                f"No page access token found. "
+                f"Pages returned: {pages_list}. "
+                f"Make sure your Instagram Business account is linked to a Facebook Page "
+                f"and you have granted 'pages_show_list' and 'pages_read_engagement' permissions."
+            )
+            logger.error(error_msg)
+            logger.error(f"Full pages response structure: {list(pages_data.keys())}")
+            if pages_data.get('data'):
+                logger.error(f"Sample page structure: {list(pages_data['data'][0].keys()) if pages_data['data'] else 'No pages'}")
+            raise ValueError(error_msg)
+        
+        if not instagram_account_id:
+            error_msg = "No Instagram Business Account found. Make sure your Instagram account is a Business or Creator account and is linked to a Facebook Page."
+            logger.error(error_msg)
+            raise ValueError(error_msg)
+        
+        # Validate that we have the Instagram Business Account ID (not a Page ID)
+        # Instagram Business Account IDs are typically 15-17 digits
+        # Facebook Page IDs are typically shorter (10-12 digits)
+        logger.info(f"Found Instagram Business Account ID: {instagram_account_id}")
+        logger.info(f"Page ID: {page.get('id')}")
+        logger.info(f"Page Access Token (first 20 chars): {page_access_token[:20] if page_access_token else 'None'}...")
+        
+        # Verify the Instagram Business Account ID is valid by testing it
+        try:
+            verify_url = f"https://graph.facebook.com/v18.0/{instagram_account_id}"
+            verify_params = {
+                'fields': 'id',
+                'access_token': page_access_token
+            }
+            verify_response = requests.get(verify_url, params=verify_params, timeout=10)
+            if verify_response.status_code != 200:
+                error_data = verify_response.json() if verify_response.text else {}
+                error_msg = error_data.get('error', {}).get('message', 'Invalid Instagram Business Account ID')
+                logger.error(f"Instagram Business Account ID validation failed: {error_msg}")
+                raise ValueError(f"Invalid Instagram Business Account ID: {error_msg}")
+            logger.info(f"Instagram Business Account ID validated successfully: {instagram_account_id}")
+        except requests.exceptions.RequestException as e:
+            logger.warning(f"Could not verify Instagram Business Account ID: {e}")
+            # Continue anyway, but log the warning
+        
+        # Save to database
+        integration = InstagramIntegration.get_instance()
+        # Store the PAGE ACCESS TOKEN, not the user's long-lived token
+        # Instagram Graph API requires the page access token for posting
+        integration.access_token = page_access_token
+        integration.user_id = instagram_account_id  # This should be the Instagram Business Account ID, not Page ID
+        integration.username = instagram_username
+        integration.is_enabled = True
+        
+        # Calculate expiration date
+        from datetime import timedelta
+        integration.token_expires_at = timezone.now() + timedelta(seconds=expires_in)
+        
+        if request.user and request.user.is_authenticated:
+            integration.created_by = request.user
+        
+        integration.save()
+        
+        logger.info(f"Instagram OAuth successful!")
+        logger.info(f"  - Instagram Business Account ID (user_id): {integration.user_id}")
+        logger.info(f"  - Username: {integration.username or 'N/A (deprecated field)'}")
+        logger.info(f"  - Access Token: {integration.access_token[:30] if integration.access_token else 'None'}...")
+        logger.info(f"  - Token Expires: {integration.token_expires_at}")
+        
+        # Return success page
+        token_expires_at = integration.token_expires_at
+        return HttpResponse(
+            f"""
+            <!DOCTYPE html>
+            <html lang="en">
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>Instagram Authorization Successful</title>
+                <style>
+                    * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+                    body {{
+                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+                        background: linear-gradient(135deg, #E1306C 0%, #C13584 50%, #833AB4 100%);
+                        min-height: 100vh;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        padding: 20px;
+                    }}
+                    .container {{
+                        background: white;
+                        border-radius: 12px;
+                        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+                        max-width: 500px;
+                        width: 100%;
+                        padding: 48px 40px;
+                        text-align: center;
+                    }}
+                    .success-icon {{
+                        width: 64px;
+                        height: 64px;
+                        margin: 0 auto 24px;
+                        background: linear-gradient(135deg, #E1306C 0%, #C13584 50%, #833AB4 100%);
+                        border-radius: 50%;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        color: white;
+                        font-size: 32px;
+                        font-weight: 300;
+                    }}
+                    h1 {{
+                        color: #1a1a1a;
+                        font-size: 24px;
+                        font-weight: 600;
+                        text-align: center;
+                        margin-bottom: 8px;
+                        letter-spacing: -0.3px;
+                    }}
+                    .subtitle {{
+                        color: #666;
+                        font-size: 14px;
+                        text-align: center;
+                        margin-bottom: 32px;
+                        line-height: 1.5;
+                    }}
+                    .info-section {{
+                        border-top: 1px solid #e5e5e5;
+                        border-bottom: 1px solid #e5e5e5;
+                        padding: 20px 0;
+                        margin: 24px 0;
+                    }}
+                    .info-item {{
+                        display: flex;
+                        justify-content: space-between;
+                        align-items: center;
+                        padding: 8px 0;
+                        font-size: 14px;
+                    }}
+                    .info-label {{
+                        color: #666;
+                        font-weight: 400;
+                    }}
+                    .info-value {{
+                        color: #1a1a1a;
+                        font-weight: 500;
+                    }}
+                    .status-badge {{
+                        display: inline-flex;
+                        align-items: center;
+                        gap: 6px;
+                        color: #0a7c0a;
+                        font-size: 13px;
+                        font-weight: 500;
+                    }}
+                    .status-badge::before {{
+                        content: '';
+                        width: 8px;
+                        height: 8px;
+                        background: #0a7c0a;
+                        border-radius: 50%;
+                    }}
+                    .account-info {{
+                        background: #f9f9f9;
+                        border: 1px solid #e5e5e5;
+                        border-radius: 4px;
+                        padding: 12px;
+                        margin: 16px 0;
+                        font-size: 13px;
+                    }}
+                    .account-info strong {{
+                        color: #1a1a1a;
+                        font-weight: 500;
+                        display: block;
+                        margin-bottom: 4px;
+                    }}
+                    .account-info code {{
+                        background: #fff;
+                        padding: 2px 6px;
+                        border-radius: 3px;
+                        font-size: 11px;
+                        font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', monospace;
+                        color: #666;
+                        border: 1px solid #e5e5e5;
+                    }}
+                    .actions {{
+                        margin-top: 32px;
+                        display: flex;
+                        flex-direction: column;
+                        gap: 10px;
+                    }}
+                    .btn {{
+                        display: block;
+                        padding: 12px 24px;
+                        border-radius: 4px;
+                        text-decoration: none;
+                        font-weight: 500;
+                        font-size: 14px;
+                        text-align: center;
+                        transition: all 0.2s ease;
+                        border: none;
+                        cursor: pointer;
+                    }}
+                    .btn-primary {{
+                        background: linear-gradient(135deg, #E1306C 0%, #C13584 50%, #833AB4 100%);
+                        color: white;
+                    }}
+                    .btn-primary:hover {{
+                        opacity: 0.9;
+                        transform: translateY(-1px);
+                        box-shadow: 0 4px 12px rgba(225, 48, 108, 0.3);
+                    }}
+                    .btn-secondary {{
+                        background: transparent;
+                        color: #666;
+                        border: 1px solid #e5e5e5;
+                    }}
+                    .btn-secondary:hover {{
+                        background: #f9f9f9;
+                        border-color: #d5d5d5;
+                    }}
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <div class="success-icon">✓</div>
+                    <h1>Instagram Connected</h1>
+                    <p class="subtitle">Your account has been successfully authorized</p>
+                    
+                    <div class="info-section">
+                        <div class="info-item">
+                            <span class="info-label">Status</span>
+                            <span class="info-value">
+                                <span class="status-badge">Connected</span>
+                            </span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">Token Expires</span>
+                            <span class="info-value">{token_expires_at.strftime('%b %d, %Y') if token_expires_at else 'Not specified'}</span>
+                        </div>
+                    </div>
+                    
+                    <div class="account-info">
+                        <strong>Instagram Account</strong>
+                        <code>{'@' + instagram_username if instagram_username else 'Account ID: ' + str(integration.user_id)}</code>
+                    </div>
+                    
+                    <div class="actions">
+                        <a href="{admin_webapp_url}/settings?tab=instagram" class="btn btn-primary">
+                            Continue to Settings
+                        </a>
+                        <a href="{admin_webapp_url}" class="btn btn-secondary">
+                            Go to Dashboard
+                        </a>
+                    </div>
+                </div>
+                <script>
+                    // Automatically redirect to settings after 5 seconds
+                    setTimeout(function() {{
+                        window.location.href = '{admin_webapp_url}/settings?tab=instagram';
+                    }}, 5000);
+                </script>
+            </body>
+            </html>
+            """
+        )
+        
+    except requests.exceptions.RequestException as e:
+        error_msg = str(e)
+        if hasattr(e, 'response') and e.response is not None:
+            try:
+                error_data = e.response.json()
+                error_msg = error_data.get('error', {}).get('message', str(e))
+            except:
+                error_msg = e.response.text[:500]
+        
+        logger.error(f"Instagram OAuth token exchange failed: {error_msg}", exc_info=True)
+        return HttpResponse(
+            f"""
+            <!DOCTYPE html>
+            <html lang="en">
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>Instagram Authorization Error</title>
+                <style>
+                    body {{
+                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                        background: linear-gradient(135deg, #E1306C 0%, #C13584 50%, #833AB4 100%);
+                        min-height: 100vh;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        padding: 20px;
+                    }}
+                    .container {{
+                        background: white;
+                        border-radius: 16px;
+                        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+                        max-width: 600px;
+                        width: 100%;
+                        padding: 40px;
+                        text-align: center;
+                    }}
+                    h1 {{ color: #dc3545; font-size: 28px; margin-bottom: 16px; }}
+                    .error-box {{
+                        background: #fee;
+                        border: 2px solid #fcc;
+                        border-radius: 8px;
+                        padding: 16px;
+                        margin: 24px 0;
+                        color: #721c24;
+                    }}
+                    .btn {{
+                        display: inline-block;
+                        padding: 14px 28px;
+                        border-radius: 8px;
+                        text-decoration: none;
+                        font-weight: 600;
+                        margin-top: 24px;
+                        background: linear-gradient(135deg, #E1306C 0%, #C13584 50%, #833AB4 100%);
+                        color: white;
+                    }}
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <h1>Authorization Error</h1>
+                    <div class="error-box">
+                        <strong>Error</strong>
+                        <p style="margin-top: 8px;">{error_msg}</p>
+                    </div>
+                    <a href="{admin_webapp_url}/settings?tab=instagram" class="btn">Go to Settings</a>
+                </div>
+            </body>
+            </html>
+            """,
+            status=500
+        )
+    except Exception as e:
+        logger.error(f"Instagram OAuth error: {str(e)}", exc_info=True)
+        return HttpResponse(
+            f"""
+            <!DOCTYPE html>
+            <html lang="en">
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>Instagram Authorization Error</title>
+                <style>
+                    body {{
+                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                        background: linear-gradient(135deg, #E1306C 0%, #C13584 50%, #833AB4 100%);
+                        min-height: 100vh;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        padding: 20px;
+                    }}
+                    .container {{
+                        background: white;
+                        border-radius: 16px;
+                        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+                        max-width: 600px;
+                        width: 100%;
+                        padding: 40px;
+                        text-align: center;
+                    }}
+                    h1 {{ color: #dc3545; font-size: 28px; margin-bottom: 16px; }}
+                    .error-box {{
+                        background: #fee;
+                        border: 2px solid #fcc;
+                        border-radius: 8px;
+                        padding: 16px;
+                        margin: 24px 0;
+                        color: #721c24;
+                    }}
+                    .btn {{
+                        display: inline-block;
+                        padding: 14px 28px;
+                        border-radius: 8px;
+                        text-decoration: none;
+                        font-weight: 600;
+                        margin-top: 24px;
+                        background: linear-gradient(135deg, #E1306C 0%, #C13584 50%, #833AB4 100%);
+                        color: white;
+                    }}
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <h1>Authorization Error</h1>
+                    <div class="error-box">
+                        <strong>Error</strong>
+                        <p style="margin-top: 8px;">{str(e)}</p>
+                    </div>
+                    <a href="{admin_webapp_url}/settings?tab=instagram" class="btn">Go to Settings</a>
+                </div>
+            </body>
+            </html>
+            """,
+            status=500
+        )
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def instagram_status(request):
+    """
+    Check Instagram integration status.
+    Returns JSON with current status.
+    """
+    integration = InstagramIntegration.get_instance()
+    
+    status_data = {
+        'is_enabled': integration.is_enabled,
+        'is_configured': bool(integration.access_token),
+        'is_token_valid': integration.is_token_valid(),
+        'username': integration.username,
+        'last_successful_post': integration.last_successful_post.isoformat() if integration.last_successful_post else None,
+        'last_error': integration.last_error,
+        'last_error_at': integration.last_error_at.isoformat() if integration.last_error_at else None,
+    }
+    
+    return JsonResponse(status_data)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def instagram_post(request):
+    """
+    Create a single Instagram post.
+    Accepts a single post object and queues it for async processing.
+    """
+    # Force output to stderr (Gunicorn captures this)
+    import sys
+    print("=== INSTAGRAM POST REQUEST RECEIVED ===", file=sys.stderr, flush=True)
+    logger.info(f"=== INSTAGRAM POST REQUEST RECEIVED ===")
+    logger.info(f"Request method: {request.method}, Content-Type: {request.content_type}")
+    logger.info(f"Request data: {request.data}")
+    
+    # Get single post data (support both direct object and wrapped in 'post' key)
+    post_data = request.data.get('post') or request.data
+    
+    logger.info(f"Extracted post_data: {post_data}")
+    
+    if not post_data:
+        logger.error("No post data provided in request")
+        return JsonResponse({
+            'error': 'Post data is required'
+        }, status=400)
+    
+    # Validate integration
+    integration = InstagramIntegration.get_instance()
+    
+    if not integration.is_enabled:
+        logger.warning("Instagram integration is disabled")
+        return JsonResponse({
+            'error': 'Instagram integration is disabled'
+        }, status=400)
+    
+    if not integration.access_token:
+        logger.warning("Instagram access token not configured")
+        return JsonResponse({
+            'error': 'Instagram access token not configured. Please authorize first.'
+        }, status=400)
+    
+    if not integration.is_token_valid():
+        logger.warning("Instagram access token expired")
+        return JsonResponse({
+            'error': 'Instagram access token expired. Please re-authorize.'
+        }, status=400)
+    
+    try:
+        from Catalog.models import Product
+        from .tasks import post_to_instagram
+        
+        logger.info(f"Successfully imported Product and post_to_instagram task")
+        
+        # Extract post data
+        product_id = post_data.get('productId')
+        media_type = post_data.get('mediaType')
+        caption = post_data.get('caption', '')
+        post_type = post_data.get('postType', 'post')
+        
+        logger.info(f"=== Processing Instagram post: product_id={product_id}, media_type={media_type}, post_type={post_type}, caption_length={len(caption)} ===")
+        
+        # Validate required fields
+        if not product_id:
+            return JsonResponse({
+                'error': 'productId is required'
+            }, status=400)
+        
+        if media_type not in ['mockup', 'jpg', 'png']:
+            return JsonResponse({
+                'error': f'Invalid media_type: {media_type}. Must be mockup, jpg, or png'
+            }, status=400)
+        
+        if post_type not in ['post', 'story']:
+            return JsonResponse({
+                'error': f'Invalid post_type: {post_type}. Must be post or story'
+            }, status=400)
+        
+        # Validate caption: required for posts, not for stories
+        if post_type == 'post' and not caption.strip():
+            return JsonResponse({
+                'error': 'Caption is required for Instagram posts'
+            }, status=400)
+        
+        # For stories, caption is not used (Instagram Stories don't support captions)
+        if post_type == 'story':
+            caption = ''  # Ensure caption is empty for stories
+            logger.info("Story post detected - caption will not be used")
+        
+        # Get product
+        try:
+            product = Product.objects.get(id=product_id)
+        except Product.DoesNotExist:
+            return JsonResponse({
+                'error': f'Product {product_id} not found'
+            }, status=404)
+        
+        # Create InstagramPost record
+        try:
+            instagram_post = InstagramPost.objects.create(
+                product=product,
+                media_type=media_type,
+                caption=caption,
+                post_type=post_type,
+                status='pending'
+            )
+            logger.info(f"Created InstagramPost record ID: {instagram_post.id} for product {product_id}")
+        except Exception as e:
+            error_msg = f"Failed to create InstagramPost record: {str(e)}"
+            logger.error(f"Failed to create post: {error_msg}", exc_info=True)
+            return JsonResponse({
+                'error': error_msg
+            }, status=500)
+        
+        # Queue Celery task for async posting
+        try:
+            logger.info(f"=== ATTEMPTING TO QUEUE TASK for post {instagram_post.id}, type: {post_type}, media_type: {media_type} ===")
+            logger.info(f"Post details: product_id={product_id}, caption_length={len(caption)}, status={instagram_post.status}")
+            
+            task_result = post_to_instagram.delay(instagram_post.id)
+            
+            logger.info(f"=== TASK QUEUED: task_result={task_result}, task_id={task_result.id if task_result else 'None'} ===")
+            logger.info(f"Task result type: {type(task_result)}, has id: {hasattr(task_result, 'id') if task_result else False}")
+            
+            # Verify task was queued
+            if not task_result:
+                error_msg = "Task queuing returned None (no task result)"
+                logger.error(f"Post {instagram_post.id} failed: {error_msg}")
+                instagram_post.status = 'failed'
+                instagram_post.error_message = error_msg
+                instagram_post.save(update_fields=['status', 'error_message'])
+                return JsonResponse({
+                    'error': error_msg
+                }, status=500)
+            
+            if not hasattr(task_result, 'id') or not task_result.id:
+                error_msg = f"Task queuing returned no task ID. Task result: {task_result}, type: {type(task_result)}"
+                logger.error(f"Post {instagram_post.id} failed: {error_msg}")
+                instagram_post.status = 'failed'
+                instagram_post.error_message = error_msg
+                instagram_post.save(update_fields=['status', 'error_message'])
+                return JsonResponse({
+                    'error': error_msg
+                }, status=500)
+            
+            logger.info(f"=== SUCCESS: Queued task {task_result.id} for post {instagram_post.id}, product {product_id}, type: {post_type} ===")
+            
+            return JsonResponse({
+                'message': 'Post queued for Instagram',
+                'post_id': instagram_post.id,
+                'product_id': product_id,
+                'task_id': task_result.id,
+                'status': 'queued',
+                'post_type': post_type  # Add this for debugging
+            }, status=200)
+            
+        except Exception as e:
+            error_msg = f"Failed to queue Instagram post task: {str(e)}"
+            logger.error(f"=== EXCEPTION QUEUING TASK for post {instagram_post.id}, type: {post_type} ===", exc_info=True)
+            logger.error(f"Exception type: {type(e).__name__}, Message: {str(e)}")
+            logger.error(f"Exception traceback:", exc_info=True)
+            try:
+                instagram_post.status = 'failed'
+                instagram_post.error_message = error_msg
+                instagram_post.save(update_fields=['status', 'error_message'])
+            except Exception as save_error:
+                logger.error(f"Failed to update InstagramPost {instagram_post.id} status: {save_error}", exc_info=True)
+            return JsonResponse({
+                'error': error_msg
+            }, status=500)
+        
+    except Exception as e:
+        logger.error(f"Critical error creating Instagram post: {str(e)}", exc_info=True)
+        return JsonResponse({
+            'error': f'Error creating post: {str(e)}'
+        }, status=500)
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def instagram_posts_list(request):
+    """
+    Get list of Instagram posts with filtering and pagination.
+    """
+    from django.core.paginator import Paginator
+    
+    status_filter = request.GET.get('status')
+    page = int(request.GET.get('page', 1))
+    limit = int(request.GET.get('limit', 20))
+    
+    posts = InstagramPost.objects.all()
+    
+    if status_filter:
+        posts = posts.filter(status=status_filter)
+    
+    posts = posts.order_by('-created_at')
+    
+    paginator = Paginator(posts, limit)
+    page_obj = paginator.get_page(page)
+    
+    posts_data = []
+    for post in page_obj.object_list:
+        posts_data.append({
+            'id': post.id,
+            'product_id': post.product.id,
+            'product_title': post.product.title,
+            'media_type': post.media_type,
+            'caption': post.caption,
+            'post_type': post.post_type,
+            'status': post.status,
+            'post_id': post.post_id,
+            'post_url': post.post_url,
+            'error_message': post.error_message,
+            'retry_count': post.retry_count,
+            'created_at': post.created_at.isoformat(),
+            'posted_at': post.posted_at.isoformat() if post.posted_at else None,
+        })
+    
+    return JsonResponse({
+        'data': posts_data,
+        'pagination': {
+            'page': page,
+            'limit': limit,
+            'total': paginator.count,
+            'total_pages': paginator.num_pages,
+            'has_next': page_obj.has_next(),
+            'has_previous': page_obj.has_previous(),
+        }
+    })
 

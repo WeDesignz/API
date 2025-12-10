@@ -483,37 +483,221 @@ def send_settlement_reminders(self):
 
 @shared_task(bind=True, name='common.tasks.process_monthly_settlements')
 def process_monthly_settlements(self):
-    """Process monthly settlements for designers on day 1 of each month."""
+    """Create settlement requests on day 1 of each month."""
     try:
-        from datetime import datetime
+        from datetime import datetime, date, timedelta
         import pytz
+        from decimal import Decimal
+        from django.contrib.auth.models import User
+        from Wallet.models import Wallet, SettlementRequest
+        from Profiles.models import DesignerProfile
+        from Authentication.user_relations import get_user_wallets
         
         # Get current date in Asia/Kolkata timezone
         kolkata_tz = pytz.timezone('Asia/Kolkata')
-        current_date = datetime.now(kolkata_tz)
+        current_date = datetime.now(kolkata_tz).date()
         
         # Only run on day 1 of the month
         if current_date.day != 1:
-            logger.info("Not the first day of the month, skipping settlement processing")
+            logger.info("Not the first day of the month, skipping settlement request creation")
             return "Not the first day of the month"
         
-        # TODO: Create settlement requests for all eligible designers
-        # eligible_designers = User.objects.filter(
-        #     is_active=True,
-        #     designerprofile__status='verified',
-        #     wallet__balance__gt=0
-        # )
+        # Calculate previous month period
+        if current_date.month == 1:
+            period_start = date(current_date.year - 1, 12, 1)
+            # Get last day of December
+            period_end = date(current_date.year - 1, 12, 31)
+        else:
+            period_start = date(current_date.year, current_date.month - 1, 1)
+            # Get last day of previous month
+            if current_date.month == 2:
+                period_end = date(current_date.year, 1, 31)
+            else:
+                # Calculate last day of previous month
+                first_day_current = date(current_date.year, current_date.month, 1)
+                period_end = first_day_current - timedelta(days=1)
         
-        # for designer in eligible_designers:
-        #     # Calculate earnings from last settlement
-        #     # Create settlement request
-        #     # Send notification
+        # Get all active verified designers
+        designers = User.objects.filter(
+            is_active=True,
+            created_designer_profiles__status='verified'
+        ).distinct()
         
-        logger.info("Monthly settlement processing completed")
-        return "Monthly settlement processing completed"
+        created_count = 0
+        skipped_count = 0
+        
+        for designer in designers:
+            try:
+                # Verify designer profile exists and is verified
+                designer_profile = DesignerProfile.objects.filter(created_by=designer, status='verified').first()
+                if not designer_profile:
+                    skipped_count += 1
+                    continue
+                
+                # Get wallet balance
+                wallets = get_user_wallets(designer)
+                if not wallets.exists():
+                    skipped_count += 1
+                    continue
+                
+                wallet = wallets.first()
+                balance = Decimal(str(wallet.balance))
+                
+                if balance <= 0:
+                    skipped_count += 1
+                    continue
+                
+                # Create settlement request (or get existing one)
+                settlement_request, created = SettlementRequest.objects.get_or_create(
+                    designer_id=designer.id,
+                    settlement_period_start=period_start,
+                    defaults={
+                        'settlement_period_end': period_end,
+                        'wallet_balance_at_period_end': balance,
+                        'settlement_amount': balance,  # Settle full balance
+                        'status': 'pending'
+                    }
+                )
+                
+                if created:
+                    # Link designer to settlement request
+                    settlement_request.set_designer(designer)
+                    created_count += 1
+                    logger.info(f"Created settlement request for designer {designer.id}: ₹{balance}")
+                    
+                    # TODO: Send notification to designer about settlement window
+                    # send_mail(
+                    #     subject="Settlement Window Open - WeDesignz",
+                    #     message=f"Hi {designer.first_name},\n\nYour settlement window is now open (Days 1-5 of the month).\n\nAvailable for settlement: ₹{balance}\nPeriod: {period_start} to {period_end}\n\nPlease log in to accept your settlement.\n\nVisit {settings.SITE_URL}/designer-console to access your dashboard.",
+                    #     from_email=settings.DEFAULT_FROM_EMAIL,
+                    #     recipient_list=[designer.email],
+                    #     fail_silently=False,
+                    # )
+                else:
+                    # Update existing request if balance changed
+                    if settlement_request.wallet_balance_at_period_end != balance:
+                        settlement_request.wallet_balance_at_period_end = balance
+                        settlement_request.settlement_amount = balance
+                        settlement_request.save()
+                        logger.info(f"Updated settlement request for designer {designer.id}: ₹{balance}")
+                    
+            except Exception as e:
+                logger.error(f"Failed to create settlement for designer {designer.id}: {str(e)}", exc_info=True)
+                skipped_count += 1
+        
+        logger.info(f"Created {created_count} settlement requests, skipped {skipped_count} designers")
+        return f"Created {created_count} settlement requests, skipped {skipped_count} designers"
         
     except Exception as e:
-        logger.error(f"Failed to process monthly settlements: {str(e)}")
+        logger.error(f"Failed to process monthly settlements: {str(e)}", exc_info=True)
+        raise self.retry(exc=e, countdown=60, max_retries=3)
+
+
+@shared_task(bind=True, name='common.tasks.process_settlement_payouts')
+def process_settlement_payouts(self):
+    """
+    Process all opted-in settlements on day 6 of each month.
+    Deducts from wallet and marks settlements as 'processing' for manual payout.
+    Admin will download settlement sheet and process payouts manually.
+    """
+    try:
+        from datetime import datetime, date
+        import pytz
+        from decimal import Decimal
+        from django.contrib.auth.models import User
+        from Wallet.models import Wallet, SettlementRequest, WalletTransaction
+        from Authentication.user_relations import get_user_wallets
+        
+        # Get current date in Asia/Kolkata timezone
+        kolkata_tz = pytz.timezone('Asia/Kolkata')
+        current_date = datetime.now(kolkata_tz).date()
+        
+        # Only run on day 6
+        if current_date.day != 6:
+            logger.info("Not day 6, skipping settlement processing")
+            return "Not day 6"
+        
+        # Get all opted-in settlement requests
+        settlement_requests = SettlementRequest.objects.filter(
+            status='opted_in',
+            settlement_date__isnull=True  # Not yet processed
+        )
+        
+        processed_count = 0
+        failed_count = 0
+        
+        for settlement_request in settlement_requests:
+            try:
+                designer_id = settlement_request.designer_id
+                
+                # Get designer
+                designer = User.objects.get(id=designer_id)
+                
+                # Get current wallet balance
+                wallets = get_user_wallets(designer)
+                wallet = wallets.first()
+                
+                if not wallet:
+                    logger.error(f"No wallet found for designer {designer_id}")
+                    settlement_request.status = 'failed'
+                    settlement_request.failure_reason = 'Wallet not found'
+                    settlement_request.save()
+                    failed_count += 1
+                    continue
+                
+                current_balance = Decimal(str(wallet.balance))
+                settlement_amount = Decimal(str(settlement_request.settlement_amount))
+                
+                # Ensure we don't settle more than available
+                if settlement_amount > current_balance:
+                    settlement_amount = current_balance
+                    logger.warning(f"Adjusting settlement amount for designer {designer_id}: {settlement_amount}")
+                
+                if settlement_amount <= 0:
+                    logger.warning(f"Insufficient balance for designer {designer_id}")
+                    settlement_request.status = 'failed'
+                    settlement_request.failure_reason = 'Insufficient wallet balance'
+                    settlement_request.save()
+                    failed_count += 1
+                    continue
+                
+                # Update settlement request to processing
+                settlement_request.status = 'processing'
+                settlement_request.settlement_date = current_date
+                settlement_request.save()
+                
+                # Deduct from wallet
+                wallet.balance = current_balance - settlement_amount
+                wallet.save()
+                
+                # Create debit transaction
+                transaction = WalletTransaction.objects.create(
+                    wallet_transaction_type='debit',
+                    amount=settlement_amount,
+                    description=f"Settlement for period {settlement_request.settlement_period_start} to {settlement_request.settlement_period_end}",
+                    reference_id=f"settlement_{settlement_request.id}",
+                    created_by=designer
+                )
+                wallet.attach_wallet_transaction(transaction)
+                
+                processed_count += 1
+                logger.info(f"Processed settlement for designer {designer_id}: ₹{settlement_amount} (marked for manual payout)")
+                    
+            except User.DoesNotExist:
+                logger.error(f"Designer {settlement_request.designer_id} not found")
+                settlement_request.status = 'failed'
+                settlement_request.failure_reason = 'Designer not found'
+                settlement_request.save()
+                failed_count += 1
+            except Exception as e:
+                logger.error(f"Failed to process settlement {settlement_request.id}: {str(e)}", exc_info=True)
+                failed_count += 1
+        
+        logger.info(f"Processed {processed_count} settlements, {failed_count} failed. Admin can download settlement sheet for manual payout.")
+        return f"Processed {processed_count} settlements, {failed_count} failed"
+        
+    except Exception as e:
+        logger.error(f"Failed to process settlement payouts: {str(e)}", exc_info=True)
         raise self.retry(exc=e, countdown=60, max_retries=3)
 
 
@@ -773,6 +957,152 @@ def send_designer_subscription_invoice_email_async(self, invoice_id, subscriptio
         return f"Subscription {subscription_id} not found"
     except Exception as e:
         logger.error(f"Failed to send designer subscription invoice email for invoice {invoice_id}: {str(e)}", exc_info=True)
+        raise self.retry(exc=e, countdown=60, max_retries=3)
+
+
+@shared_task(bind=True, name='common.tasks.generate_and_send_designer_bill_async')
+def generate_and_send_designer_bill_async(self, designer_id, settlement_period_start, settlement_period_end, settlement_request_id):
+    """
+    Generate monthly designer bill and send via email when designer opts in for settlement.
+    This task is triggered when a designer accepts settlement during the settlement window.
+    """
+    try:
+        from django.contrib.auth.models import User
+        from Orders.models import Order, Invoice
+        from Orders.invoice_service import create_monthly_designer_bill, calculate_order_breakdown
+        from datetime import date
+        from collections import defaultdict
+        from decimal import Decimal
+        
+        designer = User.objects.get(id=designer_id)
+        period_start = date.fromisoformat(settlement_period_start)
+        period_end = date.fromisoformat(settlement_period_end)
+        
+        logger.info(f"Generating monthly bill for designer {designer_id} for period {period_start} to {period_end}")
+        
+        # Get all successful orders in the period
+        orders = Order.objects.filter(
+            status='success',
+            created_at__date__gte=period_start,
+            created_at__date__lte=period_end
+        ).exclude(product_ids__isnull=True).exclude(product_ids='')
+        
+        if not orders.exists():
+            logger.warning(f'No orders found for designer {designer_id} in period {period_start} to {period_end}')
+            return f"No orders found for designer {designer_id}"
+        
+        # Initialize purchase type breakdowns
+        purchase_type_breakdowns = {
+            'individual': {
+                'gst_amount': Decimal('0'),
+                'commission_amount': Decimal('0'),
+                'product_total': Decimal('0'),
+                'design_count': 0,
+                'orders': []
+            },
+            'basic': {
+                'gst_amount': Decimal('0'),
+                'commission_amount': Decimal('0'),
+                'product_total': Decimal('0'),
+                'design_count': 0,
+                'orders': []
+            },
+            'prime': {
+                'gst_amount': Decimal('0'),
+                'commission_amount': Decimal('0'),
+                'product_total': Decimal('0'),
+                'design_count': 0,
+                'orders': []
+            },
+            'premium': {
+                'gst_amount': Decimal('0'),
+                'commission_amount': Decimal('0'),
+                'product_total': Decimal('0'),
+                'design_count': 0,
+                'orders': []
+            }
+        }
+        
+        # Process each order and categorize by purchase type
+        for order in orders:
+            breakdown = calculate_order_breakdown(order)
+            if breakdown.get('designer_breakdown') and designer_id in breakdown['designer_breakdown']:
+                dbreakdown = breakdown['designer_breakdown'][designer_id]
+                
+                # Determine purchase type
+                purchase_type = 'individual'
+                if order.subscription and order.subscription.plan:
+                    plan_name = order.subscription.plan.plan_name
+                    if plan_name in ['basic', 'prime', 'premium']:
+                        purchase_type = plan_name
+                
+                # Count designs/products for this purchase type
+                design_count = len(dbreakdown.get('products', []))
+                
+                # Add to appropriate category
+                purchase_type_breakdowns[purchase_type]['gst_amount'] += Decimal(str(dbreakdown['gst_amount']))
+                purchase_type_breakdowns[purchase_type]['commission_amount'] += Decimal(str(dbreakdown['commission_amount']))
+                purchase_type_breakdowns[purchase_type]['product_total'] += Decimal(str(dbreakdown['product_total']))
+                purchase_type_breakdowns[purchase_type]['design_count'] += design_count
+                purchase_type_breakdowns[purchase_type]['orders'].append(order)
+        
+        # Include subscription settlement invoices for this period
+        # Subscription settlements create separate invoices with subscription field set
+        subscription_invoices = Invoice.objects.filter(
+            user_id=designer_id,
+            invoice_type='designer',
+            subscription__isnull=False,
+            invoice_date__gte=period_start,
+            invoice_date__lte=period_end
+        ).select_related('subscription', 'subscription__plan')
+        
+        for sub_invoice in subscription_invoices:
+            if sub_invoice.subscription and sub_invoice.subscription.plan:
+                plan_name = sub_invoice.subscription.plan.plan_name
+                if plan_name in ['basic', 'prime', 'premium']:
+                    purchase_type = plan_name
+                    
+                    # Get design count from invoice data if available
+                    design_count = 0
+                    if sub_invoice.invoice_data and 'items' in sub_invoice.invoice_data:
+                        # Try to get quantity from first item
+                        items = sub_invoice.invoice_data.get('items', [])
+                        if items:
+                            design_count = items[0].get('quantity', 0)
+                    
+                    # Add subscription settlement amounts to appropriate category
+                    purchase_type_breakdowns[purchase_type]['gst_amount'] += Decimal(str(sub_invoice.gst_amount))
+                    purchase_type_breakdowns[purchase_type]['commission_amount'] += Decimal(str(sub_invoice.commission_amount))
+                    purchase_type_breakdowns[purchase_type]['product_total'] += Decimal(str(sub_invoice.subtotal))
+                    purchase_type_breakdowns[purchase_type]['design_count'] += design_count
+                    # Note: subscription invoices don't have orders, so we skip adding to orders list
+        
+        # Remove empty categories
+        purchase_type_breakdowns = {
+            k: v for k, v in purchase_type_breakdowns.items()
+            if v['gst_amount'] > 0 or v['commission_amount'] > 0
+        }
+        
+        if not purchase_type_breakdowns:
+            logger.warning(f'No valid breakdown data for designer {designer_id} in period {period_start} to {period_end}')
+            return f"No valid breakdown data for designer {designer_id}"
+        
+        # Generate monthly bill
+        invoice = create_monthly_designer_bill(designer, purchase_type_breakdowns, period_start, period_end)
+        
+        logger.info(f"Generated bill {invoice.invoice_number} for designer {designer_id}")
+        
+        # Send email with bill
+        EmailService.send_designer_monthly_bill_email(invoice, period_start, period_end)
+        
+        logger.info(f"Generated and sent bill {invoice.invoice_number} to designer {designer_id}")
+        return f"Bill {invoice.invoice_number} generated and sent to designer {designer_id}"
+        
+    except User.DoesNotExist:
+        logger.error(f"Designer {designer_id} not found")
+        return f"Designer {designer_id} not found"
+    except Exception as e:
+        logger.error(f"Failed to generate bill for designer {designer_id}: {str(e)}", exc_info=True)
         raise self.retry(exc=e, countdown=60, max_retries=3)
 
 
@@ -1147,6 +1477,272 @@ def send_notification_email(self, user_type, user_id, notification_id):
         raise self.retry(exc=e, countdown=60, max_retries=3)
 
 
+# ==================== INSTAGRAM TASKS ====================
+
+@shared_task(
+    bind=True, 
+    max_retries=3,
+    name='common.tasks.post_to_instagram'
+)
+def post_to_instagram(self, instagram_post_id):
+    """
+    Post to Instagram asynchronously.
+    Updates InstagramPost record with result.
+    """
+    import logging
+    import os
+    import requests
+    logger = logging.getLogger(__name__)
+    
+    logger.info(f"=== TASK STARTED: Instagram post task for post ID: {instagram_post_id} ===")
+    logger.info(f"Task ID: {self.request.id}, Retry: {self.request.retries}/{self.max_retries}")
+    
+    try:
+        from django.conf import settings
+        from .models import InstagramPost, InstagramIntegration
+        from Catalog.models import Product
+        
+        # Get the InstagramPost record
+        try:
+            instagram_post = InstagramPost.objects.get(id=instagram_post_id)
+            logger.info(f"Found InstagramPost {instagram_post_id}: status={instagram_post.status}, type={instagram_post.post_type}, media_type={instagram_post.media_type}")
+        except InstagramPost.DoesNotExist:
+            logger.error(f"InstagramPost {instagram_post_id} not found in database")
+            return
+        
+        # Check if already successfully processed
+        if instagram_post.status == 'success':
+            logger.info(f"Post {instagram_post_id} already successful. Skipping.")
+            return
+        
+        # Mark as processing immediately
+        try:
+            instagram_post.mark_processing()
+            logger.info(f"Post {instagram_post_id} marked as processing")
+        except Exception as e:
+            logger.error(f"Failed to mark post {instagram_post_id} as processing: {str(e)}", exc_info=True)
+            # Continue anyway - don't fail the task just because status update failed
+        
+        # Check if Instagram is enabled
+        integration = InstagramIntegration.get_instance()
+        if not integration.is_enabled:
+            logger.warning(f"Instagram integration is disabled for post {instagram_post_id}")
+            instagram_post.mark_failed("Instagram integration is disabled")
+            return
+        
+        if not integration.access_token:
+            logger.warning(f"Instagram access token not configured for post {instagram_post_id}")
+            instagram_post.mark_failed("Instagram access token not configured")
+            return
+        
+        if not integration.is_token_valid():
+            logger.warning(f"Instagram access token expired for post {instagram_post_id}")
+            instagram_post.mark_failed("Instagram access token expired")
+            return
+        
+        # Get the product
+        try:
+            product = instagram_post.product
+        except Product.DoesNotExist:
+            logger.error(f"Product not found for InstagramPost {instagram_post_id}")
+            instagram_post.mark_failed("Product not found")
+            return
+        
+        logger.info(f"Processing post {instagram_post_id} for product {product.id} ({product.title})")
+        
+        # Initialize Instagram service
+        try:
+            from .instagram_service import InstagramService
+            instagram_service = InstagramService()
+        except Exception as e:
+            error_msg = f"Instagram service initialization failed: {str(e)}"
+            logger.error(f"Post {instagram_post_id}: {error_msg}", exc_info=True)
+            instagram_post.mark_failed(error_msg)
+            return
+        
+        # Get all image media files for the product
+        media_files = product.get_media().filter(media_type='image')
+        
+        if not media_files.exists():
+            logger.warning(f"No image media found for product {product.id}")
+            instagram_post.mark_failed("No image media found for product")
+            return
+        
+        # Find the appropriate image based on media_type preference
+        # Priority: mockup > requested type (png/jpg) > any available image
+        image_media = None
+        requested_type = instagram_post.media_type.lower()
+        
+        # First pass: collect all valid images (exclude CDR/EPS)
+        mockup_media = None
+        png_media = None
+        jpg_media = None
+        
+        for media in media_files:
+            if not media.file:
+                continue
+            
+            try:
+                file_name = media.file.name.lower()
+            except (AttributeError, ValueError):
+                continue
+            
+            # Skip CDR and EPS files
+            if file_name.endswith(('.cdr', '.eps')):
+                continue
+            
+            # Only process image files
+            if not file_name.endswith(('.jpg', '.jpeg', '.png', '.gif', '.webp')):
+                continue
+            
+            # Check if it's a mockup
+            base_name = os.path.splitext(os.path.basename(file_name))[0]
+            is_mockup = base_name == 'mockup'
+            
+            # Also check metadata
+            if not is_mockup:
+                try:
+                    from MediaFiles.models import Relation
+                    relation = Relation.objects.filter(
+                        relation_type='Product:Media',
+                        id_1=product.pk,
+                        id_2=media.pk
+                    ).first()
+                    if relation and relation.meta and 'mockup' in str(relation.meta).lower():
+                        is_mockup = True
+                except Exception:
+                    pass
+            
+            # Categorize
+            if is_mockup and not mockup_media:
+                mockup_media = media
+            elif file_name.endswith('.png') and not png_media:
+                png_media = media
+            elif file_name.endswith(('.jpg', '.jpeg')) and not jpg_media:
+                jpg_media = media
+        
+        # Select image based on priority
+        if mockup_media:
+            # Always prefer mockup if available
+            image_media = mockup_media
+            logger.info(f"Selected mockup image for product {product.id}")
+        elif requested_type == 'png' and png_media:
+            image_media = png_media
+            logger.info(f"Selected PNG image for product {product.id} (as requested)")
+        elif requested_type == 'jpg' and jpg_media:
+            image_media = jpg_media
+            logger.info(f"Selected JPG image for product {product.id} (as requested)")
+        elif png_media:
+            image_media = png_media
+            logger.info(f"Selected PNG image for product {product.id} (fallback)")
+        elif jpg_media:
+            image_media = jpg_media
+            logger.info(f"Selected JPG image for product {product.id} (fallback)")
+        
+        if not image_media:
+            error_msg = "No valid image found. Product must have at least one mockup, PNG, or JPG image file."
+            logger.warning(f"Post {instagram_post_id}: {error_msg}")
+            instagram_post.mark_failed(error_msg)
+            return
+        
+        logger.info(f"Selected image media ID: {image_media.id} for post {instagram_post_id}")
+        
+        # Get image URL
+        try:
+            image_url = image_media.file.url
+        except Exception as e:
+            error_msg = f"Error getting image URL: {str(e)}"
+            logger.error(f"Post {instagram_post_id}: {error_msg}", exc_info=True)
+            instagram_post.mark_failed(error_msg)
+            return
+        
+        if not image_url:
+            error_msg = "Image URL not available"
+            logger.warning(f"Post {instagram_post_id}: {error_msg}")
+            instagram_post.mark_failed(error_msg)
+            return
+        
+        # Normalize URL to absolute HTTPS
+        image_url = str(image_url).strip()
+        
+        if image_url.startswith('/'):
+            media_domain = getattr(settings, 'MEDIA_DOMAIN', 'devapi.wedesignz.com').rstrip('/')
+            image_url = f"https://{media_domain}/{image_url.lstrip('/')}"
+        elif not image_url.startswith(('http://', 'https://')):
+            media_domain = getattr(settings, 'MEDIA_DOMAIN', 'devapi.wedesignz.com').rstrip('/')
+            image_url = f"https://{media_domain}/{image_url.lstrip('/')}"
+        elif image_url.startswith('http://'):
+            image_url = image_url.replace('http://', 'https://', 1)
+        
+        if not image_url.startswith('https://'):
+            error_msg = f"Invalid image URL format (must be HTTPS): {image_url[:100]}"
+            logger.error(f"Post {instagram_post_id}: {error_msg}")
+            instagram_post.mark_failed(error_msg)
+            return
+        
+        logger.info(f"Using image URL: {image_url[:100]}...")
+        
+        # Validate URL is accessible
+        try:
+            logger.info(f"Validating image URL accessibility...")
+            validation_response = requests.head(image_url, timeout=10, allow_redirects=True)
+            validation_response.raise_for_status()
+            
+            content_type = validation_response.headers.get('Content-Type', '').lower()
+            if not content_type.startswith('image/'):
+                error_msg = f"URL does not point to an image. Content-Type: {content_type}"
+                logger.error(f"Post {instagram_post_id}: {error_msg}")
+                instagram_post.mark_failed(error_msg)
+                return
+            
+            logger.info(f"Image URL validated. Content-Type: {content_type}, Status: {validation_response.status_code}")
+        except requests.exceptions.RequestException as e:
+            error_msg = f"Image URL is not accessible: {str(e)}"
+            logger.error(f"Post {instagram_post_id}: {error_msg}")
+            instagram_post.mark_failed(error_msg)
+            return
+        
+        # Post to Instagram
+        is_story = instagram_post.post_type == 'story'
+        logger.info(f"Posting to Instagram (type: {'story' if is_story else 'post'})...")
+        
+        result = instagram_service.create_and_publish_post(
+            image_url=image_url,
+            caption=instagram_post.caption or '',
+            is_story=is_story
+        )
+        
+        # Handle result
+        if result and result.get('success') and result.get('data') and result['data'].get('id'):
+            post_data = result['data']
+            instagram_post.mark_success(
+                media_id=post_data.get('media_id'),
+                post_id=post_data.get('id'),
+                post_url=post_data.get('url')
+            )
+            logger.info(f"=== SUCCESS: Post {instagram_post_id} published. Instagram Post ID: {post_data.get('id')} ===")
+        else:
+            error_msg = result.get('error', 'Unknown error') if result else 'Instagram service returned no result'
+            if result and result.get('step'):
+                error_msg = f"Failed at {result.get('step')} step: {error_msg}"
+            logger.error(f"=== FAILED: Post {instagram_post_id}: {error_msg} ===")
+            instagram_post.mark_failed(error_msg)
+            
+    except Exception as e:
+        logger.error(f"=== ERROR: Post {instagram_post_id} exception: {str(e)} ===", exc_info=True)
+        try:
+            instagram_post = InstagramPost.objects.get(id=instagram_post_id)
+            instagram_post.mark_failed(f"Error: {str(e)}")
+        except Exception:
+            pass
+        
+        # Retry if not exceeded max retries
+        if self.request.retries < self.max_retries:
+            retry_countdown = 60 * (self.request.retries + 1)
+            logger.info(f"Retrying post {instagram_post_id} in {retry_countdown} seconds (attempt {self.request.retries + 1}/{self.max_retries})")
+            raise self.retry(exc=e, countdown=retry_countdown)
+
+
 # ==================== PINTEREST TASKS ====================
 
 @shared_task(bind=True, max_retries=3)
@@ -1205,8 +1801,52 @@ def post_design_to_pinterest(self, pinterest_post_id, base_url=None):
             pinterest_post.mark_failed("No image media found for product")
             return
         
-        # Use the first image (or you can choose based on priority)
-        image_media = media_files.first()
+        # Prioritize: JPG > PNG > other images (skip mockup)
+        image_media = None
+
+        for media in media_files:
+            if not media.file:
+                continue
+            
+            file_name = media.file.name.lower()
+            base_name = os.path.splitext(os.path.basename(file_name))[0]
+            
+            # Skip mockup files
+            if base_name == 'mockup':
+                continue
+            
+            # Prefer JPG first
+            if file_name.endswith(('.jpg', '.jpeg')):
+                image_media = media
+                break
+
+        # If no JPG, try PNG
+        if not image_media:
+            for media in media_files:
+                if not media.file:
+                    continue
+                file_name = media.file.name.lower()
+                base_name = os.path.splitext(os.path.basename(file_name))[0]
+                if base_name == 'mockup':
+                    continue
+                if file_name.endswith('.png'):
+                    image_media = media
+                    break
+
+        # Fallback to any non-mockup image
+        if not image_media:
+            for media in media_files:
+                if not media.file:
+                    continue
+                file_name = media.file.name.lower()
+                base_name = os.path.splitext(os.path.basename(file_name))[0]
+                if base_name != 'mockup':
+                    image_media = media
+                    break
+
+        # Last resort: use first image
+        if not image_media:
+            image_media = media_files.first()
         
         # Build absolute image URL
         # Pinterest requires HTTPS and publicly accessible URLs (no localhost)
@@ -1244,7 +1884,8 @@ def post_design_to_pinterest(self, pinterest_post_id, base_url=None):
         
         # Validate domain - must be HTTPS and not localhost
         if domain.startswith('https://') and 'localhost' not in domain.lower() and '127.0.0.1' not in domain:
-            link = f"{domain}/designs/{product.id}"
+            # Link to customer dashboard with product ID to auto-open product modal
+            link = f"{domain}/customer-dashboard?product={product.id}"
             logger.info(f"Using Pinterest link: {link}")
         else:
             # Invalid domain (localhost), skip link - Pinterest allows pins without links

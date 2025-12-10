@@ -13,6 +13,7 @@ urlpatterns = [
     
     # Password reset
     path('request-password-reset/', views.request_password_reset, name='request_password_reset'),
+    path('verify-password-reset-otp/', views.verify_password_reset_otp, name='verify_password_reset_otp'),
     path('confirm-password-reset/', views.confirm_password_reset, name='confirm_password_reset'),
     
     # Mobile number management

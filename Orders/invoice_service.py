@@ -264,12 +264,13 @@ def _draw_invoice_meta(c: canvas.Canvas, data: Dict[str, Any], page_width: float
     c.setFont("Helvetica-Bold", 9)
     c.drawRightString(value_x, meta_y, f"{inv.get('invoice_number', '')}")
     
-    # Order Number: label on left, value on right
-    meta_y -= 6 * mm
-    c.setFont("Helvetica", 9)
-    c.drawString(label_start_x, meta_y, "Order Number:")
-    c.setFont("Helvetica-Bold", 9)
-    c.drawRightString(value_x, meta_y, f"{inv.get('order_number', '')}")
+    # Order Number: label on left, value on right (only for customer invoices)
+    if invoice_type != "designer":  # Hide Order Number for designer bills
+        meta_y -= 6 * mm
+        c.setFont("Helvetica", 9)
+        c.drawString(label_start_x, meta_y, "Order Number:")
+        c.setFont("Helvetica-Bold", 9)
+        c.drawRightString(value_x, meta_y, f"{inv.get('order_number', '')}")
     
     # Invoice Date: label on left, value on right
     meta_y -= 6 * mm
@@ -281,26 +282,59 @@ def _draw_invoice_meta(c: canvas.Canvas, data: Dict[str, Any], page_width: float
     return top_y - 30 * mm  # Adjusted for 3 rows
 
 
-def _draw_company_contact(c: canvas.Canvas, data: Dict[str, Any], left_x: float, y: float) -> float:
-    """Draw company contact info near the bottom."""
+def _draw_company_contact(c: canvas.Canvas, data: Dict[str, Any], page_width: float, y: float) -> float:
+    """Draw company contact info in an attractive footer."""
     company = data["company_details"]
+    
+    # Draw a subtle line separator
+    left_margin = 25 * mm
+    right_margin = 25 * mm
+    line_y = y + 8 * mm
+    
+    c.setStrokeColorRGB(0.85, 0.85, 0.85)
+    c.setLineWidth(0.5)
+    c.line(left_margin, line_y, page_width - right_margin, line_y)
+    
+    # Footer content with better styling
+    footer_y = y
+    
+    # Left side: Contact Email ID
+    c.setFont("Helvetica-Bold", 8)
+    c.setFillColorRGB(0.22, 0.55, 0.80)
+    c.drawString(left_margin, footer_y, "Contact Email ID:")
+    
     c.setFont("Helvetica", 8)
     c.setFillColor(colors.black)
-    text = f"Bank Transfer: {company.get('company_bank_details', '')}"
-    c.drawString(left_x, y, text)
-    c.drawRightString(190 * mm, y, f"Contact: {company.get('company_email', '')}")
-    return y - 6 * mm
+    email = company.get('company_email', 'info@wedesignz.com')
+    c.drawString(left_margin, footer_y - 4 * mm, email)
+    
+    # Right side: Support Link
+    support_link = company.get('company_support_link', 'https://support.wedesignz.com')
+    c.setFont("Helvetica-Bold", 8)
+    c.setFillColorRGB(0.22, 0.55, 0.80)
+    c.drawRightString(page_width - right_margin, footer_y, "Support Link:")
+    
+    c.setFont("Helvetica", 8)
+    c.setFillColor(colors.black)
+    c.drawRightString(page_width - right_margin, footer_y - 4 * mm, support_link)
+    
+    return footer_y - 8 * mm
 
 
 def _draw_billed_and_from_blocks(c: canvas.Canvas, data: Dict[str, Any], page_width: float, start_y: float) -> float:
-    """Draw billed to and from blocks."""
+    """Draw billed to and from blocks with proper text wrapping."""
     billed = data["billed_to"]
     sender = data["from_details"]
+    company = data.get("company_details", {})
 
     left_margin = 25 * mm
     right_margin = 25 * mm
     mid_x = page_width / 2
+    
+    # Column width for each section (to prevent overlap)
+    col_width = (mid_x - left_margin - 5 * mm)  # Leave 5mm gap between columns
 
+    # BILLED TO section
     c.setFont("Helvetica-Bold", 9)
     c.setFillColorRGB(0.22, 0.55, 0.80)
     c.drawString(left_margin, start_y, "BILLED TO")
@@ -308,23 +342,103 @@ def _draw_billed_and_from_blocks(c: canvas.Canvas, data: Dict[str, Any], page_wi
     c.setFont("Helvetica", 9)
     c.setFillColor(colors.black)
     text_y = start_y - 5 * mm
-    c.drawString(left_margin, text_y, billed.get("client_company", ""))
-    c.drawString(left_margin, text_y - 4 * mm, billed.get("client_address_line1", ""))
-    c.drawString(left_margin, text_y - 8 * mm, billed.get("client_address_line2", ""))
+    
+    # Company/Individual Name (with wrapping)
+    company_name = billed.get("client_company", "")
+    wrapped_lines = _wrap_text(company_name, col_width, c, "Helvetica", 9)
+    for line in wrapped_lines:
+        c.drawString(left_margin, text_y, line)
+        text_y -= 4 * mm
+    
+    # Address Line 1 (with wrapping)
+    if billed.get("client_address_line1"):
+        addr1 = billed.get("client_address_line1", "")
+        wrapped_lines = _wrap_text(addr1, col_width, c, "Helvetica", 9)
+        for line in wrapped_lines:
+            c.drawString(left_margin, text_y, line)
+            text_y -= 4 * mm
+    
+    # Address Line 2 (with wrapping)
+    if billed.get("client_address_line2"):
+        addr2 = billed.get("client_address_line2", "")
+        wrapped_lines = _wrap_text(addr2, col_width, c, "Helvetica", 9)
+        for line in wrapped_lines:
+            c.drawString(left_margin, text_y, line)
+            text_y -= 4 * mm
+    
+    # GST Number (if available)
+    if billed.get("client_gst_number"):
+        c.setFont("Helvetica", 8)
+        c.drawString(left_margin, text_y, f"GSTIN: {billed.get('client_gst_number')}")
+        text_y -= 4 * mm
 
+    # FROM section (WeDesignz fixed address)
     c.setFont("Helvetica-Bold", 9)
     c.setFillColorRGB(0.22, 0.55, 0.80)
     c.drawString(mid_x + 5 * mm, start_y, "FROM")
 
-    c.setFont("Helvetica-Bold", 9)
+    c.setFont("Helvetica", 9)
     c.setFillColor(colors.black)
     from_y = start_y - 5 * mm
-    c.drawString(mid_x + 5 * mm, from_y, sender.get("sender_name", ""))
+    
+    # WeDesignz Company Name
+    sender_name = sender.get("sender_name", "WeDesignz")
+    wrapped_lines = _wrap_text(sender_name, col_width, c, "Helvetica", 9)
+    for line in wrapped_lines:
+        c.drawString(mid_x + 5 * mm, from_y, line)
+        from_y -= 4 * mm
+    
+    # WeDesignz Address Line 1 (with wrapping)
+    if sender.get("sender_address_line1"):
+        addr1 = sender.get("sender_address_line1", "")
+        wrapped_lines = _wrap_text(addr1, col_width, c, "Helvetica", 9)
+        for line in wrapped_lines:
+            c.drawString(mid_x + 5 * mm, from_y, line)
+            from_y -= 4 * mm
+    
+    # WeDesignz Address Line 2 (with wrapping)
+    if sender.get("sender_address_line2"):
+        addr2 = sender.get("sender_address_line2", "")
+        wrapped_lines = _wrap_text(addr2, col_width, c, "Helvetica", 9)
+        for line in wrapped_lines:
+            c.drawString(mid_x + 5 * mm, from_y, line)
+            from_y -= 4 * mm
+    
+    # WeDesignz GST Number
+    sender_gst = sender.get("sender_gst_number", "")
+    if sender_gst:
+        c.setFont("Helvetica", 8)
+        c.drawString(mid_x + 5 * mm, from_y, f"GSTIN: {sender_gst}")
 
-    c.setFont("Helvetica", 9)
-    c.drawString(mid_x + 5 * mm, from_y - 4 * mm, sender.get("sender_location", ""))
+    # Calculate the lowest point used
+    lowest_y = min(text_y, from_y - 4 * mm)
+    return lowest_y - 4 * mm
 
-    return start_y - 20 * mm
+
+def _wrap_text(text: str, max_width: float, c: canvas.Canvas, font_name: str, font_size: int) -> List[str]:
+    """Wrap text to fit within max_width using canvas stringWidth."""
+    if not text:
+        return [""]
+    
+    words = text.split()
+    lines = []
+    current_line = []
+    
+    for word in words:
+        test_line = " ".join(current_line + [word])
+        width = c.stringWidth(test_line, font_name, font_size)
+        
+        if width <= max_width:
+            current_line.append(word)
+        else:
+            if current_line:
+                lines.append(" ".join(current_line))
+            current_line = [word]
+    
+    if current_line:
+        lines.append(" ".join(current_line))
+    
+    return lines if lines else [text]
 
 
 def _draw_items_table(c: canvas.Canvas, data: Dict[str, Any], page_width: float, start_y: float) -> float:
@@ -356,44 +470,71 @@ def _draw_items_table(c: canvas.Canvas, data: Dict[str, Any], page_width: float,
     x = left_margin + 2 * mm
     y_text = start_y - header_height + 3 * mm
 
+    # Draw headers with proper alignment
     for i, title in enumerate(headers):
-        c.drawString(x, y_text, title)
+        if i in [2, 3, 4]:  # QTY, RATE, AMOUNT - center or right align
+            # Center align headers for QTY, RATE, AMOUNT
+            col_center_x = x + col_widths[i] / 2
+            c.drawCentredString(col_center_x, y_text, title)
+        else:  # ITEM, DESCRIPTION - left align
+            c.drawString(x, y_text, title)
         x += col_widths[i]
 
     c.setFont("Helvetica", 8)
     current_y = start_y - header_height
 
-    max_rows = max(4, len(items))  # Show at least 4 rows, or more if needed
-    for row_index in range(max_rows):
+    # Draw all items (should be 2: Individual Design + GST)
+    for row_index, item in enumerate(items):
         current_y -= row_height
 
-        item = items[row_index] if row_index < len(items) else None
-
+        # Alternate row colors
         if row_index % 2 == 0:
             c.setFillColorRGB(0.96, 0.96, 0.96)
             c.rect(left_margin, current_y, table_width, row_height, stroke=0, fill=1)
 
-        if item is not None:
-            c.setFillColor(colors.black)
-            x = left_margin + 2 * mm
-            c.drawString(x, current_y + 4 * mm, str(item.get("item_no", "")))
-            x += col_widths[0]
+        c.setFillColor(colors.black)
+        x = left_margin + 2 * mm
+        
+        # Item number
+        c.drawString(x, current_y + 4 * mm, str(item.get("item_no", "")))
+        x += col_widths[0]
 
-            c.drawString(x, current_y + 4 * mm, str(item.get("description", "")))
-            x += col_widths[1]
+        # Description
+        c.drawString(x, current_y + 4 * mm, str(item.get("description", "")))
+        x += col_widths[1]
 
-            qty = item.get("quantity", "")
-            c.drawString(x, current_y + 4 * mm, str(qty))
-            x += col_widths[2]
+        # Quantity (center aligned, show actual count for GST and Commission rows)
+        qty = item.get("quantity", "")
+        description = item.get("description", "")
+        if qty == "-":
+            qty_display = "-"
+        else:
+            # Show actual quantity (number of designs)
+            qty_display = str(qty) if qty else "-"
+        col_center_x = x + col_widths[2] / 2
+        c.drawCentredString(col_center_x, current_y + 4 * mm, qty_display)
+        x += col_widths[2]
 
-            currency = data.get("currency", "")
-            rate = item.get("rate", 0)
-            amount = item.get("amount", 0)
+        # Rate (center aligned, show calculated rate or "-" if not applicable)
+        currency = data.get("currency", "")
+        rate = item.get("rate", 0)
+        amount = item.get("amount", 0)
 
-            c.drawRightString(x + col_widths[3] - 2 * mm, current_y + 4 * mm, f"{currency}{rate:,.2f}")
-            x += col_widths[3]
+        # Display rate if it's a number, otherwise show "-"
+        if rate == "-" or rate is None:
+            rate_display = "-"
+        elif isinstance(rate, (int, float)) and rate > 0:
+            rate_display = f"{currency}{rate:,.2f}"
+        else:
+            rate_display = "-"
+        col_center_x = x + col_widths[3] / 2
+        c.drawCentredString(col_center_x, current_y + 4 * mm, rate_display)
+        x += col_widths[3]
 
-            c.drawRightString(x + col_widths[4] - 2 * mm, current_y + 4 * mm, f"{currency}{amount:,.2f}")
+        # Amount (center aligned)
+        amount_display = f"{currency}{amount:,.2f}"
+        col_center_x = x + col_widths[4] / 2
+        c.drawCentredString(col_center_x, current_y + 4 * mm, amount_display)
 
     c.setStrokeColorRGB(0.80, 0.80, 0.80)
     c.line(left_margin, current_y, left_margin + table_width, current_y)
@@ -405,38 +546,78 @@ def _draw_totals_section(c: canvas.Canvas, data: Dict[str, Any], page_width: flo
     """Draw totals section on the lower-right side."""
     inv = data["invoice"]
     currency = data.get("currency", "")
+    invoice_type = data.get("invoice_type", "customer")
 
-    items: List[Dict[str, Any]] = data.get("items", [])
-    calculated_total = sum(float(i.get("amount", 0)) for i in items)
-    total_due = calculated_total
+    # Use total_due from data if available, otherwise calculate from items
+    total_due = data.get("total_due", 0)
+    if total_due == 0:
+        items: List[Dict[str, Any]] = data.get("items", [])
+        total_due = sum(float(i.get("amount", 0)) for i in items)
 
     box_width = 70 * mm
-    box_height = 25 * mm
     right_margin = 25 * mm
     box_x = page_width - right_margin - box_width
-    box_y = start_y - box_height
+    
+    # For customer invoices, show subtotal, GST, and total
+    if invoice_type == "customer":
+        gst_amount = data.get("gst_amount", 0)
+        gst_percentage = data.get("gst_percentage", 18)
+        subtotal = data.get("subtotal", total_due - gst_amount)
+        
+        # Calculate box height based on number of lines
+        box_height = 40 * mm  # Increased height for GST line
+        box_y = start_y - box_height
+        
+        # Draw background box
+        c.setFillColorRGB(0.22, 0.55, 0.80)
+        c.rect(box_x, box_y + box_height - 9 * mm, box_width, 9 * mm, stroke=0, fill=1)
+        c.setFillColor(colors.white)
+        c.setFont("Helvetica-Bold", 9)
+        c.drawCentredString(box_x + box_width / 2, box_y + box_height - 6 * mm, "TOTAL AMOUNT")
+        
+        # Draw subtotal, GST, and total
+        c.setFillColor(colors.black)
+        y_pos = box_y + box_height - 15 * mm
+        
+        # Subtotal
+        c.setFont("Helvetica", 9)
+        c.drawString(box_x + 2 * mm, y_pos, "Subtotal:")
+        c.drawRightString(box_x + box_width - 2 * mm, y_pos, f"{currency}{subtotal:,.2f}")
+        y_pos -= 6 * mm
+        
+        # GST
+        c.drawString(box_x + 2 * mm, y_pos, f"GST ({gst_percentage}%):")
+        c.drawRightString(box_x + box_width - 2 * mm, y_pos, f"{currency}{gst_amount:,.2f}")
+        y_pos -= 8 * mm
+        
+        # Total Amount (bold and larger)
+        c.setFont("Helvetica-Bold", 16)
+        c.drawRightString(box_x + box_width - 2 * mm, y_pos, f"{currency}{total_due:,.2f}")
+        
+        return box_y - 6 * mm
+    else:
+        # For designer invoices, keep the original simple layout
+        box_height = 25 * mm
+        box_y = start_y - box_height
 
-    c.setFillColorRGB(0.22, 0.55, 0.80)
-    c.rect(box_x, box_y + box_height - 9 * mm, box_width, 9 * mm, stroke=0, fill=1)
-    c.setFillColor(colors.white)
-    c.setFont("Helvetica-Bold", 9)
-    c.drawCentredString(box_x + box_width / 2, box_y + box_height - 6 * mm, "TOTAL DUE")
+        c.setFillColorRGB(0.22, 0.55, 0.80)
+        c.rect(box_x, box_y + box_height - 9 * mm, box_width, 9 * mm, stroke=0, fill=1)
+        c.setFillColor(colors.white)
+        c.setFont("Helvetica-Bold", 9)
+        c.drawCentredString(box_x + box_width / 2, box_y + box_height - 6 * mm, "TOTAL AMOUNT")
 
-    c.setFillColor(colors.black)
-    c.setFont("Helvetica-Bold", 16)
-    c.drawCentredString(box_x + box_width / 2, box_y + 9 * mm, f"{currency}{total_due:,.2f}")
+        c.setFillColor(colors.black)
+        c.setFont("Helvetica-Bold", 16)
+        c.drawCentredString(box_x + box_width / 2, box_y + 9 * mm, f"{currency}{total_due:,.2f}")
 
-    c.setFont("Helvetica", 8)
-    c.drawString(box_x, box_y - 6 * mm, f"PAYMENT DUE: {inv.get('payment_due_date', '')}")
-
-    return box_y - 12 * mm
+        return box_y - 6 * mm
 
 
 def _draw_thank_you(c: canvas.Canvas, data: Dict[str, Any], page_width: float, y: float) -> float:
-    """Draw thank you note centered near the bottom."""
-    c.setFont("Helvetica", 8)
-    c.setFillColor(colors.black)
-    c.drawCentredString(page_width / 2, y, "Thank you for your business!")
+    """Draw thank you note centered near the bottom with attractive styling."""
+    c.setFont("Helvetica-Bold", 10)
+    c.setFillColorRGB(0.22, 0.55, 0.80)
+    c.drawCentredString(page_width / 2, y, "Thank you for doing business with us")
     return y - 6 * mm
 
 
@@ -471,9 +652,8 @@ def generate_invoice_pdf(invoice_data: Dict[str, Any], output_path: str) -> None
     y_totals_bottom = _draw_totals_section(c, invoice_data, page_width, y - 4 * mm)
 
     footer_y = 32 * mm
-    _draw_company_contact(c, invoice_data, left_margin, footer_y)
-
-    _draw_thank_you(c, invoice_data, page_width, 18 * mm)
+    footer_bottom = _draw_company_contact(c, invoice_data, page_width, footer_y)
+    _draw_thank_you(c, invoice_data, page_width, footer_bottom - 4 * mm)
 
     c.showPage()
     c.save()
@@ -512,30 +692,95 @@ def get_company_details() -> Dict[str, Any]:
         "logo": logo_path,
         "text_logo": text_logo_path,
         "company_name": "WeDesignz",
-        "company_email": "info@wedesignz.com",  # Update with actual email
+        "company_email": "support@wedesignz.com",
         "company_bank_details": "IBAN ESXX XXXX XXXX XXX",  # Update with actual bank details
+        "company_gst_number": "08IXHPS5429F2ZX",
+        "company_address_line1": "B-117, Akar Tower, B-block, Old RTO road, Yogi Tower",
+        "company_address_line2": "Bhilwara - 311001",
+        "company_support_link": "https://support.wedesignz.com",  # Update with actual support link
     }
 
 
 def get_user_address(user: User) -> Dict[str, str]:
-    """Get user address details for invoice."""
-    # Try to get from user profile if available
+    """Get user address details for invoice including GST number."""
+    from Profiles.models import DesignerProfile, Studio, StudioBusinessDetails
+    from Profiles.models import Addresses
+    
+    # Get company/individual name
+    company_name = user.get_full_name() or user.username
+    
+    # Try to get address from Addresses model (for customers)
+    address_line1 = ""
+    address_line2 = ""
+    gst_number = None
+    
+    # Check if user has addresses
+    addresses = Addresses.objects.filter(created_by=user).order_by('-is_permanent', '-created_at')
+    primary_address = addresses.first()
+    
+    if primary_address:
+        address_parts = []
+        if primary_address.address_line_1:
+            address_parts.append(primary_address.address_line_1)
+        if primary_address.address_line_2:
+            address_parts.append(primary_address.address_line_2)
+        if primary_address.landmark:
+            address_parts.append(primary_address.landmark)
+        
+        address_line1 = ", ".join(address_parts) if address_parts else ""
+        
+        city_state_parts = []
+        if primary_address.city:
+            city_state_parts.append(primary_address.city)
+        if primary_address.state:
+            city_state_parts.append(primary_address.state)
+        if primary_address.postal_code:
+            city_state_parts.append(primary_address.postal_code)
+        
+        address_line2 = ", ".join(city_state_parts) if city_state_parts else ""
+    
+    # Try to get GST number and address from StudioBusinessDetails (if user is a designer)
     try:
-        from Profiles.models import DesignerProfile
-        profile = DesignerProfile.objects.filter(user=user).first()
-        if profile:
-            return {
-                "client_company": user.get_full_name() or user.username,
-                "client_address_line1": getattr(profile, 'address', '') or '',
-                "client_address_line2": getattr(profile, 'city', '') or '',
-            }
-    except:
-        pass
+        designer_profile = DesignerProfile.objects.filter(created_by=user).first()
+        if designer_profile:
+            studio = Studio.objects.filter(created_by=user).first()
+            if studio:
+                business_details = StudioBusinessDetails.objects.filter(studio=studio).first()
+                if business_details:
+                    # Get GST number
+                    if business_details.gst_number:
+                        gst_number = business_details.gst_number
+                    # Get business name
+                    if business_details.legal_business_name:
+                        company_name = business_details.legal_business_name
+                    # Get business address from registered_addresses_json if available
+                    if not address_line1 and business_details.registered_addresses_json:
+                        registered_addresses = business_details.registered_addresses_json
+                        # Try to get registered address (usually stored as a dict)
+                        if isinstance(registered_addresses, dict):
+                            # Check for common address field names
+                            if registered_addresses.get('address_line1') or registered_addresses.get('address'):
+                                address_line1 = registered_addresses.get('address_line1') or registered_addresses.get('address', '')
+                            if registered_addresses.get('city') or registered_addresses.get('state') or registered_addresses.get('pincode'):
+                                city_state_parts = []
+                                if registered_addresses.get('city'):
+                                    city_state_parts.append(registered_addresses['city'])
+                                if registered_addresses.get('state'):
+                                    city_state_parts.append(registered_addresses['state'])
+                                if registered_addresses.get('pincode'):
+                                    city_state_parts.append(registered_addresses['pincode'])
+                                if city_state_parts:
+                                    address_line2 = ", ".join(city_state_parts)
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f'Error getting designer business address: {str(e)}', exc_info=True)
     
     return {
-        "client_company": user.get_full_name() or user.username,
-        "client_address_line1": "",
-        "client_address_line2": "",
+        "client_company": company_name,
+        "client_address_line1": address_line1,
+        "client_address_line2": address_line2,
+        "client_gst_number": gst_number,
     }
 
 
@@ -548,7 +793,7 @@ def create_customer_invoice(order: Order) -> Invoice:
     invoice.invoice_type = 'customer'
     invoice.order = order
     invoice.user = order.created_by
-    invoice.subtotal = breakdown['base_amount']
+    invoice.subtotal = breakdown['total_amount'] - breakdown['gst_amount']
     invoice.gst_amount = breakdown['gst_amount']
     invoice.commission_amount = Decimal('0')
     invoice.total_amount = breakdown['total_amount']
@@ -565,13 +810,22 @@ def create_customer_invoice(order: Order) -> Invoice:
         product_ids = [int(pid.strip()) for pid in order.product_ids.split(',') if pid.strip()]
         products = Product.objects.filter(id__in=product_ids)
         
-        for idx, product in enumerate(products, 1):
+        # Count total products
+        total_quantity = len(products)
+        
+        if total_quantity > 0:
+            # Calculate rate per item (base_amount + commission, before GST)
+            # amount_after_gst = base_amount + commission = total_amount - gst_amount
+            amount_after_gst_total = float(breakdown['total_amount']) - float(breakdown['gst_amount'])
+            rate_per_item = amount_after_gst_total / total_quantity
+            
+            # Only Individual Design row (GST will be shown in totals section)
             items.append({
-                "item_no": idx,
-                "description": product.title,
-                "quantity": 1,
-                "rate": float(product.price or 0),
-                "amount": float(product.price or 0),
+                "item_no": 1,
+                "description": "Individual Design",
+                "quantity": total_quantity,
+                "rate": rate_per_item,
+                "amount": amount_after_gst_total,  # quantity * rate
             })
     
     invoice_data = {
@@ -585,12 +839,17 @@ def create_customer_invoice(order: Order) -> Invoice:
         "company_details": company_details,
         "billed_to": user_address,
         "from_details": {
-            "sender_name": "WeDesignz",
-            "sender_location": "India",
+            "sender_name": company_details.get("company_name", "WeDesignz"),
+            "sender_address_line1": company_details.get("company_address_line1", ""),
+            "sender_address_line2": company_details.get("company_address_line2", ""),
+            "sender_gst_number": company_details.get("company_gst_number", ""),
         },
         "items": items,
         "currency": "Rs",
         "total_due": float(breakdown['total_amount']),
+        "gst_amount": float(breakdown['gst_amount']),
+        "gst_percentage": BusinessConfig.get_gst_percentage(),
+        "subtotal": float(breakdown['total_amount']) - float(breakdown['gst_amount']),
     }
     
     invoice.invoice_data = invoice_data
@@ -622,7 +881,7 @@ def create_customer_invoice(order: Order) -> Invoice:
 def create_designer_invoice(order: Order, designer: User, breakdown: Dict[str, Any]) -> Invoice:
     """Create and generate designer invoice for GST + Commission."""
     invoice = Invoice()
-    invoice.invoice_number = invoice.generate_invoice_number()
+    invoice.invoice_number = invoice.generate_bill_number()  # Use BILL prefix
     invoice.invoice_type = 'designer'
     invoice.order = order
     invoice.user = designer
@@ -640,28 +899,53 @@ def create_designer_invoice(order: Order, designer: User, breakdown: Dict[str, A
     # Calculate base amount for commission calculation display
     base_for_commission = breakdown['product_total'] - breakdown['gst_amount']
     
-    # Create more descriptive items
-    items = [
-        {
+    # Determine purchase type and plan name
+    plan_name = None
+    if order.subscription and order.subscription.plan:
+        plan_name = order.subscription.plan.plan_name  # 'basic', 'prime', or 'premium'
+    
+    # Create items based on purchase type
+    items = []
+    
+    if plan_name:
+        # Purchase with subscription - capitalize plan name
+        plan_display = plan_name.capitalize()  # 'Basic', 'Prime', or 'Premium'
+        
+        items.append({
             "item_no": 1,
-            "description": f"GST (18% on Design Sales of Rs {breakdown['product_total']:.2f})",
-            "quantity": 1,
-            "rate": float(breakdown['gst_amount']),
+            "description": f"GST on Designs of {plan_display} Plan",
+            "quantity": "-",
+            "rate": "-",
             "amount": float(breakdown['gst_amount']),
-        },
-        {
+        })
+        items.append({
             "item_no": 2,
-            "description": f"Platform Commission on Rs {base_for_commission:.2f} after GST",
-            "quantity": 1,
-            "rate": float(breakdown['commission_amount']),
+            "description": f"Platform Commission on {plan_display} Plan",
+            "quantity": "-",
+            "rate": "-",
             "amount": float(breakdown['commission_amount']),
-        },
-    ]
+        })
+    else:
+        # Purchase without subscription (individual design)
+        items.append({
+            "item_no": 1,
+            "description": "GST on individual design",
+            "quantity": "-",
+            "rate": "-",
+            "amount": float(breakdown['gst_amount']),
+        })
+        items.append({
+            "item_no": 2,
+            "description": "Platform Commission on individual Design after GST",
+            "quantity": "-",
+            "rate": "-",
+            "amount": float(breakdown['commission_amount']),
+        })
     
     invoice_data = {
         "invoice": {
             "invoice_number": invoice.invoice_number,
-            "order_number": order.order_number or f"ORD-{order.id}",
+            # Remove order_number for designer invoices
             "invoice_date": invoice.invoice_date.strftime('%B %d, %Y'),
             "payment_due_date": invoice.payment_due_date.strftime('%b %d, %Y') if invoice.payment_due_date else "",
         },
@@ -669,8 +953,10 @@ def create_designer_invoice(order: Order, designer: User, breakdown: Dict[str, A
         "company_details": company_details,
         "billed_to": user_address,
         "from_details": {
-            "sender_name": "WeDesignz",
-            "sender_location": "India",
+            "sender_name": company_details.get("company_name", "WeDesignz"),
+            "sender_address_line1": company_details.get("company_address_line1", ""),
+            "sender_address_line2": company_details.get("company_address_line2", ""),
+            "sender_gst_number": company_details.get("company_gst_number", ""),
         },
         "items": items,
         "currency": "Rs",
@@ -691,22 +977,156 @@ def create_designer_invoice(order: Order, designer: User, breakdown: Dict[str, A
     invoice.pdf_file_path = pdf_path
     invoice.save()
     
-    # Send email to designer asynchronously
-    try:
-        from common.tasks import send_designer_invoice_email_async
-        # Prepare breakdown data for serialization
-        breakdown_data = {
-            'product_total': float(breakdown['product_total']),
-            'gst_amount': float(breakdown['gst_amount']),
-            'commission_amount': float(breakdown['commission_amount']),
-            'wallet_amount': float(breakdown['wallet_amount']),
-            'product_ids': [p.id for p in breakdown['products']],  # Store product IDs to fetch in task
-        }
-        send_designer_invoice_email_async.delay(invoice.id, order.id, breakdown_data)
-    except Exception as e:
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.error(f'Failed to queue designer invoice email: {str(e)}', exc_info=True)
+    # DISABLED: Individual order invoice emails are no longer sent to designers.
+    # Designers receive monthly settlement bills which include all orders.
+    # Email sending is disabled to avoid duplicate notifications.
+    # try:
+    #     from common.tasks import send_designer_invoice_email_async
+    #     # Prepare breakdown data for serialization
+    #     breakdown_data = {
+    #         'product_total': float(breakdown['product_total']),
+    #         'gst_amount': float(breakdown['gst_amount']),
+    #         'commission_amount': float(breakdown['commission_amount']),
+    #         'wallet_amount': float(breakdown['wallet_amount']),
+    #         'product_ids': [p.id for p in breakdown['products']],  # Store product IDs to fetch in task
+    #     }
+    #     send_designer_invoice_email_async.delay(invoice.id, order.id, breakdown_data)
+    # except Exception as e:
+    #     import logging
+    #     logger = logging.getLogger(__name__)
+    #     logger.error(f'Failed to queue designer invoice email: {str(e)}', exc_info=True)
+    
+    return invoice
+
+
+def create_monthly_designer_bill(designer: User, purchase_type_breakdowns: Dict[str, Dict[str, Any]], period_start: date, period_end: date) -> Invoice:
+    """
+    Create monthly bill for designer with separate rows for each purchase type.
+    
+    Args:
+        designer: Designer user
+        purchase_type_breakdowns: Dict with keys like 'individual', 'basic', 'prime', 'premium'
+            Each value is a dict with 'gst_amount', 'commission_amount', 'product_total', 'orders'
+        period_start: Start date of billing period
+        period_end: End date of billing period
+    """
+    invoice = Invoice()
+    invoice.invoice_number = invoice.generate_bill_number()
+    invoice.invoice_type = 'designer'
+    invoice.order = None  # No single order for monthly bills
+    invoice.user = designer
+    
+    # Calculate totals
+    total_gst = sum(Decimal(str(breakdown['gst_amount'])) for breakdown in purchase_type_breakdowns.values())
+    total_commission = sum(Decimal(str(breakdown['commission_amount'])) for breakdown in purchase_type_breakdowns.values())
+    total_product_total = sum(Decimal(str(breakdown['product_total'])) for breakdown in purchase_type_breakdowns.values())
+    
+    invoice.subtotal = total_product_total
+    invoice.gst_amount = total_gst
+    invoice.commission_amount = total_commission
+    invoice.total_amount = total_gst + total_commission
+    invoice.payment_due_date = timezone.now().date()
+    invoice.save()
+    
+    # Prepare invoice data
+    company_details = get_company_details()
+    user_address = get_user_address(designer)
+    
+    # Create items for each purchase type
+    items = []
+    item_no = 1
+    
+    # Order: individual, basic, prime, premium
+    purchase_type_order = ['individual', 'basic', 'prime', 'premium']
+    
+    for purchase_type in purchase_type_order:
+        if purchase_type not in purchase_type_breakdowns:
+            continue
+            
+        breakdown = purchase_type_breakdowns[purchase_type]
+        gst_amount = float(breakdown['gst_amount'])
+        commission_amount = float(breakdown['commission_amount'])
+        design_count = breakdown.get('design_count', 0)
+        
+        # Calculate rate per design for GST
+        gst_rate_per_design = gst_amount / design_count if design_count > 0 else 0
+        
+        if gst_amount > 0:
+            if purchase_type == 'individual':
+                items.append({
+                    "item_no": item_no,
+                    "description": "GST on individual design",
+                    "quantity": design_count,  # Show actual count of designs
+                    "rate": round(gst_rate_per_design, 2),
+                    "amount": gst_amount,
+                })
+            else:
+                plan_display = purchase_type.capitalize()  # 'Basic', 'Prime', 'Premium'
+                items.append({
+                    "item_no": item_no,
+                    "description": f"GST on Designs of {plan_display} Plan",
+                    "quantity": design_count,  # Show actual count of designs
+                    "rate": round(gst_rate_per_design, 2),
+                    "amount": gst_amount,
+                })
+            item_no += 1
+        
+        # Calculate rate per design for Commission
+        commission_rate_per_design = commission_amount / design_count if design_count > 0 else 0
+        
+        if commission_amount > 0:
+            if purchase_type == 'individual':
+                items.append({
+                    "item_no": item_no,
+                    "description": "Platform Commission on individual Design after GST",
+                    "quantity": design_count,  # Show actual count of designs
+                    "rate": round(commission_rate_per_design, 2),
+                    "amount": commission_amount,
+                })
+            else:
+                plan_display = purchase_type.capitalize()
+                items.append({
+                    "item_no": item_no,
+                    "description": f"Platform Commission on {plan_display} Plan",
+                    "quantity": design_count,  # Show actual count of designs
+                    "rate": round(commission_rate_per_design, 2),
+                    "amount": commission_amount,
+                })
+            item_no += 1
+    
+    invoice_data = {
+        "invoice": {
+            "invoice_number": invoice.invoice_number,
+            "invoice_date": invoice.invoice_date.strftime('%B %d, %Y'),
+            "payment_due_date": invoice.payment_due_date.strftime('%b %d, %Y') if invoice.payment_due_date else "",
+        },
+        "invoice_type": "designer",
+        "company_details": company_details,
+        "billed_to": user_address,
+        "from_details": {
+            "sender_name": company_details.get("company_name", "WeDesignz"),
+            "sender_address_line1": company_details.get("company_address_line1", ""),
+            "sender_address_line2": company_details.get("company_address_line2", ""),
+            "sender_gst_number": company_details.get("company_gst_number", ""),
+        },
+        "items": items,
+        "currency": "Rs",
+        "total_due": float(total_gst + total_commission),
+    }
+    
+    invoice.invoice_data = invoice_data
+    invoice.save()
+    
+    # Generate PDF
+    media_root = getattr(settings, 'MEDIA_ROOT', 'media')
+    invoice_dir = os.path.join(media_root, 'invoices')
+    pdf_filename = f"{invoice.invoice_number}.pdf"
+    pdf_path = os.path.join(invoice_dir, pdf_filename)
+    
+    generate_invoice_pdf(invoice_data, pdf_path)
+    
+    invoice.pdf_file_path = pdf_path
+    invoice.save()
     
     return invoice
 
@@ -716,16 +1136,18 @@ def process_order_invoices(order: Order) -> Dict[str, Any]:
     Main function to process invoices and wallet settlements for an order.
     Called when payment is successfully captured.
     
+    Note: Designer invoices/bills are NOT created here. They are created
+    only when designers opt-in during the monthly settlement window.
+    
     Returns:
-        Dict with customer_invoice, designer_invoices list, and wallet_transactions list
+        Dict with customer_invoice and wallet_transactions list
     """
     breakdown = calculate_order_breakdown(order)
     
     # Create customer invoice
     customer_invoice = create_customer_invoice(order)
     
-    # Process each designer
-    designer_invoices = []
+    # Process each designer - only credit wallets, no invoice creation
     wallet_transactions = []
     
     for designer_id, designer_breakdown in breakdown['designer_breakdown'].items():
@@ -747,13 +1169,13 @@ def process_order_invoices(order: Order) -> Dict[str, Any]:
         wallet.attach_wallet_transaction(transaction)
         wallet_transactions.append(transaction)
         
-        # Create designer invoice
-        designer_invoice = create_designer_invoice(order, designer, designer_breakdown)
-        designer_invoices.append(designer_invoice)
+        # NOTE: Designer invoices/bills are NOT created here.
+        # They are created only when designers opt-in during monthly settlement window
+        # via generate_and_send_designer_bill_async
     
     return {
         'customer_invoice': customer_invoice,
-        'designer_invoices': designer_invoices,
+        'designer_invoices': [],  # Empty list - bills created during settlement
         'wallet_transactions': wallet_transactions,
     }
 
@@ -792,8 +1214,8 @@ def create_designer_invoice_for_subscription(subscription: Subscription, designe
         {
             "item_no": 2,
             "description": f"Platform Commission on Rs {base_for_commission:.2f} after GST",
-            "quantity": 1,
-            "rate": float(breakdown['commission_amount']),
+            "quantity": "-",
+            "rate": "-",
             "amount": float(breakdown['commission_amount']),
         },
     ]
@@ -812,8 +1234,10 @@ def create_designer_invoice_for_subscription(subscription: Subscription, designe
         "company_details": company_details,
         "billed_to": user_address,
         "from_details": {
-            "sender_name": "WeDesignz",
-            "sender_location": "India",
+            "sender_name": company_details.get("company_name", "WeDesignz"),
+            "sender_address_line1": company_details.get("company_address_line1", ""),
+            "sender_address_line2": company_details.get("company_address_line2", ""),
+            "sender_gst_number": company_details.get("company_gst_number", ""),
         },
         "items": items,
         "currency": "Rs",
@@ -872,8 +1296,11 @@ def process_monthly_subscription_settlement(
     
     If customer used 7 downloads in period (5 from Designer1, 2 from Designer2):
     - Unused: 3 downloads
-    - Settlement: Calculate as if 10 downloads were used
-    - Unused 3 downloads distributed proportionally: Designer1 gets 5/7, Designer2 gets 2/7
+    - Price per download: Rs 100 / 10 = Rs 10
+    - Amount to distribute: Rs 10 × 7 = Rs 70
+    - Designer1 (5 downloads): (5/7) × Rs 70 = Rs 50
+    - Designer2 (2 downloads): (2/7) × Rs 70 = Rs 20
+    - Unused 3 downloads value (Rs 30) stays as platform revenue
     """
     from datetime import timedelta
     
@@ -922,16 +1349,17 @@ def process_monthly_subscription_settlement(
             'message': 'No downloads used in this period, no settlement'
         }
     
-    # Step 1: Extract base amount from monthly price (includes GST and commission)
+    # Step 1: Calculate amount to distribute (only for downloads actually used)
+    # Price per download = monthly_price / monthly_downloads_allowed
+    # Amount to distribute = price_per_download * total_downloads_used
+    price_per_download = monthly_price / Decimal(str(monthly_downloads_allowed))
+    amount_to_distribute = price_per_download * Decimal(str(total_downloads_used))
+    
+    # Step 2: Extract GST and commission rates
     gst_percentage = Decimal(str(BusinessConfig.get_gst_percentage()))
     commission_rate = Decimal(str(BusinessConfig.get_commission_rate()))
     
-    # Extract base from monthly_price (reverse calculation)
-    monthly_extracted = extract_gst_and_commission(monthly_price, gst_percentage, commission_rate)
-    monthly_base_amount = monthly_extracted['base_amount']  # This is the Rs 65.2
-    
-    # Step 2: Distribute monthly price proportionally based on actual downloads used
-    # Group products by designer first
+    # Step 3: Group products by designer
     designer_breakdown = {}
     
     for product in all_products:
@@ -951,13 +1379,13 @@ def process_monthly_subscription_settlement(
         designer_breakdown[designer_id]['products'].append(product)
         designer_breakdown[designer_id]['download_count'] += 1
     
-    # Distribute monthly_price proportionally based on actual downloads
+    # Step 4: Distribute amount_to_distribute proportionally based on actual downloads used
     for designer_id, breakdown in designer_breakdown.items():
         # Calculate proportion: designer downloads / total downloads used
         proportion = Decimal(str(breakdown['download_count'])) / Decimal(str(total_downloads_used))
-        breakdown['product_total'] = monthly_price * proportion  # Designer's share of monthly price
+        breakdown['product_total'] = amount_to_distribute * proportion  # Designer's share
     
-    # Step 3: Extract GST and commission from each designer's share
+    # Step 5: Extract GST and commission from each designer's share
     for designer_id, breakdown in designer_breakdown.items():
         # Extract GST and commission from designer's product_total (which includes GST and commission)
         extracted = extract_gst_and_commission(breakdown['product_total'], gst_percentage, commission_rate)
@@ -981,7 +1409,7 @@ def process_monthly_subscription_settlement(
         transaction = WalletTransaction.objects.create(
             wallet_transaction_type='credit',
             amount=breakdown['wallet_amount'],
-            description=f"Earnings from subscription {subscription.id} - {period_start.strftime('%b %d')} to {period_end.strftime('%b %d, %Y')} ({breakdown['download_count']} downloads + unused allocation)",
+            description=f"Earnings from subscription {subscription.id} - {period_start.strftime('%b %d')} to {period_end.strftime('%b %d, %Y')} ({breakdown['download_count']} downloads)",
             reference_id=f"subscription_{subscription.id}_{period_start.strftime('%Y%m%d')}",
             created_by=designer
         )
@@ -1001,16 +1429,19 @@ def process_monthly_subscription_settlement(
     
     # Calculate unused downloads for reporting
     unused_downloads = monthly_downloads_allowed - total_downloads_used
+    unused_downloads_value = price_per_download * Decimal(str(unused_downloads))
     
     return {
         'subscription_id': subscription.id,
         'period_start': period_start.strftime('%Y-%m-%d'),
         'period_end': period_end.strftime('%Y-%m-%d'),
         'total_downloads_used': total_downloads_used,
-        'total_downloads_settled': monthly_downloads_allowed,
+        'total_downloads_allowed': monthly_downloads_allowed,
         'unused_downloads': unused_downloads,
+        'unused_downloads_value': float(unused_downloads_value),
         'monthly_price': float(monthly_price),
-        'monthly_base_amount': float(monthly_extracted['base_amount']),
+        'price_per_download': float(price_per_download),
+        'amount_distributed': float(amount_to_distribute),
         'designer_breakdown': {
             designer_id: {
                 'designer_id': designer_id,
@@ -1030,15 +1461,17 @@ def process_monthly_subscription_settlement(
 def process_subscription_settlement(subscription: Subscription) -> Dict[str, Any]:
     """
     Process subscription settlement for monthly subscriptions when subscription period ends.
-    Distributes subscription price across actual downloads used.
+    Distributes subscription price across actual downloads used only.
     
     Example:
     - Subscription: Rs 400, 20 downloads allowed
     - Actual downloads: 10 (6 from designer1, 4 from designer2)
-    - Per download price: Rs 400 / 10 = Rs 40
-    - Designer1: 6 × Rs 40 = Rs 240
-    - Designer2: 4 × Rs 40 = Rs 160
-    - Then apply GST and commission calculations
+    - Price per download: Rs 400 / 20 = Rs 20
+    - Amount to distribute: Rs 20 × 10 = Rs 200
+    - Designer1 (6 downloads): (6/10) × Rs 200 = Rs 120
+    - Designer2 (4 downloads): (4/10) × Rs 200 = Rs 80
+    - Unused 10 downloads value (Rs 200) stays as platform revenue
+    - Then apply GST and commission calculations on distributed amount
     """
     from datetime import timedelta
     
@@ -1077,17 +1510,20 @@ def process_subscription_settlement(subscription: Subscription) -> Dict[str, Any
             'message': 'No downloads used in this subscription period'
         }
     
-    # Step 1: Extract base amount from subscription price (includes GST and commission)
+    # Step 1: Calculate amount to distribute (only for downloads actually used)
     subscription_price = Decimal(str(subscription.plan.price))
+    total_downloads_allowed = subscription.plan.no_of_free_downloads
+    
+    # Price per download = subscription_price / total_downloads_allowed
+    # Amount to distribute = price_per_download * total_downloads (actual downloads used)
+    price_per_download = subscription_price / Decimal(str(total_downloads_allowed))
+    amount_to_distribute = price_per_download * Decimal(str(total_downloads))
+    
+    # Step 2: Extract GST and commission rates
     gst_percentage = Decimal(str(BusinessConfig.get_gst_percentage()))
     commission_rate = Decimal(str(BusinessConfig.get_commission_rate()))
     
-    # Extract base from subscription_price (reverse calculation)
-    subscription_extracted = extract_gst_and_commission(subscription_price, gst_percentage, commission_rate)
-    subscription_base_amount = subscription_extracted['base_amount']
-    
-    # Step 2: Distribute subscription price proportionally based on actual downloads used
-    # Group products by designer
+    # Step 3: Group products by designer
     designer_breakdown = {}
     
     for product in all_products:
@@ -1107,13 +1543,13 @@ def process_subscription_settlement(subscription: Subscription) -> Dict[str, Any
         designer_breakdown[designer_id]['products'].append(product)
         designer_breakdown[designer_id]['download_count'] += 1
     
-    # Distribute subscription_price proportionally based on actual downloads
+    # Step 4: Distribute amount_to_distribute proportionally based on actual downloads
     for designer_id, breakdown in designer_breakdown.items():
-        # Calculate proportion: designer downloads / total downloads
+        # Calculate proportion: designer downloads / total downloads used
         proportion = Decimal(str(breakdown['download_count'])) / Decimal(str(total_downloads))
-        breakdown['product_total'] = subscription_price * proportion  # Designer's share of subscription price
+        breakdown['product_total'] = amount_to_distribute * proportion  # Designer's share
     
-    # Step 3: Extract GST and commission from each designer's share
+    # Step 5: Extract GST and commission from each designer's share
     for designer_id, breakdown in designer_breakdown.items():
         # Extract GST and commission from designer's product_total (which includes GST and commission)
         extracted = extract_gst_and_commission(breakdown['product_total'], gst_percentage, commission_rate)
@@ -1153,15 +1589,19 @@ def process_subscription_settlement(subscription: Subscription) -> Dict[str, Any
     subscription.settlement_processed = True
     subscription.save()
     
-    # Calculate per download price for reporting
-    per_download_price = subscription_price / Decimal(str(total_downloads)) if total_downloads > 0 else Decimal('0')
+    # Calculate unused downloads for reporting
+    unused_downloads = total_downloads_allowed - total_downloads
+    unused_downloads_value = price_per_download * Decimal(str(unused_downloads))
     
     return {
         'subscription_id': subscription.id,
         'total_downloads': total_downloads,
-        'per_download_price': float(per_download_price),
+        'total_downloads_allowed': total_downloads_allowed,
+        'unused_downloads': unused_downloads,
+        'unused_downloads_value': float(unused_downloads_value),
         'subscription_price': float(subscription_price),
-        'subscription_base_amount': float(subscription_extracted['base_amount']),
+        'price_per_download': float(price_per_download),
+        'amount_distributed': float(amount_to_distribute),
         'designer_breakdown': {
             designer_id: {
                 'designer_id': designer_id,

@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Wallet, WalletTransaction, WalletWithdrawalRequest
+from .models import Wallet, WalletTransaction, WalletWithdrawalRequest, SettlementRequest
 
 
 @admin.register(Wallet)
@@ -98,3 +98,36 @@ class WalletWithdrawalRequestAdmin(admin.ModelAdmin):
     
     def get_queryset(self, request):
         return super().get_queryset(request).select_related('wallet', 'processed_by', 'created_by', 'updated_by')
+
+
+@admin.register(SettlementRequest)
+class SettlementRequestAdmin(admin.ModelAdmin):
+    """
+    Admin interface for SettlementRequest model.
+    Manages monthly settlement requests for designers.
+    """
+    list_display = ['id', 'designer_id', 'settlement_period_start', 'settlement_amount', 'status', 'opted_in', 'settlement_date', 'created_at']
+    list_filter = ['status', 'opted_in', 'settlement_period_start', 'created_at', 'settlement_date']
+    search_fields = ['designer_id', 'razorpay_transfer_id', 'razorpay_payout_id', 'failure_reason']
+    readonly_fields = ['created_at', 'updated_at', 'settlement_date']
+    list_editable = ['status']
+    ordering = ['-created_at']
+    list_per_page = 25
+    
+    fieldsets = (
+        ('Settlement Information', {
+            'fields': ('designer_id', 'settlement_period_start', 'settlement_period_end', 
+                      'wallet_balance_at_period_end', 'settlement_amount', 'status')
+        }),
+        ('Opt-in Information', {
+            'fields': ('opted_in', 'opted_in_at')
+        }),
+        ('Processing Information', {
+            'fields': ('settlement_date', 'razorpay_transfer_id', 'razorpay_payout_id', 'failure_reason'),
+            'classes': ('collapse',)
+        }),
+        ('Timestamps', {
+            'fields': ('created_at', 'updated_at'),
+            'classes': ('collapse',)
+        }),
+    )

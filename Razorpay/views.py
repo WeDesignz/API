@@ -774,6 +774,9 @@ def webhook_handler(request):
                 except RazorpayPayment.DoesNotExist:
                     pass
         
+        # Note: Razorpay Route API and Payouts API webhook handlers removed
+        # Settlements are now processed manually using the settlement sheet
+        
         return HttpResponse('OK', status=200)
     
     except Exception as e:

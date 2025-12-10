@@ -365,6 +365,47 @@ class Invoice(models.Model):
             
             cache.set(cache_key, new_counter, 86400)
             return invoice_number
+    
+    def generate_bill_number(self):
+        """
+        Generate bill number in format: BILL-YYYYMMDD-XXXXX
+        For designer invoices (bills).
+        """
+        from django.utils import timezone
+        from django.core.cache import cache
+        from django.db import transaction
+        
+        date_str = timezone.now().strftime('%Y%m%d')
+        cache_key = f'bill_counter_{date_str}'
+        
+        counter = cache.get(cache_key)
+        if counter is None:
+            today_start = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
+            today_bills = Invoice.objects.filter(
+                invoice_number__startswith=f'BILL-{date_str}-',
+                created_at__gte=today_start
+            ).order_by('-invoice_number').first()
+            
+            if today_bills:
+                try:
+                    counter = int(today_bills.invoice_number.split('-')[-1])
+                except (ValueError, IndexError):
+                    counter = 0
+            else:
+                counter = 0
+            
+            cache.set(cache_key, counter, 86400)
+        
+        with transaction.atomic():
+            new_counter = counter + 1
+            bill_number = f'BILL-{date_str}-{new_counter:05d}'
+            
+            while Invoice.objects.filter(invoice_number=bill_number).exists():
+                new_counter += 1
+                bill_number = f'BILL-{date_str}-{new_counter:05d}'
+            
+            cache.set(cache_key, new_counter, 86400)
+            return bill_number
 
 
 # OrderTransaction model has been merged into Order model
