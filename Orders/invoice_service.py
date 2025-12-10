@@ -1136,16 +1136,18 @@ def process_order_invoices(order: Order) -> Dict[str, Any]:
     Main function to process invoices and wallet settlements for an order.
     Called when payment is successfully captured.
     
+    Note: Designer invoices/bills are NOT created here. They are created
+    only when designers opt-in during the monthly settlement window.
+    
     Returns:
-        Dict with customer_invoice, designer_invoices list, and wallet_transactions list
+        Dict with customer_invoice and wallet_transactions list
     """
     breakdown = calculate_order_breakdown(order)
     
     # Create customer invoice
     customer_invoice = create_customer_invoice(order)
     
-    # Process each designer
-    designer_invoices = []
+    # Process each designer - only credit wallets, no invoice creation
     wallet_transactions = []
     
     for designer_id, designer_breakdown in breakdown['designer_breakdown'].items():
@@ -1167,13 +1169,13 @@ def process_order_invoices(order: Order) -> Dict[str, Any]:
         wallet.attach_wallet_transaction(transaction)
         wallet_transactions.append(transaction)
         
-        # Create designer invoice
-        designer_invoice = create_designer_invoice(order, designer, designer_breakdown)
-        designer_invoices.append(designer_invoice)
+        # NOTE: Designer invoices/bills are NOT created here.
+        # They are created only when designers opt-in during monthly settlement window
+        # via generate_and_send_designer_bill_async
     
     return {
         'customer_invoice': customer_invoice,
-        'designer_invoices': designer_invoices,
+        'designer_invoices': [],  # Empty list - bills created during settlement
         'wallet_transactions': wallet_transactions,
     }
 

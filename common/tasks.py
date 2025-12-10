@@ -674,7 +674,7 @@ def process_settlement_payouts(self):
                 transaction = WalletTransaction.objects.create(
                     wallet_transaction_type='debit',
                     amount=settlement_amount,
-                    description=f"Settlement for period {settlement_request.settlement_period_start} to {settlement_request.settlement_period_end} (Manual payout required)",
+                    description=f"Settlement for period {settlement_request.settlement_period_start} to {settlement_request.settlement_period_end}",
                     reference_id=f"settlement_{settlement_request.id}",
                     created_by=designer
                 )
