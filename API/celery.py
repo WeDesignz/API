@@ -17,10 +17,10 @@ app.autodiscover_tasks()
 
 # Celery Beat configuration
 app.conf.beat_schedule = {
-    # OTP Cleanup - Every 5 minutes
+    # OTP Cleanup - Every week at 2:00 AM (Sunday)
     'cleanup-expired-otps': {
         'task': 'common.tasks.cleanup_expired_otps',
-        'schedule': 300.0,  # 5 minutes
+        'schedule': crontab(hour=2, minute=0, day_of_week=0),  # Every Sunday at 2:00 AM IST
     },
     
     # Custom Order Timeouts - Every 5 minutes

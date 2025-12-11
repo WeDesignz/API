@@ -749,10 +749,10 @@ def get_user_address(user: User) -> Dict[str, str]:
                 if business_details:
                     # Get GST number
                     if business_details.gst_number:
-                        gst_number = business_details.gst_number
+                    gst_number = business_details.gst_number
                     # Get business name
                     if business_details.legal_business_name:
-                        company_name = business_details.legal_business_name
+                    company_name = business_details.legal_business_name
                     # Get business address from registered_addresses_json if available
                     if not address_line1 and business_details.registered_addresses_json:
                         registered_addresses = business_details.registered_addresses_json
