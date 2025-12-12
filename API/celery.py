@@ -23,12 +23,6 @@ app.conf.beat_schedule = {
         'schedule': crontab(hour=2, minute=0, day_of_week=0),  # Every Sunday at 2:00 AM IST
     },
     
-    # Custom Order Timeouts - Every 5 minutes
-    'process-custom-order-timeouts': {
-        'task': 'common.tasks.process_custom_order_timeouts',
-        'schedule': 300.0,  # 5 minutes
-    },
-    
     # Subscription Status Updates - Every hour
     'update-subscription-status': {
         'task': 'common.tasks.update_subscription_status',
@@ -75,6 +69,18 @@ app.conf.beat_schedule = {
     'process-expired-subscriptions': {
         'task': 'common.tasks.process_expired_subscriptions',
         'schedule': crontab(hour=3, minute=30),  # Daily at 3:30 AM IST
+    },
+    
+    # Process Monthly Settlements - Day 1 of every month at 1:00 AM IST
+    'process-monthly-settlements': {
+        'task': 'common.tasks.process_monthly_settlements',
+        'schedule': crontab(day_of_month=1, hour=1, minute=0),  # Day 1 at 1:00 AM IST
+    },
+    
+    # Process Settlement Payouts - Day 6 of every month at 1:00 AM IST
+    'process-settlement-payouts': {
+        'task': 'common.tasks.process_settlement_payouts',
+        'schedule': crontab(day_of_month=6, hour=1, minute=0),  # Day 6 at 1:00 AM IST
     },
     
     # Promotional Emails - Every 3 days at 10 AM

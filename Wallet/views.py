@@ -6,9 +6,11 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from django.db.models import Sum, Q
+from django.db import transaction
 from django.utils import timezone
 from django.http import HttpResponse
 from django.contrib.auth.models import User
+import logging
 from .models import Wallet, WalletTransaction, WalletWithdrawalRequest, SettlementRequest
 from .serializers import (
     WalletSerializer, WalletTransactionSerializer, WalletWithdrawalRequestSerializer
@@ -1589,6 +1591,25 @@ def update_settlement_status(request, settlement_id):
         }, status=status.HTTP_400_BAD_REQUEST)
     
     old_status = settlement.status
+    
+    # If admin is marking settlement as failed, unmark any transactions that were marked
+    if new_status == 'failed' and old_status in ['processing', 'opted_in']:
+        logger = logging.getLogger(__name__)
+        try:
+            with transaction.atomic():
+                # Unmark transactions that were marked for this settlement
+                unmarked_count = WalletTransaction.objects.filter(
+                    settlement_request=settlement
+                ).update(
+                    settlement_request=None,
+                    settled_at=None
+                )
+                
+                if unmarked_count > 0:
+                    logger.info(f"Unmarked {unmarked_count} transactions for failed settlement {settlement_id}")
+        except Exception as e:
+            logger.error(f"Failed to unmark transactions for settlement {settlement_id}: {str(e)}", exc_info=True)
+            # Continue with status update even if unmarking fails
     
     # Update settlement
     settlement.status = new_status
