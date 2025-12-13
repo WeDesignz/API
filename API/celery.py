@@ -35,12 +35,6 @@ app.conf.beat_schedule = {
         'schedule': 3600.0,  # 1 hour
     },
     
-    # Daily Backup - Every day at 2 AM
-    'daily-database-backup': {
-        'task': 'common.tasks.daily_database_backup',
-        'schedule': 7200.0,  # 2 hours (2 AM)
-    },
-    
     # Expire Coupons - Every day at 2 AM
     'expire-coupons': {
         'task': 'common.tasks.expire_coupons',

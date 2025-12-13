@@ -318,52 +318,6 @@ def expire_coupons(self):
     except Exception as e:
         logger.error(f"Failed to expire coupons: {str(e)}")
         raise self.retry(exc=e, countdown=60, max_retries=3)
-
-
-@shared_task(bind=True, name='common.tasks.daily_database_backup')
-def daily_database_backup(self):
-    """Create daily database backup."""
-    try:
-        backup_dir = os.path.join(settings.BASE_DIR, 'backups', 'daily')
-        os.makedirs(backup_dir, exist_ok=True)
-        
-        # Create backup filename with timestamp
-        timestamp = timezone.now().strftime('%Y%m%d_%H%M%S')
-        backup_filename = f"wedesignz_daily_{timestamp}.sql"
-        backup_path = os.path.join(backup_dir, backup_filename)
-        
-        # Database backup command (adjust for your database)
-        db_settings = settings.DATABASES['default']
-        if db_settings['ENGINE'] == 'django.db.backends.postgresql':
-            import subprocess
-            subprocess.run([
-                'pg_dump',
-                '-h', db_settings['HOST'],
-                '-U', db_settings['USER'],
-                '-d', db_settings['NAME'],
-                '-f', backup_path
-            ])
-        
-        # Clean up old daily backups (keep only 2 days)
-        old_backups = []
-        for file in os.listdir(backup_dir):
-            if file.startswith('wedesignz_daily_'):
-                file_path = os.path.join(backup_dir, file)
-                file_time = os.path.getctime(file_path)
-                if file_time < (timezone.now() - timedelta(days=2)).timestamp():
-                    old_backups.append(file_path)
-        
-        for old_backup in old_backups:
-            os.remove(old_backup)
-        
-        logger.info(f"Daily backup created: {backup_filename}")
-        return f"Daily backup created: {backup_filename}"
-        
-    except Exception as e:
-        logger.error(f"Failed to create daily backup: {str(e)}")
-        raise self.retry(exc=e, countdown=300, max_retries=2)
-
-
 @shared_task(bind=True, name='common.tasks.weekly_database_backup')
 def weekly_database_backup(self):
     """Create weekly database backup with media files."""
