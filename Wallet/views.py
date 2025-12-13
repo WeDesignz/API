@@ -1455,11 +1455,16 @@ def _generate_excel_response(settlement_data, filename, total_amount):
         if not settlement_data:
             ws['A1'] = 'No settlements found'
             ws['A1'].font = Font(bold=True)
+            # Save to BytesIO buffer first
+            output = io.BytesIO()
+            wb.save(output)
+            output.seek(0)
+            
             response = HttpResponse(
+                output.read(),
                 content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
             )
             response['Content-Disposition'] = f'attachment; filename="{filename}"'
-            wb.save(response)
             return response
         
         # Write header
@@ -1504,11 +1509,16 @@ def _generate_excel_response(settlement_data, filename, total_amount):
         # Freeze header row
         ws.freeze_panes = 'A2'
         
+        # Save to BytesIO buffer first, then write to HttpResponse
+        output = io.BytesIO()
+        wb.save(output)
+        output.seek(0)
+        
         response = HttpResponse(
+            output.read(),
             content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
         )
         response['Content-Disposition'] = f'attachment; filename="{filename}"'
-        wb.save(response)
         return response
     
     except ImportError:
@@ -1910,14 +1920,65 @@ def list_settlements(request):
     end = start + page_size
     settlements_page = queryset[start:end]
     
-    # Serialize settlements
+    # Serialize settlements with designer information
     settlements_data = []
     for settlement in settlements_page:
+        # Get designer information
+        designer = None
+        designer_name = ''
+        designer_email = ''
+        designer_phone = ''
+        account_holder_name = ''
+        account_number = ''
+        ifsc_code = ''
+        
+        try:
+            # Get designer user
+            designer = User.objects.filter(id=settlement.designer_id).first()
+            if designer:
+                designer_name = f"{designer.first_name} {designer.last_name}".strip() or designer.username or ''
+                designer_email = designer.email if hasattr(designer, 'email') else ''
+                
+                # Get phone number
+                try:
+                    from Authentication.models import MobileNumber
+                    mobile_numbers = get_related(designer, 'User:MobileNumber', MobileNumber)
+                    if mobile_numbers.exists():
+                        mobile = mobile_numbers.first()
+                        designer_phone = str(mobile.mobile_number) if hasattr(mobile, 'mobile_number') else ''
+                except:
+                    pass
+                
+                # Get bank details from StudioBusinessDetails
+                try:
+                    from Profiles.models import Studio, StudioBusinessDetails
+                    studio = Studio.objects.filter(created_by=designer).first()
+                    if studio:
+                        business_details = StudioBusinessDetails.objects.filter(studio=studio).first()
+                        if business_details:
+                            account_holder_name = business_details.bank_account_holder_name or ''
+                            account_number = business_details.bank_account_number or ''
+                            ifsc_code = business_details.bank_ifsc_code or ''
+                except:
+                    pass
+        except Exception as e:
+            logging.error(f"Error fetching designer info for settlement {settlement.id}: {str(e)}")
+        
+        # Format settlement period string
+        settlement_period = f"{settlement.settlement_period_start.strftime('%b %Y')}"
+        
         settlements_data.append({
             'id': settlement.id,
             'designer_id': settlement.designer_id,
+            'designer_name': designer_name,
+            'designer_email': designer_email,
+            'designer_phone': designer_phone,
+            'account_holder_name': account_holder_name,
+            'account_number': account_number,
+            'ifsc_code': ifsc_code,
             'settlement_period_start': settlement.settlement_period_start.isoformat(),
             'settlement_period_end': settlement.settlement_period_end.isoformat(),
+            'settlement_period': settlement_period,
             'wallet_balance_at_period_end': float(settlement.wallet_balance_at_period_end),
             'settlement_amount': float(settlement.settlement_amount),
             'status': settlement.status,
@@ -1930,12 +1991,19 @@ def list_settlements(request):
             'updated_at': settlement.updated_at.isoformat()
         })
     
+    # Return response with nested data structure
+    # transformResponse extracts backendResponse.data, so we nest the PaginatedResponse structure
+    # This ensures the frontend receives: { success: true, data: { data: [...], pagination: {...} } }
     return Response({
-        'settlements': settlements_data,
-        'pagination': {
-            'page': page,
-            'page_size': page_size,
-            'total_count': total_count,
-            'total_pages': (total_count + page_size - 1) // page_size
+        'data': {
+            'data': settlements_data,
+            'pagination': {
+                'page': page,
+                'page_size': page_size,
+                'limit': page_size,  # Added for compatibility
+                'total': total_count,  # Frontend expects 'total'
+                'total_count': total_count,  # Keep for backward compatibility
+                'total_pages': (total_count + page_size - 1) // page_size
+            }
         }
     })
