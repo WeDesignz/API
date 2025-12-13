@@ -1027,6 +1027,127 @@ def cleanup_expired_settlements(self):
         raise self.retry(exc=e, countdown=60, max_retries=3)
 
 
+@shared_task(bind=True, name='common.tasks.expire_processing_settlements')
+def expire_processing_settlements(self):
+    """
+    Mark settlements as expired if they've been in 'processing' status 
+    for more than 7 days without being completed.
+    
+    This task:
+    1. Finds settlements in 'processing' status for more than 7 days
+    2. Unmarks transactions (makes them available for future settlements)
+    3. Refunds wallet balance (reverses the debit transaction)
+    4. Marks settlement as 'expired'
+    
+    Runs daily to ensure settlements don't stay in processing forever.
+    """
+    try:
+        from datetime import timedelta
+        from decimal import Decimal
+        from django.contrib.auth.models import User
+        from Wallet.models import SettlementRequest, WalletTransaction, Wallet
+        from Authentication.user_relations import get_user_wallets
+        
+        # Get settlements in 'processing' status for more than 7 days
+        cutoff_date = timezone.now() - timedelta(days=7)
+        
+        expired_settlements = SettlementRequest.objects.filter(
+            status='processing',
+            settlement_date__lte=cutoff_date.date()
+        )
+        
+        expired_count = 0
+        refunded_count = 0
+        error_count = 0
+        
+        for settlement in expired_settlements:
+            try:
+                designer_id = settlement.designer_id
+                
+                # Get designer
+                try:
+                    designer = User.objects.get(id=designer_id)
+                except User.DoesNotExist:
+                    logger.error(f"Designer {designer_id} not found for settlement {settlement.id}")
+                    settlement.status = 'expired'
+                    settlement.failure_reason = 'Designer not found - settlement expired'
+                    settlement.save()
+                    error_count += 1
+                    continue
+                
+                # Get wallet
+                wallets = get_user_wallets(designer)
+                wallet = wallets.first()
+                
+                if not wallet:
+                    logger.error(f"No wallet found for designer {designer_id} in settlement {settlement.id}")
+                    settlement.status = 'expired'
+                    settlement.failure_reason = 'Wallet not found - settlement expired'
+                    settlement.save()
+                    error_count += 1
+                    continue
+                
+                # Use database transaction to ensure atomicity
+                with transaction.atomic():
+                    # Get all transactions for this settlement
+                    settlement_transactions = WalletTransaction.objects.filter(
+                        settlement_request=settlement
+                    )
+                    
+                    # Find the debit transaction (settlement deduction)
+                    debit_transaction = settlement_transactions.filter(
+                        wallet_transaction_type='debit',
+                        reference_id=f"settlement_{settlement.id}"
+                    ).first()
+                    
+                    # Refund the amount back to wallet if debit transaction exists
+                    if debit_transaction:
+                        refund_amount = Decimal(str(debit_transaction.amount))
+                        current_balance = Decimal(str(wallet.balance))
+                        wallet.balance = current_balance + refund_amount
+                        wallet.save()
+                        refunded_count += 1
+                        logger.info(f"Refunded ₹{refund_amount} to wallet for expired settlement {settlement.id}")
+                    
+                    # Unmark credit transactions (make them available for future settlements)
+                    credit_transactions = settlement_transactions.filter(
+                        wallet_transaction_type='credit'
+                    )
+                    unmarked_count = credit_transactions.update(
+                        settlement_request=None,
+                        settled_at=None
+                    )
+                    
+                    if unmarked_count > 0:
+                        logger.info(f"Unmarked {unmarked_count} credit transactions for expired settlement {settlement.id}")
+                    
+                    # Mark settlement as expired
+                    settlement.status = 'expired'
+                    settlement.failure_reason = 'Settlement expired - not completed within 7 days of processing'
+                    settlement.save()
+                    
+                    expired_count += 1
+                    logger.info(f"Expired settlement {settlement.id} for designer {designer_id} (₹{settlement.settlement_amount})")
+                    
+            except Exception as e:
+                logger.error(f"Failed to expire settlement {settlement.id}: {str(e)}", exc_info=True)
+                error_count += 1
+                # Mark as expired even if refund fails
+                try:
+                    settlement.status = 'expired'
+                    settlement.failure_reason = f'Settlement expired - error during expiration: {str(e)}'
+                    settlement.save()
+                except:
+                    pass
+        
+        logger.info(f"Expired {expired_count} settlements, refunded {refunded_count} wallets, {error_count} errors")
+        return f"Expired {expired_count} settlements, refunded {refunded_count} wallets, {error_count} errors"
+        
+    except Exception as e:
+        logger.error(f"Failed to expire processing settlements: {str(e)}", exc_info=True)
+        raise self.retry(exc=e, countdown=60, max_retries=3)
+
+
 # ==================== ORDER TASKS ====================
 
 @shared_task(bind=True, name='common.tasks.send_order_confirmation_email_async')

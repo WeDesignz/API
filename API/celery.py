@@ -83,6 +83,13 @@ app.conf.beat_schedule = {
         'schedule': crontab(day_of_month=6, hour=1, minute=0),  # Day 6 at 1:00 AM IST
     },
     
+    # Expire Processing Settlements - Daily at 2:00 AM IST
+    # Marks settlements as expired if they've been in 'processing' status for more than 7 days
+    'expire-processing-settlements': {
+        'task': 'common.tasks.expire_processing_settlements',
+        'schedule': crontab(hour=2, minute=0),  # Daily at 2:00 AM IST
+    },
+    
     # Promotional Emails - Every 3 days at 10 AM
     'send-promotional-emails': {
         'task': 'common.tasks.send_promotional_emails',
