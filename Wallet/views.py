@@ -1248,6 +1248,12 @@ def linked_account_status(request):
             description='Filter by settlement date (YYYY-MM-DD)',
             type=openapi.TYPE_STRING
         ),
+        openapi.Parameter(
+            'search',
+            openapi.IN_QUERY,
+            description='Search by settlement ID, designer name, or designer email',
+            type=openapi.TYPE_STRING
+        ),
     ],
     responses={
         200: openapi.Response(
@@ -1276,6 +1282,7 @@ def download_settlement_sheet(request):
         status_filter = request.GET.get('status')
         period_start_str = request.GET.get('period_start')
         settlement_date_str = request.GET.get('settlement_date')
+        search_query = request.GET.get('search', '').strip()
         
         # Validate format
         if file_format not in ['csv', 'xlsx']:
@@ -1306,6 +1313,24 @@ def download_settlement_sheet(request):
                 return Response({
                     'error': 'Invalid settlement_date format. Use YYYY-MM-DD'
                 }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Apply search filter if provided
+        if search_query:
+            # Filter by settlement ID, or designer name/email (requires join)
+            # Try to match settlement ID first (exact match)
+            try:
+                settlement_id = int(search_query)
+                queryset = queryset.filter(id=settlement_id)
+            except ValueError:
+                # Search by designer name or email
+                # We need to filter by related designer fields
+                designer_ids = User.objects.filter(
+                    Q(first_name__icontains=search_query) |
+                    Q(last_name__icontains=search_query) |
+                    Q(username__icontains=search_query) |
+                    Q(email__icontains=search_query)
+                ).values_list('id', flat=True)
+                queryset = queryset.filter(designer_id__in=designer_ids)
         
         # Order by settlement period and designer ID
         queryset = queryset.order_by('-settlement_period_start', 'designer_id')
