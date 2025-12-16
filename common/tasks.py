@@ -1,6 +1,7 @@
 from celery import shared_task
 from django.utils import timezone
 from django.db.models import Q, Count
+from django.db import transaction
 from django.contrib.auth.models import User
 from django.core.mail import send_mail
 from django.conf import settings
@@ -23,6 +24,148 @@ from django.template.loader import render_to_string
 from django.core.mail import EmailMultiAlternatives
 
 logger = logging.getLogger(__name__)
+
+
+def calculate_period_end_balance(designer, period_end):
+    """
+    Calculate wallet balance as of the end of the settlement period.
+    This includes ALL transactions from the beginning of time up to period_end.
+    
+    This ensures that:
+    - Only transactions up to the end of previous month are included
+    - Any credits on Day 1 of new month are excluded
+    - The balance matches what the wallet should have been at period_end
+    
+    Args:
+        designer: User object (designer)
+        period_end: date object (last day of previous month)
+    
+    Returns:
+        Decimal: Balance at period end (sum of all credits - debits up to period_end)
+    """
+    from datetime import datetime, time
+    from decimal import Decimal
+    import pytz
+    from django.db.models import Sum
+    from Wallet.models import WalletTransaction
+    from Authentication.user_relations import get_user_wallets
+    from common.relations import get_related
+    
+    # Create period end datetime (end of day in IST)
+    kolkata_tz = pytz.timezone('Asia/Kolkata')
+    period_end_datetime = kolkata_tz.localize(
+        datetime.combine(period_end, time.max)  # 23:59:59.999999
+    )
+    
+    # Collect all transaction IDs (from both created_by and wallet relations)
+    all_transaction_ids = set()
+    
+    # Method 1: Transactions by created_by
+    transactions_by_user = WalletTransaction.objects.filter(
+        created_by=designer,
+        created_at__lte=period_end_datetime
+    )
+    all_transaction_ids.update(transactions_by_user.values_list('id', flat=True))
+    
+    # Method 2: Transactions via wallet relations (more comprehensive)
+    wallets = get_user_wallets(designer)
+    for wallet in wallets:
+        wallet_transactions = get_related(wallet, 'Wallet:WalletTransaction', WalletTransaction)
+        wallet_transactions = wallet_transactions.filter(
+            created_at__lte=period_end_datetime
+        )
+        all_transaction_ids.update(wallet_transactions.values_list('id', flat=True))
+    
+    if not all_transaction_ids:
+        return Decimal('0')
+    
+    # Aggregate credits and debits using database aggregation (faster than looping)
+    transactions = WalletTransaction.objects.filter(id__in=all_transaction_ids)
+    
+    credits = transactions.filter(
+        wallet_transaction_type='credit'
+    ).aggregate(total=Sum('amount'))['total'] or Decimal('0')
+    
+    debits = transactions.filter(
+        wallet_transaction_type='debit'
+    ).aggregate(total=Sum('amount'))['total'] or Decimal('0')
+    
+    period_end_balance = Decimal(str(credits)) - Decimal(str(debits))
+    
+    return period_end_balance
+
+
+def calculate_unsettled_balance(designer, period_end):
+    """
+    Calculate wallet balance from only UNSETTLED transactions up to period_end.
+    
+    This ensures that:
+    - Only transactions that haven't been settled yet are included
+    - Previously settled transactions are excluded
+    - Only transactions up to the end of previous month are included
+    - Any credits on Day 1 of new month are excluded
+    - The balance matches what should be available for settlement
+    
+    Args:
+        designer: User object (designer)
+        period_end: date object (last day of previous month)
+    
+    Returns:
+        Decimal: Unsettled balance at period end (sum of unsettled credits - all debits up to period_end)
+    """
+    from datetime import datetime, time
+    from decimal import Decimal
+    import pytz
+    from django.db.models import Sum
+    from Wallet.models import WalletTransaction
+    from Authentication.user_relations import get_user_wallets
+    from common.relations import get_related
+    
+    # Create period end datetime (end of day in IST)
+    kolkata_tz = pytz.timezone('Asia/Kolkata')
+    period_end_datetime = kolkata_tz.localize(
+        datetime.combine(period_end, time.max)  # 23:59:59.999999
+    )
+    
+    # Collect all transaction IDs (from both created_by and wallet relations)
+    all_transaction_ids = set()
+    
+    # Method 1: Transactions by created_by
+    transactions_by_user = WalletTransaction.objects.filter(
+        created_by=designer,
+        created_at__lte=period_end_datetime
+    )
+    all_transaction_ids.update(transactions_by_user.values_list('id', flat=True))
+    
+    # Method 2: Transactions via wallet relations (more comprehensive)
+    wallets = get_user_wallets(designer)
+    for wallet in wallets:
+        wallet_transactions = get_related(wallet, 'Wallet:WalletTransaction', WalletTransaction)
+        wallet_transactions = wallet_transactions.filter(
+            created_at__lte=period_end_datetime
+        )
+        all_transaction_ids.update(wallet_transactions.values_list('id', flat=True))
+    
+    if not all_transaction_ids:
+        return Decimal('0')
+    
+    # Get all transactions
+    transactions = WalletTransaction.objects.filter(id__in=all_transaction_ids)
+    
+    # Get only UNSETTLED credits (credits that haven't been included in any settlement)
+    unsettled_credits = transactions.filter(
+        wallet_transaction_type='credit',
+        settlement_request__isnull=True  # Only unsettled transactions
+    ).aggregate(total=Sum('amount'))['total'] or Decimal('0')
+    
+    # Get ALL debits (including settlement debits from previous months)
+    all_debits = transactions.filter(
+        wallet_transaction_type='debit'
+    ).aggregate(total=Sum('amount'))['total'] or Decimal('0')
+    
+    unsettled_balance = Decimal(str(unsettled_credits)) - Decimal(str(all_debits))
+    
+    return unsettled_balance
 
 
 @shared_task(bind=True, name='common.tasks.send_promotional_emails')
@@ -175,52 +318,6 @@ def expire_coupons(self):
     except Exception as e:
         logger.error(f"Failed to expire coupons: {str(e)}")
         raise self.retry(exc=e, countdown=60, max_retries=3)
-
-
-@shared_task(bind=True, name='common.tasks.daily_database_backup')
-def daily_database_backup(self):
-    """Create daily database backup."""
-    try:
-        backup_dir = os.path.join(settings.BASE_DIR, 'backups', 'daily')
-        os.makedirs(backup_dir, exist_ok=True)
-        
-        # Create backup filename with timestamp
-        timestamp = timezone.now().strftime('%Y%m%d_%H%M%S')
-        backup_filename = f"wedesignz_daily_{timestamp}.sql"
-        backup_path = os.path.join(backup_dir, backup_filename)
-        
-        # Database backup command (adjust for your database)
-        db_settings = settings.DATABASES['default']
-        if db_settings['ENGINE'] == 'django.db.backends.postgresql':
-            import subprocess
-            subprocess.run([
-                'pg_dump',
-                '-h', db_settings['HOST'],
-                '-U', db_settings['USER'],
-                '-d', db_settings['NAME'],
-                '-f', backup_path
-            ])
-        
-        # Clean up old daily backups (keep only 2 days)
-        old_backups = []
-        for file in os.listdir(backup_dir):
-            if file.startswith('wedesignz_daily_'):
-                file_path = os.path.join(backup_dir, file)
-                file_time = os.path.getctime(file_path)
-                if file_time < (timezone.now() - timedelta(days=2)).timestamp():
-                    old_backups.append(file_path)
-        
-        for old_backup in old_backups:
-            os.remove(old_backup)
-        
-        logger.info(f"Daily backup created: {backup_filename}")
-        return f"Daily backup created: {backup_filename}"
-        
-    except Exception as e:
-        logger.error(f"Failed to create daily backup: {str(e)}")
-        raise self.retry(exc=e, countdown=300, max_retries=2)
-
-
 @shared_task(bind=True, name='common.tasks.weekly_database_backup')
 def weekly_database_backup(self):
     """Create weekly database backup with media files."""
@@ -307,44 +404,62 @@ def mark_inactive_accounts_for_deletion(self):
         raise self.retry(exc=e, countdown=60, max_retries=3)
 
 
-@shared_task(bind=True, name='common.tasks.process_custom_order_timeouts')
-def process_custom_order_timeouts(self):
-    """Process custom orders that have exceeded the configured time limit."""
+@shared_task(bind=True, name='common.tasks.check_custom_order_sla')
+def check_custom_order_sla(self, order_id):
+    """
+    Check if a specific custom order has exceeded its SLA deadline.
+    This task is scheduled to run at the order's sla_deadline time.
+    If the order is not completed by then, it will be marked as delayed.
+    """
     try:
-        from common.business_config import BusinessConfig
-        timeout_threshold = timezone.now() - timedelta(hours=BusinessConfig.get_custom_order_time_slot_hours())
-        timeout_orders = CustomOrderRequest.objects.filter(
-            status='in_progress',
-            created_at__lt=timeout_threshold
-        )
+        order = CustomOrderRequest.objects.select_related('created_by').get(id=order_id)
         
-        processed_count = 0
-        for order in timeout_orders:
-            try:
-                # Mark as failed due to timeout
-                order.status = 'failed'
-                order.save()
+        # Check if order is already completed or cancelled
+        if order.status in ['completed', 'cancelled']:
+            logger.info(f"Order {order_id} is already {order.status}, skipping SLA check")
+            return f"Order {order_id} already {order.status}"
+        
+        # Check if SLA deadline has passed
+        now = timezone.now()
+        if now < order.sla_deadline:
+            # This shouldn't happen, but if the task runs early, reschedule it
+            logger.warning(f"Order {order_id} SLA check ran early. Rescheduling...")
+            # Reschedule for the actual deadline
+            check_custom_order_sla.apply_async(
+                args=[order_id],
+                eta=order.sla_deadline
+            )
+            return f"Rescheduled order {order_id} SLA check for {order.sla_deadline}"
+        
+        # Order has exceeded SLA deadline and is not completed
+        # Mark as delayed
+        order.status = 'delayed'
+        order.save(update_fields=['status', 'updated_at'])
+        
+        logger.info(f"Order {order_id} marked as delayed - SLA deadline exceeded")
                 
-                # Send notification to user
+        # Send notification to customer
+        if order.created_by and order.created_by.email:
+            try:
                 send_mail(
-                    subject="Custom Order Timeout - WeDesignz",
-                    message=f"Your custom order #{order.id} has exceeded the 1-hour delivery time and has been cancelled. A refund will be processed.",
+                    subject="Custom Order Delayed - WeDesignz",
+                    message=f"Your custom order #{order_id} has exceeded the delivery time and has been marked as delayed. We apologize for the inconvenience and are working to complete it as soon as possible.",
                     from_email=settings.DEFAULT_FROM_EMAIL,
                     recipient_list=[order.created_by.email],
-                    fail_silently=False,
+                    fail_silently=True,
                 )
-                
-                processed_count += 1
-                
             except Exception as e:
-                logger.error(f"Failed to process timeout for order {order.id}: {str(e)}")
+                logger.error(f"Failed to send delay notification for order {order_id}: {str(e)}")
         
-        logger.info(f"Processed {processed_count} timeout custom orders")
-        return f"Processed {processed_count} timeout custom orders"
+        return f"Order {order_id} marked as delayed"
         
+    except CustomOrderRequest.DoesNotExist:
+        logger.error(f"Order {order_id} not found for SLA check")
+        return f"Order {order_id} not found"
     except Exception as e:
-        logger.error(f"Failed to process custom order timeouts: {str(e)}")
-        raise self.retry(exc=e, countdown=60, max_retries=3)
+        logger.error(f"Failed to check SLA for order {order_id}: {str(e)}", exc_info=True)
+        # Retry once after 5 minutes if there's an error
+        raise self.retry(exc=e, countdown=300, max_retries=1)
 
 
 @shared_task(bind=True, name='common.tasks.send_subscription_expiry_reminders')
@@ -534,16 +649,19 @@ def process_monthly_settlements(self):
                     skipped_count += 1
                     continue
                 
-                # Get wallet balance
+                # Verify wallet exists
                 wallets = get_user_wallets(designer)
                 if not wallets.exists():
                     skipped_count += 1
                     continue
                 
-                wallet = wallets.first()
-                balance = Decimal(str(wallet.balance))
+                # Calculate unsettled balance at period end from transactions (not current wallet balance)
+                # This ensures we only include UNSETTLED transactions up to the end of previous month
+                # and exclude any credits that happen on Day 1 of the new month
+                # Previously settled transactions are excluded
+                unsettled_balance = calculate_unsettled_balance(designer, period_end)
                 
-                if balance <= 0:
+                if unsettled_balance <= 0:
                     skipped_count += 1
                     continue
                 
@@ -553,8 +671,8 @@ def process_monthly_settlements(self):
                     settlement_period_start=period_start,
                     defaults={
                         'settlement_period_end': period_end,
-                        'wallet_balance_at_period_end': balance,
-                        'settlement_amount': balance,  # Settle full balance
+                        'wallet_balance_at_period_end': unsettled_balance,
+                        'settlement_amount': unsettled_balance,  # Settle full unsettled balance at period end
                         'status': 'pending'
                     }
                 )
@@ -563,23 +681,23 @@ def process_monthly_settlements(self):
                     # Link designer to settlement request
                     settlement_request.set_designer(designer)
                     created_count += 1
-                    logger.info(f"Created settlement request for designer {designer.id}: ₹{balance}")
+                    logger.info(f"Created settlement request for designer {designer.id}: ₹{unsettled_balance} (calculated from unsettled transactions up to {period_end})")
                     
                     # TODO: Send notification to designer about settlement window
                     # send_mail(
                     #     subject="Settlement Window Open - WeDesignz",
-                    #     message=f"Hi {designer.first_name},\n\nYour settlement window is now open (Days 1-5 of the month).\n\nAvailable for settlement: ₹{balance}\nPeriod: {period_start} to {period_end}\n\nPlease log in to accept your settlement.\n\nVisit {settings.SITE_URL}/designer-console to access your dashboard.",
+                    #     message=f"Hi {designer.first_name},\n\nYour settlement window is now open (Days 1-5 of the month).\n\nAvailable for settlement: ₹{unsettled_balance}\nPeriod: {period_start} to {period_end}\n\nPlease log in to accept your settlement.\n\nVisit {settings.SITE_URL}/designer-console to access your dashboard.",
                     #     from_email=settings.DEFAULT_FROM_EMAIL,
                     #     recipient_list=[designer.email],
                     #     fail_silently=False,
                     # )
                 else:
                     # Update existing request if balance changed
-                    if settlement_request.wallet_balance_at_period_end != balance:
-                        settlement_request.wallet_balance_at_period_end = balance
-                        settlement_request.settlement_amount = balance
+                    if settlement_request.wallet_balance_at_period_end != unsettled_balance:
+                        settlement_request.wallet_balance_at_period_end = unsettled_balance
+                        settlement_request.settlement_amount = unsettled_balance
                         settlement_request.save()
-                        logger.info(f"Updated settlement request for designer {designer.id}: ₹{balance}")
+                        logger.info(f"Updated settlement request for designer {designer.id}: ₹{unsettled_balance} (calculated from unsettled transactions up to {period_end})")
                     
             except Exception as e:
                 logger.error(f"Failed to create settlement for designer {designer.id}: {str(e)}", exc_info=True)
@@ -661,27 +779,63 @@ def process_settlement_payouts(self):
                     failed_count += 1
                     continue
                 
-                # Update settlement request to processing
-                settlement_request.status = 'processing'
-                settlement_request.settlement_date = current_date
-                settlement_request.save()
-                
-                # Deduct from wallet
-                wallet.balance = current_balance - settlement_amount
-                wallet.save()
-                
-                # Create debit transaction
-                transaction = WalletTransaction.objects.create(
-                    wallet_transaction_type='debit',
-                    amount=settlement_amount,
-                    description=f"Settlement for period {settlement_request.settlement_period_start} to {settlement_request.settlement_period_end}",
-                    reference_id=f"settlement_{settlement_request.id}",
-                    created_by=designer
+                # Mark all unsettled credit transactions up to period_end as settled
+                from datetime import time
+                period_end_datetime = kolkata_tz.localize(
+                    datetime.combine(settlement_request.settlement_period_end, time.max)
                 )
-                wallet.attach_wallet_transaction(transaction)
                 
-                processed_count += 1
-                logger.info(f"Processed settlement for designer {designer_id}: ₹{settlement_amount} (marked for manual payout)")
+                # Get all unsettled credit transactions up to period_end
+                unsettled_credits = WalletTransaction.objects.filter(
+                    created_by=designer,
+                    wallet_transaction_type='credit',
+                    created_at__lte=period_end_datetime,
+                    settlement_request__isnull=True  # Only unsettled transactions
+                )
+                
+                # Use database transaction to ensure atomicity
+                # Only mark transactions as settled if all steps succeed
+                try:
+                    with transaction.atomic():
+                        # Update settlement request to processing
+                        settlement_request.status = 'processing'
+                        settlement_request.settlement_date = current_date
+                        settlement_request.save()
+                        
+                        # Mark all unsettled credit transactions up to period_end as settled
+                        now = timezone.now()
+                        unsettled_credits.update(
+                            settlement_request=settlement_request,
+                            settled_at=now
+                        )
+                        
+                        # Deduct from wallet
+                        wallet.balance = current_balance - settlement_amount
+                        wallet.save()
+                        
+                        # Create debit transaction
+                        debit_transaction = WalletTransaction.objects.create(
+                            wallet_transaction_type='debit',
+                            amount=settlement_amount,
+                            description=f"Settlement for period {settlement_request.settlement_period_start} to {settlement_request.settlement_period_end}",
+                            reference_id=f"settlement_{settlement_request.id}",
+                            created_by=designer
+                        )
+                        wallet.attach_wallet_transaction(debit_transaction)
+                    
+                    # If we reach here, all operations succeeded
+                    processed_count += 1
+                    logger.info(f"Processed settlement for designer {designer_id}: ₹{settlement_amount} (marked for manual payout)")
+                    
+                except Exception as inner_e:
+                    # If any step fails, transaction will rollback automatically
+                    # But we need to mark settlement as failed
+                    logger.error(f"Failed to process settlement {settlement_request.id} (transaction rolled back): {str(inner_e)}", exc_info=True)
+                    settlement_request.status = 'failed'
+                    settlement_request.failure_reason = f'Processing error: {str(inner_e)}'
+                    settlement_request.save()
+                    failed_count += 1
+                    continue
                     
             except User.DoesNotExist:
                 logger.error(f"Designer {settlement_request.designer_id} not found")
@@ -691,6 +845,23 @@ def process_settlement_payouts(self):
                 failed_count += 1
             except Exception as e:
                 logger.error(f"Failed to process settlement {settlement_request.id}: {str(e)}", exc_info=True)
+                # If settlement was marked as processing, unmark any transactions that were marked
+                if settlement_request.status == 'processing':
+                    try:
+                        # Unmark transactions that were marked for this settlement
+                        WalletTransaction.objects.filter(
+                            settlement_request=settlement_request
+                        ).update(
+                            settlement_request=None,
+                            settled_at=None
+                        )
+                        logger.info(f"Unmarked transactions for failed settlement {settlement_request.id}")
+                    except Exception as unmark_error:
+                        logger.error(f"Failed to unmark transactions for settlement {settlement_request.id}: {str(unmark_error)}")
+                
+                settlement_request.status = 'failed'
+                settlement_request.failure_reason = f'Processing error: {str(e)}'
+                settlement_request.save()
                 failed_count += 1
         
         logger.info(f"Processed {processed_count} settlements, {failed_count} failed. Admin can download settlement sheet for manual payout.")
@@ -807,6 +978,127 @@ def cleanup_expired_settlements(self):
         
     except Exception as e:
         logger.error(f"Failed to cleanup expired settlements: {str(e)}")
+        raise self.retry(exc=e, countdown=60, max_retries=3)
+
+
+@shared_task(bind=True, name='common.tasks.expire_processing_settlements')
+def expire_processing_settlements(self):
+    """
+    Mark settlements as expired if they've been in 'processing' status 
+    for more than 7 days without being completed.
+    
+    This task:
+    1. Finds settlements in 'processing' status for more than 7 days
+    2. Unmarks transactions (makes them available for future settlements)
+    3. Refunds wallet balance (reverses the debit transaction)
+    4. Marks settlement as 'expired'
+    
+    Runs daily to ensure settlements don't stay in processing forever.
+    """
+    try:
+        from datetime import timedelta
+        from decimal import Decimal
+        from django.contrib.auth.models import User
+        from Wallet.models import SettlementRequest, WalletTransaction, Wallet
+        from Authentication.user_relations import get_user_wallets
+        
+        # Get settlements in 'processing' status for more than 7 days
+        cutoff_date = timezone.now() - timedelta(days=7)
+        
+        expired_settlements = SettlementRequest.objects.filter(
+            status='processing',
+            settlement_date__lte=cutoff_date.date()
+        )
+        
+        expired_count = 0
+        refunded_count = 0
+        error_count = 0
+        
+        for settlement in expired_settlements:
+            try:
+                designer_id = settlement.designer_id
+                
+                # Get designer
+                try:
+                    designer = User.objects.get(id=designer_id)
+                except User.DoesNotExist:
+                    logger.error(f"Designer {designer_id} not found for settlement {settlement.id}")
+                    settlement.status = 'expired'
+                    settlement.failure_reason = 'Designer not found - settlement expired'
+                    settlement.save()
+                    error_count += 1
+                    continue
+                
+                # Get wallet
+                wallets = get_user_wallets(designer)
+                wallet = wallets.first()
+                
+                if not wallet:
+                    logger.error(f"No wallet found for designer {designer_id} in settlement {settlement.id}")
+                    settlement.status = 'expired'
+                    settlement.failure_reason = 'Wallet not found - settlement expired'
+                    settlement.save()
+                    error_count += 1
+                    continue
+                
+                # Use database transaction to ensure atomicity
+                with transaction.atomic():
+                    # Get all transactions for this settlement
+                    settlement_transactions = WalletTransaction.objects.filter(
+                        settlement_request=settlement
+                    )
+                    
+                    # Find the debit transaction (settlement deduction)
+                    debit_transaction = settlement_transactions.filter(
+                        wallet_transaction_type='debit',
+                        reference_id=f"settlement_{settlement.id}"
+                    ).first()
+                    
+                    # Refund the amount back to wallet if debit transaction exists
+                    if debit_transaction:
+                        refund_amount = Decimal(str(debit_transaction.amount))
+                        current_balance = Decimal(str(wallet.balance))
+                        wallet.balance = current_balance + refund_amount
+                        wallet.save()
+                        refunded_count += 1
+                        logger.info(f"Refunded ₹{refund_amount} to wallet for expired settlement {settlement.id}")
+                    
+                    # Unmark credit transactions (make them available for future settlements)
+                    credit_transactions = settlement_transactions.filter(
+                        wallet_transaction_type='credit'
+                    )
+                    unmarked_count = credit_transactions.update(
+                        settlement_request=None,
+                        settled_at=None
+                    )
+                    
+                    if unmarked_count > 0:
+                        logger.info(f"Unmarked {unmarked_count} credit transactions for expired settlement {settlement.id}")
+                    
+                    # Mark settlement as expired
+                    settlement.status = 'expired'
+                    settlement.failure_reason = 'Settlement expired - not completed within 7 days of processing'
+                    settlement.save()
+                    
+                    expired_count += 1
+                    logger.info(f"Expired settlement {settlement.id} for designer {designer_id} (₹{settlement.settlement_amount})")
+                    
+            except Exception as e:
+                logger.error(f"Failed to expire settlement {settlement.id}: {str(e)}", exc_info=True)
+                error_count += 1
+                # Mark as expired even if refund fails
+                try:
+                    settlement.status = 'expired'
+                    settlement.failure_reason = f'Settlement expired - error during expiration: {str(e)}'
+                    settlement.save()
+                except:
+                    pass
+        
+        logger.info(f"Expired {expired_count} settlements, refunded {refunded_count} wallets, {error_count} errors")
+        return f"Expired {expired_count} settlements, refunded {refunded_count} wallets, {error_count} errors"
+        
+    except Exception as e:
+        logger.error(f"Failed to expire processing settlements: {str(e)}", exc_info=True)
         raise self.retry(exc=e, countdown=60, max_retries=3)
 
 
@@ -980,16 +1272,45 @@ def generate_and_send_designer_bill_async(self, designer_id, settlement_period_s
         
         logger.info(f"Generating monthly bill for designer {designer_id} for period {period_start} to {period_end}")
         
-        # Get all successful orders in the period
-        orders = Order.objects.filter(
+        # Get all successful orders up to period_end (not just in period)
+        # We need to check which ones have unsettled wallet transactions
+        from Wallet.models import WalletTransaction
+        from datetime import datetime, time
+        import pytz
+        
+        kolkata_tz = pytz.timezone('Asia/Kolkata')
+        period_end_datetime = kolkata_tz.localize(
+            datetime.combine(period_end, time.max)
+        )
+        
+        # Get all orders up to period_end
+        all_orders = Order.objects.filter(
             status='success',
-            created_at__date__gte=period_start,
             created_at__date__lte=period_end
         ).exclude(product_ids__isnull=True).exclude(product_ids='')
         
+        # Filter to only include orders with unsettled wallet transactions
+        # An order's wallet transaction is unsettled if it hasn't been included in any settlement
+        unsettled_order_ids = []
+        for order in all_orders:
+            # Check if this order has an unsettled wallet transaction
+            order_transaction = WalletTransaction.objects.filter(
+                created_by_id=designer_id,
+                reference_id=f"order_{order.id}",
+                wallet_transaction_type='credit',
+                created_at__lte=period_end_datetime,
+                settlement_request__isnull=True  # Only unsettled transactions
+            ).exists()
+            
+            if order_transaction:
+                unsettled_order_ids.append(order.id)
+        
+        # Get only unsettled orders
+        orders = Order.objects.filter(id__in=unsettled_order_ids)
+        
         if not orders.exists():
-            logger.warning(f'No orders found for designer {designer_id} in period {period_start} to {period_end}')
-            return f"No orders found for designer {designer_id}"
+            logger.warning(f'No unsettled orders found for designer {designer_id} up to period {period_end}')
+            # Still continue to check for subscription transactions
         
         # Initialize purchase type breakdowns
         purchase_type_breakdowns = {
@@ -1046,36 +1367,75 @@ def generate_and_send_designer_bill_async(self, designer_id, settlement_period_s
                 purchase_type_breakdowns[purchase_type]['design_count'] += design_count
                 purchase_type_breakdowns[purchase_type]['orders'].append(order)
         
-        # Include subscription settlement invoices for this period
-        # Subscription settlements create separate invoices with subscription field set
-        subscription_invoices = Invoice.objects.filter(
-            user_id=designer_id,
-            invoice_type='designer',
-            subscription__isnull=False,
-            invoice_date__gte=period_start,
-            invoice_date__lte=period_end
-        ).select_related('subscription', 'subscription__plan')
+        # Include subscription settlement earnings from wallet transactions
+        # Subscription settlements credit wallets but don't create invoices until opt-in
+        # Only include UNSETTLED subscription transactions
+        from Plans.models import Subscription
+        from Orders.invoice_service import extract_gst_and_commission
+        from common.business_config import BusinessConfig
         
-        for sub_invoice in subscription_invoices:
-            if sub_invoice.subscription and sub_invoice.subscription.plan:
-                plan_name = sub_invoice.subscription.plan.plan_name
-                if plan_name in ['basic', 'prime', 'premium']:
-                    purchase_type = plan_name
+        # Get GST and commission rates for reverse calculation
+        gst_percentage = Decimal(str(BusinessConfig.get_gst_percentage()))
+        commission_rate = Decimal(str(BusinessConfig.get_commission_rate()))
+        
+        # Find UNSETTLED wallet transactions for subscription settlements up to period_end
+        subscription_transactions = WalletTransaction.objects.filter(
+            created_by_id=designer_id,
+            wallet_transaction_type='credit',
+            reference_id__startswith='subscription_',
+            created_at__lte=period_end_datetime,
+            settlement_request__isnull=True  # Only unsettled transactions
+        )
+        
+        for transaction in subscription_transactions:
+            # Extract subscription ID from reference_id
+            # Format: "subscription_{id}" or "subscription_{id}_{period_date}"
+            ref_parts = transaction.reference_id.split('_')
+            if len(ref_parts) >= 2:
+                try:
+                    subscription_id = int(ref_parts[1])
+                    subscription = Subscription.objects.select_related('plan').filter(id=subscription_id).first()
                     
-                    # Get design count from invoice data if available
-                    design_count = 0
-                    if sub_invoice.invoice_data and 'items' in sub_invoice.invoice_data:
-                        # Try to get quantity from first item
-                        items = sub_invoice.invoice_data.get('items', [])
-                        if items:
-                            design_count = items[0].get('quantity', 0)
-                    
-                    # Add subscription settlement amounts to appropriate category
-                    purchase_type_breakdowns[purchase_type]['gst_amount'] += Decimal(str(sub_invoice.gst_amount))
-                    purchase_type_breakdowns[purchase_type]['commission_amount'] += Decimal(str(sub_invoice.commission_amount))
-                    purchase_type_breakdowns[purchase_type]['product_total'] += Decimal(str(sub_invoice.subtotal))
-                    purchase_type_breakdowns[purchase_type]['design_count'] += design_count
-                    # Note: subscription invoices don't have orders, so we skip adding to orders list
+                    if subscription and subscription.plan:
+                        plan_name = subscription.plan.plan_name
+                        if plan_name in ['basic', 'prime', 'premium']:
+                            purchase_type = plan_name
+                            
+                            # Reverse calculate product_total, gst_amount, commission_amount from wallet_amount
+                            # wallet_amount = base_amount (after GST and commission extraction)
+                            # We need to reverse: base_amount -> amount_after_gst -> product_total
+                            wallet_amount = Decimal(str(transaction.amount))
+                            
+                            # Reverse Step 2: base_amount -> amount_after_gst
+                            # y * (1 + commission_rate/100) = amount_after_gst
+                            amount_after_gst = wallet_amount * (Decimal('1') + (commission_rate / Decimal('100')))
+                            commission_amount = amount_after_gst - wallet_amount
+                            
+                            # Reverse Step 1: amount_after_gst -> product_total
+                            # x * (1 + gst_percentage/100) = product_total
+                            product_total = amount_after_gst * (Decimal('1') + (gst_percentage / Decimal('100')))
+                            gst_amount = product_total - amount_after_gst
+                            
+                            # Extract download count from description
+                            # Format: "Earnings from subscription {id} ({count} downloads)" or
+                            #         "Earnings from subscription {id} - {period} ({count} downloads)"
+                            design_count = 0
+                            if transaction.description:
+                                import re
+                                match = re.search(r'\((\d+)\s+downloads?\)', transaction.description)
+                                if match:
+                                    design_count = int(match.group(1))
+                            
+                            # Add subscription settlement amounts to appropriate category
+                            purchase_type_breakdowns[purchase_type]['gst_amount'] += gst_amount
+                            purchase_type_breakdowns[purchase_type]['commission_amount'] += commission_amount
+                            purchase_type_breakdowns[purchase_type]['product_total'] += product_total
+                            purchase_type_breakdowns[purchase_type]['design_count'] += design_count
+                            # Note: subscription settlements don't have orders, so we skip adding to orders list
+                except (ValueError, IndexError):
+                    # Skip if reference_id format is invalid
+                    logger.warning(f"Invalid subscription reference_id format: {transaction.reference_id}")
+                    continue
         
         # Remove empty categories
         purchase_type_breakdowns = {
@@ -1145,7 +1505,7 @@ def process_expired_subscriptions(self):
                     # Note: process_subscription_settlement already marks as expired and settlement_processed
                     
                     processed_count += 1
-                    logger.info(f"Processed monthly subscription settlement for subscription {subscription.id}: {result.get('total_downloads', 0)} downloads, {result.get('per_download_price', 0):.2f} per download")
+                    logger.info(f"Processed monthly subscription settlement for subscription {subscription.id}: {result.get('total_downloads', 0)} downloads, {result.get('price_per_download', 0):.2f} per download. Designer invoices will be created when designers opt-in.")
                     
                 except Exception as e:
                     logger.error(f"Failed to process monthly subscription {subscription.id}: {str(e)}", exc_info=True)

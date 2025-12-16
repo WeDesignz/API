@@ -6,9 +6,11 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from django.db.models import Sum, Q
+from django.db import transaction
 from django.utils import timezone
 from django.http import HttpResponse
 from django.contrib.auth.models import User
+import logging
 from .models import Wallet, WalletTransaction, WalletWithdrawalRequest, SettlementRequest
 from .serializers import (
     WalletSerializer, WalletTransactionSerializer, WalletWithdrawalRequestSerializer
@@ -1246,6 +1248,12 @@ def linked_account_status(request):
             description='Filter by settlement date (YYYY-MM-DD)',
             type=openapi.TYPE_STRING
         ),
+        openapi.Parameter(
+            'search',
+            openapi.IN_QUERY,
+            description='Search by settlement ID, designer name, or designer email',
+            type=openapi.TYPE_STRING
+        ),
     ],
     responses={
         200: openapi.Response(
@@ -1274,6 +1282,7 @@ def download_settlement_sheet(request):
         status_filter = request.GET.get('status')
         period_start_str = request.GET.get('period_start')
         settlement_date_str = request.GET.get('settlement_date')
+        search_query = request.GET.get('search', '').strip()
         
         # Validate format
         if file_format not in ['csv', 'xlsx']:
@@ -1304,6 +1313,24 @@ def download_settlement_sheet(request):
                 return Response({
                     'error': 'Invalid settlement_date format. Use YYYY-MM-DD'
                 }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Apply search filter if provided
+        if search_query:
+            # Filter by settlement ID, or designer name/email (requires join)
+            # Try to match settlement ID first (exact match)
+            try:
+                settlement_id = int(search_query)
+                queryset = queryset.filter(id=settlement_id)
+            except ValueError:
+                # Search by designer name or email
+                # We need to filter by related designer fields
+                designer_ids = User.objects.filter(
+                    Q(first_name__icontains=search_query) |
+                    Q(last_name__icontains=search_query) |
+                    Q(username__icontains=search_query) |
+                    Q(email__icontains=search_query)
+                ).values_list('id', flat=True)
+                queryset = queryset.filter(designer_id__in=designer_ids)
         
         # Order by settlement period and designer ID
         queryset = queryset.order_by('-settlement_period_start', 'designer_id')
@@ -1453,11 +1480,16 @@ def _generate_excel_response(settlement_data, filename, total_amount):
         if not settlement_data:
             ws['A1'] = 'No settlements found'
             ws['A1'].font = Font(bold=True)
+            # Save to BytesIO buffer first
+            output = io.BytesIO()
+            wb.save(output)
+            output.seek(0)
+            
             response = HttpResponse(
+                output.read(),
                 content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
             )
             response['Content-Disposition'] = f'attachment; filename="{filename}"'
-            wb.save(response)
             return response
         
         # Write header
@@ -1502,11 +1534,16 @@ def _generate_excel_response(settlement_data, filename, total_amount):
         # Freeze header row
         ws.freeze_panes = 'A2'
         
+        # Save to BytesIO buffer first, then write to HttpResponse
+        output = io.BytesIO()
+        wb.save(output)
+        output.seek(0)
+        
         response = HttpResponse(
+            output.read(),
             content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
         )
         response['Content-Disposition'] = f'attachment; filename="{filename}"'
-        wb.save(response)
         return response
     
     except ImportError:
@@ -1589,6 +1626,25 @@ def update_settlement_status(request, settlement_id):
         }, status=status.HTTP_400_BAD_REQUEST)
     
     old_status = settlement.status
+    
+    # If admin is marking settlement as failed, unmark any transactions that were marked
+    if new_status == 'failed' and old_status in ['processing', 'opted_in']:
+        logger = logging.getLogger(__name__)
+        try:
+            with transaction.atomic():
+                # Unmark transactions that were marked for this settlement
+                unmarked_count = WalletTransaction.objects.filter(
+                    settlement_request=settlement
+                ).update(
+                    settlement_request=None,
+                    settled_at=None
+                )
+                
+                if unmarked_count > 0:
+                    logger.info(f"Unmarked {unmarked_count} transactions for failed settlement {settlement_id}")
+        except Exception as e:
+            logger.error(f"Failed to unmark transactions for settlement {settlement_id}: {str(e)}", exc_info=True)
+            # Continue with status update even if unmarking fails
     
     # Update settlement
     settlement.status = new_status
@@ -1889,14 +1945,65 @@ def list_settlements(request):
     end = start + page_size
     settlements_page = queryset[start:end]
     
-    # Serialize settlements
+    # Serialize settlements with designer information
     settlements_data = []
     for settlement in settlements_page:
+        # Get designer information
+        designer = None
+        designer_name = ''
+        designer_email = ''
+        designer_phone = ''
+        account_holder_name = ''
+        account_number = ''
+        ifsc_code = ''
+        
+        try:
+            # Get designer user
+            designer = User.objects.filter(id=settlement.designer_id).first()
+            if designer:
+                designer_name = f"{designer.first_name} {designer.last_name}".strip() or designer.username or ''
+                designer_email = designer.email if hasattr(designer, 'email') else ''
+                
+                # Get phone number
+                try:
+                    from Authentication.models import MobileNumber
+                    mobile_numbers = get_related(designer, 'User:MobileNumber', MobileNumber)
+                    if mobile_numbers.exists():
+                        mobile = mobile_numbers.first()
+                        designer_phone = str(mobile.mobile_number) if hasattr(mobile, 'mobile_number') else ''
+                except:
+                    pass
+                
+                # Get bank details from StudioBusinessDetails
+                try:
+                    from Profiles.models import Studio, StudioBusinessDetails
+                    studio = Studio.objects.filter(created_by=designer).first()
+                    if studio:
+                        business_details = StudioBusinessDetails.objects.filter(studio=studio).first()
+                        if business_details:
+                            account_holder_name = business_details.bank_account_holder_name or ''
+                            account_number = business_details.bank_account_number or ''
+                            ifsc_code = business_details.bank_ifsc_code or ''
+                except:
+                    pass
+        except Exception as e:
+            logging.error(f"Error fetching designer info for settlement {settlement.id}: {str(e)}")
+        
+        # Format settlement period string
+        settlement_period = f"{settlement.settlement_period_start.strftime('%b %Y')}"
+        
         settlements_data.append({
             'id': settlement.id,
             'designer_id': settlement.designer_id,
+            'designer_name': designer_name,
+            'designer_email': designer_email,
+            'designer_phone': designer_phone,
+            'account_holder_name': account_holder_name,
+            'account_number': account_number,
+            'ifsc_code': ifsc_code,
             'settlement_period_start': settlement.settlement_period_start.isoformat(),
             'settlement_period_end': settlement.settlement_period_end.isoformat(),
+            'settlement_period': settlement_period,
             'wallet_balance_at_period_end': float(settlement.wallet_balance_at_period_end),
             'settlement_amount': float(settlement.settlement_amount),
             'status': settlement.status,
@@ -1909,12 +2016,19 @@ def list_settlements(request):
             'updated_at': settlement.updated_at.isoformat()
         })
     
+    # Return response with nested data structure
+    # transformResponse extracts backendResponse.data, so we nest the PaginatedResponse structure
+    # This ensures the frontend receives: { success: true, data: { data: [...], pagination: {...} } }
     return Response({
-        'settlements': settlements_data,
-        'pagination': {
-            'page': page,
-            'page_size': page_size,
-            'total_count': total_count,
-            'total_pages': (total_count + page_size - 1) // page_size
+        'data': {
+            'data': settlements_data,
+            'pagination': {
+                'page': page,
+                'page_size': page_size,
+                'limit': page_size,  # Added for compatibility
+                'total': total_count,  # Frontend expects 'total'
+                'total_count': total_count,  # Keep for backward compatibility
+                'total_pages': (total_count + page_size - 1) // page_size
+            }
         }
     })

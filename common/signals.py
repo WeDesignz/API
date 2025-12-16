@@ -85,7 +85,7 @@ def send_order_confirmation_email(sender, instance, created, **kwargs):
 # Custom Request Signals
 @receiver(post_save, sender=CustomOrderRequest)
 def send_custom_order_notification(sender, instance, created, **kwargs):
-    """Send notifications for custom order status changes."""
+    """Send notifications for custom order status changes and schedule SLA check."""
     if created:
         # Send admin notification for new custom order
         try:
@@ -98,6 +98,19 @@ def send_custom_order_notification(sender, instance, created, **kwargs):
             )
         except Exception as e:
             logger.error(f"Failed to send admin notification for custom order: {str(e)}")
+        
+        # Schedule SLA check task to run at the order's deadline
+        try:
+            from common.tasks import check_custom_order_sla
+            
+            # Schedule the task to run at the SLA deadline
+            check_custom_order_sla.apply_async(
+                args=[instance.id],
+                eta=instance.sla_deadline
+            )
+            logger.info(f"Scheduled SLA check for custom order {instance.id} at {instance.sla_deadline}")
+        except Exception as e:
+            logger.error(f"Failed to schedule SLA check for custom order {instance.id}: {str(e)}", exc_info=True)
     
     elif instance.status == 'completed':
         # Send completion email to user

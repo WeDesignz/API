@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from django.contrib.auth.models import User
+from django.db.models import Sum
 from .models import Addresses, DesignerProfile, Studio, StudioBusinessDetails, StudioMember, Ratings, DesignProcessingTask
 from Accounts.serializers import UserSerializer
 from MediaFiles.serializers import MediaSerializer
@@ -829,8 +830,24 @@ class DesignerManagementSerializer(serializers.ModelSerializer):
         if not wallets.exists():
             return 0
         
+        # Get transactions by created_by (user)
+        transactions_by_user = WalletTransaction.objects.filter(
+            created_by=obj,
+            wallet_transaction_type='credit'
+        )
+        
+        # Get transactions linked to wallets through relations
+        all_transaction_ids = set(transactions_by_user.values_list('id', flat=True))
+        for wallet in wallets:
+            wallet_transactions = get_related(wallet, 'Wallet:WalletTransaction', WalletTransaction)
+            all_transaction_ids.update(wallet_transactions.filter(wallet_transaction_type='credit').values_list('id', flat=True))
+        
+        # Get all unique credit transactions and aggregate
+        if not all_transaction_ids:
+            return 0
+        
         total = WalletTransaction.objects.filter(
-            wallet__in=wallets,
+            id__in=all_transaction_ids,
             wallet_transaction_type='credit'
         ).aggregate(total=Sum('amount'))['total']
         
@@ -913,10 +930,28 @@ class DesignerDetailSerializer(serializers.ModelSerializer):
         primary_wallet = wallets.first()
         
         # Calculate financial metrics
-        total_earnings = WalletTransaction.objects.filter(
-            wallet=primary_wallet,
+        # Get transactions by created_by (user)
+        transactions_by_user = WalletTransaction.objects.filter(
+            created_by=obj,
             wallet_transaction_type='credit'
-        ).aggregate(total=Sum('amount'))['total'] or 0
+        )
+        
+        # Get transactions linked to wallet through relations
+        wallet_transactions = get_related(primary_wallet, 'Wallet:WalletTransaction', WalletTransaction)
+        wallet_transactions = wallet_transactions.filter(wallet_transaction_type='credit')
+        
+        # Combine both querysets and remove duplicates
+        all_transaction_ids = set(transactions_by_user.values_list('id', flat=True))
+        all_transaction_ids.update(wallet_transactions.values_list('id', flat=True))
+        
+        # Aggregate total earnings
+        if all_transaction_ids:
+            total_earnings = WalletTransaction.objects.filter(
+                id__in=all_transaction_ids,
+                wallet_transaction_type='credit'
+            ).aggregate(total=Sum('amount'))['total'] or 0
+        else:
+            total_earnings = 0
         
         pending_withdrawals = WalletWithdrawalRequest.objects.filter(
             wallet=primary_wallet,
@@ -955,7 +990,25 @@ class DesignerDetailSerializer(serializers.ModelSerializer):
                 'last_transaction_date': None
             }
         
-        transactions = WalletTransaction.objects.filter(wallet__in=wallets)
+        # Get transactions by created_by (user)
+        transactions_by_user = WalletTransaction.objects.filter(created_by=obj)
+        
+        # Get transactions linked to wallets through relations
+        all_transaction_ids = set(transactions_by_user.values_list('id', flat=True))
+        for wallet in wallets:
+            wallet_transactions = get_related(wallet, 'Wallet:WalletTransaction', WalletTransaction)
+            all_transaction_ids.update(wallet_transactions.values_list('id', flat=True))
+        
+        # Get all unique transactions
+        if not all_transaction_ids:
+            return {
+                'total_transactions': 0,
+                'credit_transactions': 0,
+                'debit_transactions': 0,
+                'last_transaction_date': None
+            }
+        
+        transactions = WalletTransaction.objects.filter(id__in=all_transaction_ids)
         
         credit_count = transactions.filter(wallet_transaction_type='credit').count()
         debit_count = transactions.filter(wallet_transaction_type='debit').count()

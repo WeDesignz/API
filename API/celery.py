@@ -17,16 +17,10 @@ app.autodiscover_tasks()
 
 # Celery Beat configuration
 app.conf.beat_schedule = {
-    # OTP Cleanup - Every 5 minutes
+    # OTP Cleanup - Every week at 2:00 AM (Sunday)
     'cleanup-expired-otps': {
         'task': 'common.tasks.cleanup_expired_otps',
-        'schedule': 300.0,  # 5 minutes
-    },
-    
-    # Custom Order Timeouts - Every 5 minutes
-    'process-custom-order-timeouts': {
-        'task': 'common.tasks.process_custom_order_timeouts',
-        'schedule': 300.0,  # 5 minutes
+        'schedule': crontab(hour=2, minute=0, day_of_week=0),  # Every Sunday at 2:00 AM IST
     },
     
     # Subscription Status Updates - Every hour
@@ -39,12 +33,6 @@ app.conf.beat_schedule = {
     'send-auto-mandate-notifications': {
         'task': 'common.tasks.send_auto_mandate_notifications',
         'schedule': 3600.0,  # 1 hour
-    },
-    
-    # Daily Backup - Every day at 2 AM
-    'daily-database-backup': {
-        'task': 'common.tasks.daily_database_backup',
-        'schedule': 7200.0,  # 2 hours (2 AM)
     },
     
     # Expire Coupons - Every day at 2 AM
@@ -75,6 +63,25 @@ app.conf.beat_schedule = {
     'process-expired-subscriptions': {
         'task': 'common.tasks.process_expired_subscriptions',
         'schedule': crontab(hour=3, minute=30),  # Daily at 3:30 AM IST
+    },
+    
+    # Process Monthly Settlements - Day 1 of every month at 1:00 AM IST
+    'process-monthly-settlements': {
+        'task': 'common.tasks.process_monthly_settlements',
+        'schedule': crontab(day_of_month=1, hour=1, minute=0),  # Day 1 at 1:00 AM IST
+    },
+    
+    # Process Settlement Payouts - Day 6 of every month at 1:00 AM IST
+    'process-settlement-payouts': {
+        'task': 'common.tasks.process_settlement_payouts',
+        'schedule': crontab(day_of_month=6, hour=1, minute=0),  # Day 6 at 1:00 AM IST
+    },
+    
+    # Expire Processing Settlements - Daily at 2:00 AM IST
+    # Marks settlements as expired if they've been in 'processing' status for more than 7 days
+    'expire-processing-settlements': {
+        'task': 'common.tasks.expire_processing_settlements',
+        'schedule': crontab(hour=2, minute=0),  # Daily at 2:00 AM IST
     },
     
     # Promotional Emails - Every 3 days at 10 AM

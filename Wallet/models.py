@@ -54,6 +54,21 @@ class WalletTransaction(models.Model):
     updated_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='updated_wallet_transactions', null=True, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
     
+    # Settlement tracking
+    settlement_request = models.ForeignKey(
+        'Wallet.SettlementRequest',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='transactions',
+        help_text="Settlement request that included this transaction"
+    )
+    settled_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When this transaction was settled (Day 6 when processed)"
+    )
+    
     objects = models.Manager()
     
     class Meta:

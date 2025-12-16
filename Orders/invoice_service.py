@@ -749,10 +749,10 @@ def get_user_address(user: User) -> Dict[str, str]:
                 if business_details:
                     # Get GST number
                     if business_details.gst_number:
-                        gst_number = business_details.gst_number
+                    gst_number = business_details.gst_number
                     # Get business name
                     if business_details.legal_business_name:
-                        company_name = business_details.legal_business_name
+                    company_name = business_details.legal_business_name
                     # Get business address from registered_addresses_json if available
                     if not address_line1 and business_details.registered_addresses_json:
                         registered_addresses = business_details.registered_addresses_json
@@ -1181,7 +1181,13 @@ def process_order_invoices(order: Order) -> Dict[str, Any]:
 
 
 def create_designer_invoice_for_subscription(subscription: Subscription, designer: User, breakdown: Dict[str, Any]) -> Invoice:
-    """Create and generate designer invoice (bill) for subscription settlement."""
+    """
+    Create and generate designer invoice (bill) for subscription settlement.
+    
+    NOTE: This function is currently NOT used during subscription settlement.
+    Designer invoices are now created only when designers opt-in during the monthly settlement window.
+    This function is kept for potential future use or manual invoice generation.
+    """
     invoice = Invoice()
     invoice.invoice_number = invoice.generate_invoice_number()
     invoice.invoice_type = 'designer'
@@ -1394,7 +1400,8 @@ def process_monthly_subscription_settlement(
         breakdown['wallet_amount'] = extracted['base_amount']  # Base amount goes to wallet
     
     # Process settlements for each designer
-    designer_invoices = []
+    # NOTE: Designer invoices/bills are NOT created here. They are created
+    # only when designers opt-in during the monthly settlement window.
     wallet_transactions = []
     
     for designer_id, breakdown in designer_breakdown.items():
@@ -1415,10 +1422,6 @@ def process_monthly_subscription_settlement(
         )
         wallet.attach_wallet_transaction(transaction)
         wallet_transactions.append(transaction)
-        
-        # Create designer invoice (bill) for subscription settlement
-        designer_invoice = create_designer_invoice_for_subscription(subscription, designer, breakdown)
-        designer_invoices.append(designer_invoice)
     
     # Update last settled date (use period_end as the settlement date)
     subscription.last_settled_month = period_end
@@ -1558,7 +1561,8 @@ def process_subscription_settlement(subscription: Subscription) -> Dict[str, Any
         breakdown['wallet_amount'] = extracted['base_amount']  # Base amount goes to wallet
     
     # Process settlements for each designer
-    designer_invoices = []
+    # NOTE: Designer invoices/bills are NOT created here. They are created
+    # only when designers opt-in during the monthly settlement window.
     wallet_transactions = []
     
     for designer_id, breakdown in designer_breakdown.items():
@@ -1579,10 +1583,6 @@ def process_subscription_settlement(subscription: Subscription) -> Dict[str, Any
         )
         wallet.attach_wallet_transaction(transaction)
         wallet_transactions.append(transaction)
-        
-        # Create designer invoice (bill) for subscription settlement
-        designer_invoice = create_designer_invoice_for_subscription(subscription, designer, breakdown)
-        designer_invoices.append(designer_invoice)
     
     # Mark subscription as expired and settlement processed
     subscription.status = 'expired'
@@ -1613,7 +1613,6 @@ def process_subscription_settlement(subscription: Subscription) -> Dict[str, Any
             }
             for designer_id, breakdown in designer_breakdown.items()
         },
-        'designer_invoices': [inv.id for inv in designer_invoices],
         'wallet_transactions': [txn.id for txn in wallet_transactions],
     }
 

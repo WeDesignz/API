@@ -188,7 +188,6 @@ Tasks are defined in:
 - **`send_auto_mandate_notifications`** - Send notifications for upcoming auto-mandate transactions
 - **`cleanup_expired_otps`** - Clean up expired OTPs from the database
 - **`expire_coupons`** - Mark expired coupons as inactive
-- **`daily_database_backup`** - Create daily database backup
 - **`weekly_database_backup`** - Create weekly database backup with media files
 - **`mark_inactive_accounts_for_deletion`** - Mark deactivated accounts for deletion after 6 months
 - **`process_custom_order_timeouts`** - Process custom orders that have exceeded time limit
