@@ -1166,10 +1166,11 @@ def resend_otp(request):
         
         elif mobile_number:
             try:
-                mobile_obj = MobileNumber.objects.get(mobile_number=mobile_number)
+                # Security: Only allow users to resend OTP for their own mobile numbers
+                mobile_obj = MobileNumber.objects.get(mobile_number=mobile_number, created_by=request.user)
             except MobileNumber.DoesNotExist:
                 return Response({
-                    'error': 'Mobile number not found'
+                    'error': 'Mobile number not found or does not belong to you'
                 }, status=status.HTTP_400_BAD_REQUEST)
             
             # Check if mobile is verified for password reset
@@ -1187,7 +1188,7 @@ def resend_otp(request):
                 otp_type='M',
                 otp_for=otp_for,
                 expires_at=expires_at,
-                created_by=mobile_obj.created_by
+                created_by=request.user
             )
             
             # Send OTP via WhatsApp

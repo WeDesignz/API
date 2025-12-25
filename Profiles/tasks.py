@@ -87,16 +87,17 @@ def process_design_upload_task(self, task_id, zip_file_path):
             logger.info(f"Task {task_id}: Found metadata file: {metadata_file}")
             
             # Parse metadata.xlsx
-            # Fixed column positions (metadata.xlsx format is fixed):
+            # Fixed column positions (metadata.xlsx format):
             # Column 1: folder_name
             # Column 2: title
             # Column 3: description
             # Column 4: category
             # Column 5: subcategory
-            # Column 6: plan
-            # Column 7: color
-            # Column 8: visible
-            # Column 9: tags
+            # Column 6: tags
+            # Note: plan, color, and visible are no longer in metadata - defaults applied:
+            # - plan: defaults to '4' (premium)
+            # - visible: defaults to '1' (show)
+            # - color: defaults to None
             # Note: Price is now managed globally via SystemConfig, not from metadata
             logger.info(f"Task {task_id}: Reading metadata file...")
             metadata_data = zip_ref.read(metadata_file)
@@ -122,10 +123,7 @@ def process_design_upload_task(self, task_id, zip_file_path):
                             'description': str(row[2].value).strip() if len(row) > 2 and row[2].value else '',
                             'category': str(row[3].value).strip() if len(row) > 3 and row[3].value else '',
                             'subcategory': str(row[4].value).strip() if len(row) > 4 and row[4].value else '',
-                            'plan': str(row[5].value).strip() if len(row) > 5 and row[5].value else '',
-                            'color': str(row[6].value).strip() if len(row) > 6 and row[6].value else '',
-                            'visible': str(row[7].value).strip() if len(row) > 7 and row[7].value else '',
-                            'tags': str(row[8].value).strip() if len(row) > 8 and row[8].value else '',
+                            'tags': str(row[5].value).strip() if len(row) > 5 and row[5].value else '',  # Tags now at column 5
                         }
                         metadata_dict[folder_name] = row_data
                         row_count += 1
@@ -318,8 +316,8 @@ def process_design_upload_task(self, task_id, zip_file_path):
                         
                         logger.info(f"Task {task_id}: Category ready, creating product...")
                         
-                        # Map Plan value (column 6)
-                        plan_value = metadata.get('plan', '').strip() if metadata.get('plan') else ''
+                        # Plan default: 4 (premium) - removed from metadata template
+                        plan_value = '4'  # Default to premium plan
                         plan_mapping = {
                             '0': 'free',
                             '1': 'basic',
@@ -328,7 +326,7 @@ def process_design_upload_task(self, task_id, zip_file_path):
                             '4': 'premium',
                             '9': 'basic'
                         }
-                        product_plan_type = plan_mapping.get(str(plan_value).strip(), 'basic')
+                        product_plan_type = plan_mapping.get(str(plan_value).strip(), 'premium')  # Default to premium
                         
                         # Price is now managed globally via SystemConfig
                         # Use global design price for paid designs, None for free designs
@@ -338,14 +336,12 @@ def process_design_upload_task(self, task_id, zip_file_path):
                         else:
                             price = BusinessConfig.get_design_price()
                         
-                        # Get visibility (column 8, previously column 9)
-                        visible_value = metadata.get('visible', '1').strip() if metadata.get('visible') else '1'
-                        visibility_status = 'show' if str(visible_value).strip() == '1' else 'hide'
+                        # Visibility default: 1 (show) - removed from metadata template
+                        visible_value = '1'  # Always default to visible
+                        visibility_status = 'show'
                         
-                        # Get color (column 7)
-                        color = metadata.get('color', '').strip() if metadata.get('color') else None
-                        if not color:
-                            color = None
+                        # Color default: None - removed from metadata template
+                        color = None  # Color column removed, always set to None
                         
                         # Get title and description from metadata (using fixed column positions)
                         title = metadata.get('title', '').strip()[:200] if metadata.get('title') else f"Design {folder_name}"
