@@ -23,51 +23,27 @@ app.conf.beat_schedule = {
         'schedule': crontab(hour=2, minute=0, day_of_week=0),  # Every Sunday at 2:00 AM IST
     },
     
-    # Subscription Status Updates - Every hour
-    'update-subscription-status': {
-        'task': 'common.tasks.update_subscription_status',
-        'schedule': 3600.0,  # 1 hour
-    },
-    
-    # Auto-mandate Notifications - Every hour
-    'send-auto-mandate-notifications': {
-        'task': 'common.tasks.send_auto_mandate_notifications',
-        'schedule': 3600.0,  # 1 hour
-    },
-    
-    # Expire Coupons - Every day at 2 AM
+    # Expire Coupons - Every day at 4 AM
     'expire-coupons': {
         'task': 'common.tasks.expire_coupons',
-        'schedule': 7200.0,  # 2 hours (2 AM)
+        'schedule': crontab(hour=4, minute=0),  # Daily at 4:00 AM IST
     },
     
-    # Mark Inactive Accounts - Every day at 2 AM
-    'mark-inactive-accounts-for-deletion': {
-        'task': 'common.tasks.mark_inactive_accounts_for_deletion',
-        'schedule': 7200.0,  # 2 hours (2 AM)
-    },
-    
-    # Weekly Backup - Every Sunday at 3 AM
-    'weekly-database-backup': {
-        'task': 'common.tasks.weekly_database_backup',
-        'schedule': 604800.0,  # 1 week
-    },
-    
-    # Subscription Expiry Reminders - Every Sunday at 3 AM
+    # Subscription Expiry Reminders - Every Sunday at 3:30 AM
     'send-subscription-expiry-reminders': {
         'task': 'common.tasks.send_subscription_expiry_reminders',
-        'schedule': 604800.0,  # 1 week
+        'schedule': crontab(hour=3, minute=30, day_of_week=0),  # Every Sunday at 3:30 AM IST
     },
     
-    # Process Expired Subscriptions - Daily at 3:30 AM IST
-    'process-expired-subscriptions': {
-        'task': 'common.tasks.process_expired_subscriptions',
-        'schedule': crontab(hour=3, minute=30),  # Daily at 3:30 AM IST
+    # Process Subscription Billing - Daily at 3:00 AM IST
+    'process-subscription-billing': {
+        'task': 'common.tasks.process_subscription_billing',
+        'schedule': crontab(hour=3, minute=0),  # Daily at 3:00 AM IST
     },
     
-    # Process Monthly Settlements - Day 1 of every month at 1:00 AM IST
-    'process-monthly-settlements': {
-        'task': 'common.tasks.process_monthly_settlements',
+    # Create Designer Payout Requests - Day 1 of every month at 1:00 AM IST
+    'create-designer-payout-requests': {
+        'task': 'common.tasks.create_designer_payout_requests',
         'schedule': crontab(day_of_month=1, hour=1, minute=0),  # Day 1 at 1:00 AM IST
     },
     
@@ -82,12 +58,6 @@ app.conf.beat_schedule = {
     'expire-processing-settlements': {
         'task': 'common.tasks.expire_processing_settlements',
         'schedule': crontab(hour=2, minute=0),  # Daily at 2:00 AM IST
-    },
-    
-    # Promotional Emails - Every 3 days at 10 AM
-    'send-promotional-emails': {
-        'task': 'common.tasks.send_promotional_emails',
-        'schedule': 259200.0,  # 3 days
     },
 }
 

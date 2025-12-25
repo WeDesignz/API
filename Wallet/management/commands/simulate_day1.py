@@ -2,7 +2,7 @@ from django.core.management.base import BaseCommand
 from freezegun import freeze_time
 from datetime import datetime, date, timedelta
 import pytz
-from common.tasks import process_monthly_settlements
+from common.tasks import create_designer_payout_requests
 from Wallet.models import SettlementRequest
 
 
@@ -44,7 +44,7 @@ class Command(BaseCommand):
         self.stdout.write(f'\nSimulating: {target_datetime.strftime("%Y-%m-%d %H:%M")} IST')
         
         with freeze_time(target_datetime):
-            result = process_monthly_settlements()
+            result = create_designer_payout_requests()
             self.stdout.write(self.style.SUCCESS(f'\n✓ {result}'))
         
         # Calculate period that was used

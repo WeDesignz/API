@@ -22,7 +22,7 @@ from Orders.invoice_service import (
 from Plans.models import Plan, Subscription
 from Catalog.models import Product, Category
 from Wallet.models import Wallet, WalletTransaction
-from common.tasks import process_expired_subscriptions
+from common.tasks import process_subscription_billing
 from common.business_config import BusinessConfig
 
 
@@ -766,7 +766,7 @@ class ProcessMonthlySubscriptionSettlementTestCase(TestCase):
 
 
 class ProcessExpiredSubscriptionsTaskTestCase(TestCase):
-    """Test cases for process_expired_subscriptions Celery task"""
+    """Test cases for process_subscription_billing Celery task"""
     
     def setUp(self):
         """Set up test data"""
@@ -820,7 +820,7 @@ class ProcessExpiredSubscriptionsTaskTestCase(TestCase):
     
     @patch('common.tasks.send_designer_subscription_invoice_email_async')
     @patch('Orders.invoice_service.process_subscription_settlement')
-    def test_process_expired_subscriptions_monthly(self, mock_settlement, mock_email):
+    def test_process_subscription_billing_monthly(self, mock_settlement, mock_email):
         """Test Celery task processes monthly subscriptions"""
         print("\n" + "="*70)
         print("CELERY TASK TEST - MONTHLY SUBSCRIPTION SETTLEMENT")
@@ -873,7 +873,7 @@ class ProcessExpiredSubscriptionsTaskTestCase(TestCase):
         print(f"  Per Download Price: Rs {mock_settlement.return_value['per_download_price']:.2f}")
         
         # Call the task
-        result = process_expired_subscriptions()
+        result = process_subscription_billing()
         
         print(f"\nTask Execution:")
         print(f"  Task Result:        {result}")
@@ -885,7 +885,7 @@ class ProcessExpiredSubscriptionsTaskTestCase(TestCase):
     
     @patch('common.tasks.send_designer_subscription_invoice_email_async')
     @patch('Orders.invoice_service.process_monthly_subscription_settlement')
-    def test_process_expired_subscriptions_annual(self, mock_settlement, mock_email):
+    def test_process_subscription_billing_annual(self, mock_settlement, mock_email):
         """Test Celery task processes annual subscriptions"""
         print("\n" + "="*70)
         print("CELERY TASK TEST - ANNUAL SUBSCRIPTION SETTLEMENT")
@@ -945,7 +945,7 @@ class ProcessExpiredSubscriptionsTaskTestCase(TestCase):
         print(f"  Downloads Settled:  {mock_settlement.return_value['total_downloads_settled']}")
         
         # Call the task
-        result = process_expired_subscriptions()
+        result = process_subscription_billing()
         
         print(f"\nTask Execution:")
         print(f"  Task Result:        {result}")

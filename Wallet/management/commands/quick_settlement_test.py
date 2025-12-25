@@ -4,7 +4,7 @@ from datetime import datetime, date
 import pytz
 from django.utils import timezone
 from common.tasks import (
-    process_monthly_settlements, 
+    create_designer_payout_requests, 
     process_settlement_payouts,
     generate_and_send_designer_bill_async
 )
@@ -70,7 +70,7 @@ class Command(BaseCommand):
         self.stdout.write(f'\n[Step 1] Day 1 - Creating settlement requests...')
         
         with freeze_time(day1):
-            result = process_monthly_settlements()
+            result = create_designer_payout_requests()
             self.stdout.write(self.style.SUCCESS(f'✓ {result}'))
         
         # Calculate period

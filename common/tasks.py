@@ -596,9 +596,9 @@ def send_settlement_reminders(self):
         raise self.retry(exc=e, countdown=60, max_retries=3)
 
 
-@shared_task(bind=True, name='common.tasks.process_monthly_settlements')
-def process_monthly_settlements(self):
-    """Create settlement requests on day 1 of each month."""
+@shared_task(bind=True, name='common.tasks.create_designer_payout_requests')
+def create_designer_payout_requests(self):
+    """Create settlement requests for designers on day 1 of each month."""
     try:
         from datetime import datetime, date, timedelta
         import pytz
@@ -1466,14 +1466,15 @@ def generate_and_send_designer_bill_async(self, designer_id, settlement_period_s
         raise self.retry(exc=e, countdown=60, max_retries=3)
 
 
-@shared_task(bind=True, name='common.tasks.process_expired_subscriptions')
-def process_expired_subscriptions(self):
+@shared_task(bind=True, name='common.tasks.process_subscription_billing')
+def process_subscription_billing(self):
     """
-    Process subscription settlements:
+    Process subscription billing cycles:
     - Monthly subscriptions: When 30-day period ends
     - Annual subscriptions: Monthly based on purchase date (purchase_date + 30*N days)
       Example: Purchased March 14 → Settles April 14, May 14, June 14, etc.
-    Runs daily to check for subscriptions that need settlement.
+    Creates designer invoices based on subscription downloads.
+    Runs daily to check for subscriptions that need billing processing.
     """
     from datetime import timedelta, date
     from Orders.invoice_service import process_subscription_settlement, process_monthly_subscription_settlement
