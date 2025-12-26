@@ -241,8 +241,13 @@ def _draw_invoice_meta(c: canvas.Canvas, data: Dict[str, Any], page_width: float
     right_margin = 25 * mm
     col_x = page_width - right_margin
     
-    # Use "BILL" for designer, "INVOICE" for customer
-    document_title = "BILL" if invoice_type == "designer" else "INVOICE"
+    # Use "BILL" for designer, "RECEIPT" for receipt, "INVOICE" for customer
+    if invoice_type == "designer":
+        document_title = "BILL"
+    elif invoice_type == "receipt":
+        document_title = "RECEIPT"
+    else:
+        document_title = "INVOICE"
     
     c.setFont("Helvetica-Bold", 18)
     c.setFillColor(colors.black)
@@ -257,15 +262,18 @@ def _draw_invoice_meta(c: canvas.Canvas, data: Dict[str, Any], page_width: float
     meta_y = top_y - 15 * mm
     c.setFillColor(colors.black)
     
-    # Invoice Number: label on left, value on right with proper spacing
-    label_text = "Invoice Number:"
+    # Invoice/Receipt Number: label on left, value on right with proper spacing
+    if invoice_type == "receipt":
+        label_text = "Receipt Number:"
+    else:
+        label_text = "Invoice Number:"
     c.setFont("Helvetica", 9)
     c.drawString(label_start_x, meta_y, label_text)
     c.setFont("Helvetica-Bold", 9)
     c.drawRightString(value_x, meta_y, f"{inv.get('invoice_number', '')}")
     
-    # Order Number: label on left, value on right (only for customer invoices)
-    if invoice_type != "designer":  # Hide Order Number for designer bills
+    # Order Number: label on left, value on right (only for customer invoices, not receipts)
+    if invoice_type not in ["designer", "receipt"]:  # Hide Order Number for designer bills and receipts
         meta_y -= 6 * mm
         c.setFont("Helvetica", 9)
         c.drawString(label_start_x, meta_y, "Order Number:")
@@ -559,6 +567,7 @@ def _draw_totals_section(c: canvas.Canvas, data: Dict[str, Any], page_width: flo
     box_x = page_width - right_margin - box_width
     
     # For customer invoices, show subtotal, GST, and total
+    # For receipts, show only total amount (no GST breakdown)
     if invoice_type == "customer":
         gst_amount = data.get("gst_amount", 0)
         gst_percentage = data.get("gst_percentage", 18)
@@ -596,7 +605,7 @@ def _draw_totals_section(c: canvas.Canvas, data: Dict[str, Any], page_width: flo
         
         return box_y - 6 * mm
     else:
-        # For designer invoices, keep the original simple layout
+        # For designer invoices and receipts, keep the original simple layout (just total)
         box_height = 25 * mm
         box_y = start_y - box_height
 
@@ -878,78 +887,50 @@ def create_customer_invoice(order: Order) -> Invoice:
     return invoice
 
 
-def create_designer_invoice(order: Order, designer: User, breakdown: Dict[str, Any]) -> Invoice:
-    """Create and generate designer invoice for GST + Commission."""
+def create_settlement_receipt(settlement_request: 'SettlementRequest') -> Invoice:
+    """
+    Create receipt PDF for settlement.
+    Similar to customer invoice but with:
+    - Title: "Receipt" instead of "Invoice"
+    - Item: 1
+    - Description: "Brokerage"
+    - Amount: settlement_amount (original, not after TDS)
+    - No GST shown (settlement amount is net)
+    """
+    from Wallet.models import SettlementRequest
+    
     invoice = Invoice()
-    invoice.invoice_number = invoice.generate_bill_number()  # Use BILL prefix
-    invoice.invoice_type = 'designer'
-    invoice.order = order
-    invoice.user = designer
-    invoice.subtotal = breakdown['product_total']
-    invoice.gst_amount = breakdown['gst_amount']
-    invoice.commission_amount = breakdown['commission_amount']
-    invoice.total_amount = breakdown['gst_amount'] + breakdown['commission_amount']
+    invoice.invoice_number = invoice.generate_invoice_number()
+    invoice.invoice_type = 'customer'  # Use customer type but will show as Receipt
+    invoice.order = None  # No order for settlements
+    invoice.user = settlement_request.designer
+    invoice.subtotal = settlement_request.settlement_amount
+    invoice.gst_amount = Decimal('0')  # No GST on receipt
+    invoice.commission_amount = Decimal('0')
+    invoice.total_amount = settlement_request.settlement_amount
     invoice.payment_due_date = timezone.now().date()
     invoice.save()
     
-    # Prepare invoice data
+    # Prepare receipt data for PDF
     company_details = get_company_details()
-    user_address = get_user_address(designer)
+    user_address = get_user_address(settlement_request.designer)
     
-    # Calculate base amount for commission calculation display
-    base_for_commission = breakdown['product_total'] - breakdown['gst_amount']
+    # Create single item for Brokerage
+    items = [{
+        "item_no": 1,
+        "description": "Brokerage",
+        "quantity": 1,
+        "rate": float(settlement_request.settlement_amount),
+        "amount": float(settlement_request.settlement_amount),
+    }]
     
-    # Determine purchase type and plan name
-    plan_name = None
-    if order.subscription and order.subscription.plan:
-        plan_name = order.subscription.plan.plan_name  # 'basic', 'prime', or 'premium'
-    
-    # Create items based on purchase type
-    items = []
-    
-    if plan_name:
-        # Purchase with subscription - capitalize plan name
-        plan_display = plan_name.capitalize()  # 'Basic', 'Prime', or 'Premium'
-        
-        items.append({
-            "item_no": 1,
-            "description": f"GST on Designs of {plan_display} Plan",
-            "quantity": "-",
-            "rate": "-",
-            "amount": float(breakdown['gst_amount']),
-        })
-        items.append({
-            "item_no": 2,
-            "description": f"Platform Commission on {plan_display} Plan",
-            "quantity": "-",
-            "rate": "-",
-            "amount": float(breakdown['commission_amount']),
-        })
-    else:
-        # Purchase without subscription (individual design)
-        items.append({
-            "item_no": 1,
-            "description": "GST on individual design",
-            "quantity": "-",
-            "rate": "-",
-            "amount": float(breakdown['gst_amount']),
-        })
-        items.append({
-            "item_no": 2,
-            "description": "Platform Commission on individual Design after GST",
-            "quantity": "-",
-            "rate": "-",
-            "amount": float(breakdown['commission_amount']),
-        })
-    
-    invoice_data = {
+    receipt_data = {
         "invoice": {
             "invoice_number": invoice.invoice_number,
-            # Remove order_number for designer invoices
             "invoice_date": invoice.invoice_date.strftime('%B %d, %Y'),
             "payment_due_date": invoice.payment_due_date.strftime('%b %d, %Y') if invoice.payment_due_date else "",
         },
-        "invoice_type": "designer",  # Add invoice type for PDF title
+        "invoice_type": "receipt",  # Special type for receipt
         "company_details": company_details,
         "billed_to": user_address,
         "from_details": {
@@ -960,170 +941,23 @@ def create_designer_invoice(order: Order, designer: User, breakdown: Dict[str, A
         },
         "items": items,
         "currency": "Rs",
-        "total_due": float(breakdown['gst_amount'] + breakdown['commission_amount']),
+        "total_due": float(settlement_request.settlement_amount),
+        "gst_amount": 0.0,  # No GST on receipt
+        "gst_percentage": 0,
+        "subtotal": float(settlement_request.settlement_amount),
     }
     
-    invoice.invoice_data = invoice_data
+    invoice.invoice_data = receipt_data
     invoice.save()
     
     # Generate PDF
     media_root = getattr(settings, 'MEDIA_ROOT', 'media')
     invoice_dir = os.path.join(media_root, 'invoices')
-    pdf_filename = f"{invoice.invoice_number}.pdf"
+    pdf_filename = f"receipt_{invoice.invoice_number}.pdf"
     pdf_path = os.path.join(invoice_dir, pdf_filename)
     
-    generate_invoice_pdf(invoice_data, pdf_path)
-    
-    invoice.pdf_file_path = pdf_path
-    invoice.save()
-    
-    # DISABLED: Individual order invoice emails are no longer sent to designers.
-    # Designers receive monthly settlement bills which include all orders.
-    # Email sending is disabled to avoid duplicate notifications.
-    # try:
-    #     from common.tasks import send_designer_invoice_email_async
-    #     # Prepare breakdown data for serialization
-    #     breakdown_data = {
-    #         'product_total': float(breakdown['product_total']),
-    #         'gst_amount': float(breakdown['gst_amount']),
-    #         'commission_amount': float(breakdown['commission_amount']),
-    #         'wallet_amount': float(breakdown['wallet_amount']),
-    #         'product_ids': [p.id for p in breakdown['products']],  # Store product IDs to fetch in task
-    #     }
-    #     send_designer_invoice_email_async.delay(invoice.id, order.id, breakdown_data)
-    # except Exception as e:
-    #     import logging
-    #     logger = logging.getLogger(__name__)
-    #     logger.error(f'Failed to queue designer invoice email: {str(e)}', exc_info=True)
-    
-    return invoice
-
-
-def create_monthly_designer_bill(designer: User, purchase_type_breakdowns: Dict[str, Dict[str, Any]], period_start: date, period_end: date) -> Invoice:
-    """
-    Create monthly bill for designer with separate rows for each purchase type.
-    
-    Args:
-        designer: Designer user
-        purchase_type_breakdowns: Dict with keys like 'individual', 'basic', 'prime', 'premium'
-            Each value is a dict with 'gst_amount', 'commission_amount', 'product_total', 'orders'
-        period_start: Start date of billing period
-        period_end: End date of billing period
-    """
-    invoice = Invoice()
-    invoice.invoice_number = invoice.generate_bill_number()
-    invoice.invoice_type = 'designer'
-    invoice.order = None  # No single order for monthly bills
-    invoice.user = designer
-    
-    # Calculate totals
-    total_gst = sum(Decimal(str(breakdown['gst_amount'])) for breakdown in purchase_type_breakdowns.values())
-    total_commission = sum(Decimal(str(breakdown['commission_amount'])) for breakdown in purchase_type_breakdowns.values())
-    total_product_total = sum(Decimal(str(breakdown['product_total'])) for breakdown in purchase_type_breakdowns.values())
-    
-    invoice.subtotal = total_product_total
-    invoice.gst_amount = total_gst
-    invoice.commission_amount = total_commission
-    invoice.total_amount = total_gst + total_commission
-    invoice.payment_due_date = timezone.now().date()
-    invoice.save()
-    
-    # Prepare invoice data
-    company_details = get_company_details()
-    user_address = get_user_address(designer)
-    
-    # Create items for each purchase type
-    items = []
-    item_no = 1
-    
-    # Order: individual, basic, prime, premium
-    purchase_type_order = ['individual', 'basic', 'prime', 'premium']
-    
-    for purchase_type in purchase_type_order:
-        if purchase_type not in purchase_type_breakdowns:
-            continue
-            
-        breakdown = purchase_type_breakdowns[purchase_type]
-        gst_amount = float(breakdown['gst_amount'])
-        commission_amount = float(breakdown['commission_amount'])
-        design_count = breakdown.get('design_count', 0)
-        
-        # Calculate rate per design for GST
-        gst_rate_per_design = gst_amount / design_count if design_count > 0 else 0
-        
-        if gst_amount > 0:
-            if purchase_type == 'individual':
-                items.append({
-                    "item_no": item_no,
-                    "description": "GST on individual design",
-                    "quantity": design_count,  # Show actual count of designs
-                    "rate": round(gst_rate_per_design, 2),
-                    "amount": gst_amount,
-                })
-            else:
-                plan_display = purchase_type.capitalize()  # 'Basic', 'Prime', 'Premium'
-                items.append({
-                    "item_no": item_no,
-                    "description": f"GST on Designs of {plan_display} Plan",
-                    "quantity": design_count,  # Show actual count of designs
-                    "rate": round(gst_rate_per_design, 2),
-                    "amount": gst_amount,
-                })
-            item_no += 1
-        
-        # Calculate rate per design for Commission
-        commission_rate_per_design = commission_amount / design_count if design_count > 0 else 0
-        
-        if commission_amount > 0:
-            if purchase_type == 'individual':
-                items.append({
-                    "item_no": item_no,
-                    "description": "Platform Commission on individual Design after GST",
-                    "quantity": design_count,  # Show actual count of designs
-                    "rate": round(commission_rate_per_design, 2),
-                    "amount": commission_amount,
-                })
-            else:
-                plan_display = purchase_type.capitalize()
-                items.append({
-                    "item_no": item_no,
-                    "description": f"Platform Commission on {plan_display} Plan",
-                    "quantity": design_count,  # Show actual count of designs
-                    "rate": round(commission_rate_per_design, 2),
-                    "amount": commission_amount,
-                })
-            item_no += 1
-    
-    invoice_data = {
-        "invoice": {
-            "invoice_number": invoice.invoice_number,
-            "invoice_date": invoice.invoice_date.strftime('%B %d, %Y'),
-            "payment_due_date": invoice.payment_due_date.strftime('%b %d, %Y') if invoice.payment_due_date else "",
-        },
-        "invoice_type": "designer",
-        "company_details": company_details,
-        "billed_to": user_address,
-        "from_details": {
-            "sender_name": company_details.get("company_name", "WeDesignz"),
-            "sender_address_line1": company_details.get("company_address_line1", ""),
-            "sender_address_line2": company_details.get("company_address_line2", ""),
-            "sender_gst_number": company_details.get("company_gst_number", ""),
-        },
-        "items": items,
-        "currency": "Rs",
-        "total_due": float(total_gst + total_commission),
-    }
-    
-    invoice.invoice_data = invoice_data
-    invoice.save()
-    
-    # Generate PDF
-    media_root = getattr(settings, 'MEDIA_ROOT', 'media')
-    invoice_dir = os.path.join(media_root, 'invoices')
-    pdf_filename = f"{invoice.invoice_number}.pdf"
-    pdf_path = os.path.join(invoice_dir, pdf_filename)
-    
-    generate_invoice_pdf(invoice_data, pdf_path)
+    # Generate receipt PDF (same function but with receipt type)
+    generate_invoice_pdf(receipt_data, pdf_path)
     
     invoice.pdf_file_path = pdf_path
     invoice.save()
@@ -1136,8 +970,7 @@ def process_order_invoices(order: Order) -> Dict[str, Any]:
     Main function to process invoices and wallet settlements for an order.
     Called when payment is successfully captured.
     
-    Note: Designer invoices/bills are NOT created here. They are created
-    only when designers opt-in during the monthly settlement window.
+    Note: Designer invoices/bills are NOT created. Only wallet credits are processed.
     
     Returns:
         Dict with customer_invoice and wallet_transactions list
@@ -1168,121 +1001,12 @@ def process_order_invoices(order: Order) -> Dict[str, Any]:
         )
         wallet.attach_wallet_transaction(transaction)
         wallet_transactions.append(transaction)
-        
-        # NOTE: Designer invoices/bills are NOT created here.
-        # They are created only when designers opt-in during monthly settlement window
-        # via generate_and_send_designer_bill_async
     
     return {
         'customer_invoice': customer_invoice,
-        'designer_invoices': [],  # Empty list - bills created during settlement
+        'designer_invoices': [],  # No designer invoices created
         'wallet_transactions': wallet_transactions,
     }
-
-
-def create_designer_invoice_for_subscription(subscription: Subscription, designer: User, breakdown: Dict[str, Any]) -> Invoice:
-    """
-    Create and generate designer invoice (bill) for subscription settlement.
-    
-    NOTE: This function is currently NOT used during subscription settlement.
-    Designer invoices are now created only when designers opt-in during the monthly settlement window.
-    This function is kept for potential future use or manual invoice generation.
-    """
-    invoice = Invoice()
-    invoice.invoice_number = invoice.generate_invoice_number()
-    invoice.invoice_type = 'designer'
-    invoice.order = None  # No order for subscription settlements
-    invoice.subscription = subscription
-    invoice.user = designer
-    invoice.subtotal = breakdown['product_total']
-    invoice.gst_amount = breakdown['gst_amount']
-    invoice.commission_amount = breakdown['commission_amount']
-    invoice.total_amount = breakdown['gst_amount'] + breakdown['commission_amount']
-    invoice.payment_due_date = timezone.now().date()
-    invoice.save()
-    
-    # Prepare invoice data
-    company_details = get_company_details()
-    user_address = get_user_address(designer)
-    
-    # Calculate base amount for commission calculation display
-    base_for_commission = breakdown['product_total'] - breakdown['gst_amount']
-    
-    # Create more descriptive items
-    items = [
-        {
-            "item_no": 1,
-            "description": f"GST (18% on Design Sales of Rs {breakdown['product_total']:.2f})",
-            "quantity": 1,
-            "rate": float(breakdown['gst_amount']),
-            "amount": float(breakdown['gst_amount']),
-        },
-        {
-            "item_no": 2,
-            "description": f"Platform Commission on Rs {base_for_commission:.2f} after GST",
-            "quantity": "-",
-            "rate": "-",
-            "amount": float(breakdown['commission_amount']),
-        },
-    ]
-    
-    # Create subscription reference number
-    subscription_ref = f"SUB-{subscription.id}"
-    
-    invoice_data = {
-        "invoice": {
-            "invoice_number": invoice.invoice_number,
-            "order_number": subscription_ref,  # Use subscription reference instead of order number
-            "invoice_date": invoice.invoice_date.strftime('%B %d, %Y'),
-            "payment_due_date": invoice.payment_due_date.strftime('%b %d, %Y') if invoice.payment_due_date else "",
-        },
-        "invoice_type": "designer",
-        "company_details": company_details,
-        "billed_to": user_address,
-        "from_details": {
-            "sender_name": company_details.get("company_name", "WeDesignz"),
-            "sender_address_line1": company_details.get("company_address_line1", ""),
-            "sender_address_line2": company_details.get("company_address_line2", ""),
-            "sender_gst_number": company_details.get("company_gst_number", ""),
-        },
-        "items": items,
-        "currency": "Rs",
-        "total_due": float(breakdown['gst_amount'] + breakdown['commission_amount']),
-    }
-    
-    invoice.invoice_data = invoice_data
-    invoice.save()
-    
-    # Generate PDF
-    media_root = getattr(settings, 'MEDIA_ROOT', 'media')
-    invoice_dir = os.path.join(media_root, 'invoices')
-    pdf_filename = f"{invoice.invoice_number}.pdf"
-    pdf_path = os.path.join(invoice_dir, pdf_filename)
-    
-    generate_invoice_pdf(invoice_data, pdf_path)
-    
-    invoice.pdf_file_path = pdf_path
-    invoice.save()
-    
-    # Send email to designer asynchronously
-    try:
-        from common.tasks import send_designer_subscription_invoice_email_async
-        # Prepare breakdown data for serialization
-        breakdown_data = {
-            'product_total': float(breakdown['product_total']),
-            'gst_amount': float(breakdown['gst_amount']),
-            'commission_amount': float(breakdown['commission_amount']),
-            'wallet_amount': float(breakdown['wallet_amount']),
-            'download_count': breakdown.get('download_count', 0),
-            'product_ids': [p.id for p in breakdown['products']],
-        }
-        send_designer_subscription_invoice_email_async.delay(invoice.id, subscription.id, breakdown_data)
-    except Exception as e:
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.error(f'Failed to queue designer subscription invoice email: {str(e)}', exc_info=True)
-    
-    return invoice
 
 
 def process_monthly_subscription_settlement(
@@ -1400,8 +1124,7 @@ def process_monthly_subscription_settlement(
         breakdown['wallet_amount'] = extracted['base_amount']  # Base amount goes to wallet
     
     # Process settlements for each designer
-    # NOTE: Designer invoices/bills are NOT created here. They are created
-    # only when designers opt-in during the monthly settlement window.
+    # NOTE: Designer invoices/bills are NOT created. Only wallet credits are processed.
     wallet_transactions = []
     
     for designer_id, breakdown in designer_breakdown.items():
@@ -1456,7 +1179,7 @@ def process_monthly_subscription_settlement(
             }
             for designer_id, breakdown in designer_breakdown.items()
         },
-        'designer_invoices': [inv.id for inv in designer_invoices],
+        'designer_invoices': [],  # No designer invoices created
         'wallet_transactions': [txn.id for txn in wallet_transactions],
     }
 
@@ -1561,8 +1284,7 @@ def process_subscription_settlement(subscription: Subscription) -> Dict[str, Any
         breakdown['wallet_amount'] = extracted['base_amount']  # Base amount goes to wallet
     
     # Process settlements for each designer
-    # NOTE: Designer invoices/bills are NOT created here. They are created
-    # only when designers opt-in during the monthly settlement window.
+    # NOTE: Designer invoices/bills are NOT created. Only wallet credits are processed.
     wallet_transactions = []
     
     for designer_id, breakdown in designer_breakdown.items():

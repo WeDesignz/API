@@ -32,4 +32,5 @@ urlpatterns = [
     path('admin/settlements/<int:settlement_id>/status/', views.update_settlement_status, name='update_settlement_status'),
     path('admin/settlements/bulk-update/', views.bulk_update_settlement_status, name='bulk_update_settlement_status'),
     path('admin/settlements/', views.list_settlements, name='list_settlements'),
+    path('admin/tds/', views.list_tds_records, name='list_tds_records'),
 ]

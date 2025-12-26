@@ -8,6 +8,7 @@ from django.contrib.auth.models import User
 from django.core.mail import send_mail
 from django.conf import settings
 from django.utils import timezone
+from django.db import IntegrityError
 from datetime import timedelta
 import random
 import string
@@ -796,6 +797,41 @@ def add_mobile_number(request):
         if serializer.is_valid():
             mobile_number = serializer.validated_data['mobile_number']
             
+            # Check if mobile number already exists (globally unique)
+            try:
+                existing_mobile = MobileNumber.objects.get(mobile_number=mobile_number)
+                
+                # If it exists and belongs to current user, just send OTP
+                if existing_mobile.created_by == request.user:
+                    # Generate and send OTP
+                    otp = generate_otp()
+                    expires_at = timezone.now() + timedelta(minutes=10)
+                    
+                    OTP.objects.create(
+                        otp=otp,
+                        otp_type='M',
+                        otp_for='mobile_verification',
+                        expires_at=expires_at,
+                        created_by=request.user
+                    )
+                    
+                    # Send OTP via WhatsApp
+                    send_otp_sms(mobile_number, otp, "Mobile Verification")
+                    
+                    return Response({
+                        'message': 'OTP sent to your mobile number.',
+                        'mobile_number': mobile_number
+                    }, status=status.HTTP_200_OK)
+                else:
+                    # Mobile number exists but belongs to another user
+                    return Response({
+                        'error': 'This mobile number is already registered with another account.'
+                    }, status=status.HTTP_400_BAD_REQUEST)
+                    
+            except MobileNumber.DoesNotExist:
+                # Mobile number doesn't exist, create it
+                pass
+            
             # Check if user already has mobile numbers
             existing_mobiles = MobileNumber.objects.filter(created_by=request.user)
             is_first_mobile = existing_mobiles.count() == 0
@@ -846,6 +882,13 @@ def add_mobile_number(request):
             'error': error_message or 'Invalid mobile number. Please check your input and try again.',
             'errors': serializer.errors
         }, status=status.HTTP_400_BAD_REQUEST)
+    except IntegrityError as e:
+        # Handle unique constraint violation more gracefully
+        if 'mobile_number' in str(e):
+            return Response({
+                'error': 'This mobile number is already registered. Please use a different number or verify the existing one.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        raise
     except Exception as e:
         import traceback
         import logging

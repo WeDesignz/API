@@ -1,6 +1,7 @@
 from django.db import models
 from django.contrib.auth.models import User
 from common.relations import attach_relation, get_related_ids, get_related, detach_relation
+from decimal import Decimal
 
 
 class Wallet(models.Model):
@@ -185,3 +186,35 @@ class SettlementRequest(models.Model):
         """Set the related designer via relation system"""
         from common.relations import attach_relation
         attach_relation('User:SettlementRequest', designer, self)
+
+
+class SettlementTDS(models.Model):
+    """
+    Model to track TDS (Tax Deducted at Source) for settlements.
+    TDS percentage:
+    - 2% if designer has PAN card
+    - 20% if designer doesn't have PAN card
+    """
+    settlement_request = models.OneToOneField(
+        SettlementRequest,
+        on_delete=models.CASCADE,
+        related_name='tds_record'
+    )
+    settlement_amount = models.DecimalField(max_digits=10, decimal_places=2)
+    tds_percentage = models.DecimalField(max_digits=5, decimal_places=2)  # 2.00 or 20.00
+    tds_amount = models.DecimalField(max_digits=10, decimal_places=2)
+    net_amount = models.DecimalField(max_digits=10, decimal_places=2)  # Amount after TDS
+    has_pan = models.BooleanField(default=False, help_text='Whether designer has PAN card')
+    pan_number = models.CharField(max_length=20, blank=True, null=True, help_text='PAN number if available')
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        db_table = 'settlement_tds'
+        verbose_name = 'Settlement TDS'
+        verbose_name_plural = 'Settlement TDS Records'
+        ordering = ['-created_at']
+    
+    def __str__(self):
+        return f"TDS for Settlement {self.settlement_request.id} - {self.tds_percentage}% - ₹{self.tds_amount}"
