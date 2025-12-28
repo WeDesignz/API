@@ -1330,6 +1330,44 @@ def process_subscription_billing(self):
         raise self.retry(exc=e, countdown=60, max_retries=3)
 
 
+@shared_task(bind=True, name='common.tasks.send_design_rejection_email_async')
+def send_design_rejection_email_async(self, product_id, rejection_reason=None):
+    """Send email notification to designer when their design is rejected, asynchronously."""
+    try:
+        from Catalog.models import Product
+        from django.contrib.auth.models import User
+        
+        # Get the product with related user
+        try:
+            product = Product.objects.select_related('created_by', 'category').get(id=product_id)
+        except Product.DoesNotExist:
+            logger.error(f"Product {product_id} not found for rejection email")
+            return f"Product {product_id} not found"
+        
+        # Get the designer (user who created the design)
+        designer = product.created_by
+        if not designer or not designer.email:
+            logger.warning(f"Designer or email not found for product {product_id}")
+            return f"Designer or email not found for product {product_id}"
+        
+        # Send rejection email using EmailService
+        try:
+            EmailService.send_design_rejected_email(
+                user=designer,
+                design=product,
+                feedback_message=rejection_reason
+            )
+            logger.info(f"Design rejection email sent successfully to {designer.email} for product {product_id}")
+            return f"Rejection email sent to {designer.email}"
+        except Exception as e:
+            logger.error(f"Failed to send design rejection email to {designer.email} for product {product_id}: {str(e)}", exc_info=True)
+            raise self.retry(exc=e, countdown=60, max_retries=3)
+            
+    except Exception as e:
+        logger.error(f"Error in send_design_rejection_email_async for product {product_id}: {str(e)}", exc_info=True)
+        raise self.retry(exc=e, countdown=60, max_retries=3)
+
+
 @shared_task(bind=True, name='common.tasks.send_design_sale_notification_async')
 def send_design_sale_notification_async(self, order_id):
     """Send notification to designer when their design is sold, asynchronously."""

@@ -571,8 +571,12 @@ class AddMobileNumberSerializer(serializers.Serializer):
         request = self.context.get('request') if self.context else None
         user = request.user if request and hasattr(request, 'user') else None
         if user:
-            if MobileNumber.objects.filter(mobile_number=value, created_by=user).exists():
-                raise serializers.ValidationError("This mobile number is already associated with your account.")
+            # Check if mobile number exists for another user (not the current user)
+            # Allow re-verification if it exists for the current user (handled in view)
+            existing_mobile = MobileNumber.objects.filter(mobile_number=value).exclude(created_by=user).first()
+            if existing_mobile:
+                raise serializers.ValidationError("This mobile number is already registered with another account.")
+            # If it exists for the current user, allow it (for re-verification during onboarding)
         else:
             # Fallback: check global uniqueness if no user context
             if MobileNumber.objects.filter(mobile_number=value).exists():

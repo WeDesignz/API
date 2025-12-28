@@ -582,8 +582,14 @@ class DesignApproval(models.Model):
                 logger.error(f'[reject_design] Error updating product status: {str(e)}', exc_info=True)
                 return False
             
-            # TODO: Send notification to designer (async - don't block)
-            # TODO: Send email notification (async - don't block)
+            # Send email notification to designer (async - don't block)
+            try:
+                from common.tasks import send_design_rejection_email_async
+                send_design_rejection_email_async.delay(self.product_id, rejection_reason)
+                logger.info(f'[reject_design] Queued rejection email for product {self.product_id}')
+            except Exception as e:
+                # Don't fail rejection if email queuing fails
+                logger.warning(f'[reject_design] Failed to queue rejection email: {str(e)}', exc_info=True)
             
             logger.info(f'[reject_design] Design rejected successfully: product_id={self.product_id}')
             return True
