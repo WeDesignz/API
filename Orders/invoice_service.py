@@ -266,7 +266,7 @@ def _draw_invoice_meta(c: canvas.Canvas, data: Dict[str, Any], page_width: float
     if invoice_type == "receipt":
         label_text = "Receipt Number:"
     else:
-        label_text = "Invoice Number:"
+    label_text = "Invoice Number:"
     c.setFont("Helvetica", 9)
     c.drawString(label_start_x, meta_y, label_text)
     c.setFont("Helvetica-Bold", 9)
@@ -914,7 +914,7 @@ def create_settlement_receipt(settlement_request: 'SettlementRequest') -> Invoic
     # Prepare receipt data for PDF
     company_details = get_company_details()
     user_address = get_user_address(settlement_request.designer)
-    
+        
     # Create single item for Brokerage
     items = [{
         "item_no": 1,
