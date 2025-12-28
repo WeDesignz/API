@@ -190,7 +190,6 @@ Tasks are defined in:
 - **`expire_coupons`** - Mark expired coupons as inactive
 - **`weekly_database_backup`** - Create weekly database backup with media files
 - **`mark_inactive_accounts_for_deletion`** - Mark deactivated accounts for deletion after 6 months
-- **`process_custom_order_timeouts`** - Process custom orders that have exceeded time limit
 - **`send_subscription_expiry_reminders`** - Send reminders for subscriptions expiring soon
 - **`send_bulk_emails`** - Send bulk emails to specific users
 - **`generate_reports`** - Generate various reports
@@ -237,7 +236,6 @@ Periodic tasks are scheduled using Celery Beat and stored in the database via `d
 | Task | Schedule | Description |
 |------|----------|-------------|
 | `cleanup-expired-otps` | Every 5 minutes | Clean up expired OTPs |
-| `process-custom-order-timeouts` | Every 5 minutes | Process custom order timeouts |
 | `update-subscription-status` | Every hour | Update subscription status |
 | `send-auto-mandate-notifications` | Every hour | Send auto-mandate notifications |
 | `daily-database-backup` | Every day at 2 AM | Create daily database backup |

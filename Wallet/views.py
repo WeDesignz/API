@@ -11,7 +11,7 @@ from django.utils import timezone
 from django.http import HttpResponse
 from django.contrib.auth.models import User
 import logging
-from .models import Wallet, WalletTransaction, WalletWithdrawalRequest, SettlementRequest
+from .models import Wallet, WalletTransaction, WalletWithdrawalRequest, SettlementRequest, SettlementTDS
 from .serializers import (
     WalletSerializer, WalletTransactionSerializer, WalletWithdrawalRequestSerializer
 )
@@ -22,6 +22,70 @@ import io
 from datetime import datetime, date
 import pytz
 from decimal import Decimal
+from typing import Dict, Any
+
+
+def calculate_settlement_tds(settlement_request: SettlementRequest) -> Dict[str, Any]:
+    """
+    Calculate TDS for a settlement based on PAN card availability.
+    
+    TDS Rules:
+    - 2% if designer has PAN card
+    - 20% if designer doesn't have PAN card
+    
+    Returns:
+        Dict with:
+        - has_pan: bool
+        - pan_number: str or None
+        - tds_percentage: Decimal (2.00 or 20.00)
+        - tds_amount: Decimal
+        - net_amount: Decimal
+    """
+    from Profiles.models import Studio, StudioBusinessDetails
+    
+    settlement_amount = Decimal(str(settlement_request.settlement_amount))
+    
+    # Get designer
+    designer = settlement_request.designer
+    if not designer:
+        # Default to 20% if designer not found
+        tds_percentage = Decimal('20.00')
+        has_pan = False
+        pan_number = None
+    else:
+        # Check for PAN card in StudioBusinessDetails
+        studio = Studio.objects.filter(created_by=designer).first()
+        pan_number = None
+        has_pan = False
+        
+        if studio:
+            business_details = StudioBusinessDetails.objects.filter(studio=studio).first()
+            if business_details:
+                # Check if PAN number exists
+                if business_details.pan_number:
+                    pan_number = business_details.pan_number.strip()
+                    has_pan = bool(pan_number)  # PAN exists if pan_number is not empty
+                # Also check if pan_card URL exists (even without pan_number)
+                elif business_details.pan_card:
+                    has_pan = True
+        
+        # Determine TDS percentage
+        if has_pan:
+            tds_percentage = Decimal('2.00')
+        else:
+            tds_percentage = Decimal('20.00')
+    
+    # Calculate TDS amount
+    tds_amount = (settlement_amount * tds_percentage) / Decimal('100')
+    net_amount = settlement_amount - tds_amount
+    
+    return {
+        'has_pan': has_pan,
+        'pan_number': pan_number,
+        'tds_percentage': tds_percentage,
+        'tds_amount': tds_amount,
+        'net_amount': net_amount,
+    }
 
 
 @swagger_auto_schema(
@@ -992,24 +1056,8 @@ def accept_settlement(request):
         settlement_request.status = 'opted_in'
         settlement_request.save()
         
-        # Schedule async task to generate and send monthly bill
-        try:
-            from common.tasks import generate_and_send_designer_bill_async
-            import logging
-            logger = logging.getLogger(__name__)
-            
-            generate_and_send_designer_bill_async.delay(
-                designer_id=request.user.id,
-                settlement_period_start=settlement_request.settlement_period_start.isoformat(),
-                settlement_period_end=settlement_request.settlement_period_end.isoformat(),
-                settlement_request_id=settlement_request.id
-            )
-            logger.info(f"Scheduled bill generation task for designer {request.user.id} for settlement {settlement_request.id}")
-        except Exception as e:
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.error(f'Failed to queue bill generation task for designer {request.user.id}: {str(e)}', exc_info=True)
-            # Don't fail the settlement opt-in if bill generation fails
+        # No bill generation - settlement only processes wallet credits
+        # Designers receive wallet transaction emails when credits are added
         
         return Response({
             'message': 'Settlement accepted successfully',
@@ -1290,11 +1338,16 @@ def download_settlement_sheet(request):
                 'error': 'Invalid format. Use "csv" or "xlsx"'
             }, status=status.HTTP_400_BAD_REQUEST)
         
-        # Build query
-        queryset = SettlementRequest.objects.all()
+        # Build query - only include settlements from Day 6 onwards (processing, completed, failed)
+        # These are settlements that have been processed and are ready for payout
+        queryset = SettlementRequest.objects.filter(
+            status__in=['processing', 'completed', 'failed']
+        )
         
         if status_filter:
-            queryset = queryset.filter(status=status_filter)
+            # Only allow filtering by processing, completed, or failed
+            if status_filter in ['processing', 'completed', 'failed']:
+                queryset = queryset.filter(status=status_filter)
         
         if period_start_str:
             try:
@@ -1335,9 +1388,16 @@ def download_settlement_sheet(request):
         # Order by settlement period and designer ID
         queryset = queryset.order_by('-settlement_period_start', 'designer_id')
         
+        # Get remitter details from .env
+        import os
+        from django.conf import settings
+        remitter_account_no = os.getenv('Remitter_Account_No', '')
+        remitter_name = os.getenv('Remitter_Name', '')
+        
         # Prepare data
         settlement_data = []
         total_amount = Decimal('0.00')
+        total_net_amount = Decimal('0.00')
         
         for settlement in queryset:
             try:
@@ -1345,6 +1405,22 @@ def download_settlement_sheet(request):
                 designer = settlement.designer
                 if not designer:
                     continue
+                
+                # Calculate TDS
+                tds_info = calculate_settlement_tds(settlement)
+                
+                # Create or update TDS record
+                tds_record, created = SettlementTDS.objects.get_or_create(
+                    settlement_request=settlement,
+                    defaults={
+                        'settlement_amount': settlement.settlement_amount,
+                        'tds_percentage': tds_info['tds_percentage'],
+                        'tds_amount': tds_info['tds_amount'],
+                        'net_amount': tds_info['net_amount'],
+                        'has_pan': tds_info['has_pan'],
+                        'pan_number': tds_info['pan_number'],
+                    }
+                )
                 
                 # Get bank details from StudioBusinessDetails
                 from Profiles.models import Studio, StudioBusinessDetails
@@ -1360,50 +1436,19 @@ def download_settlement_sheet(request):
                         bank_ifsc_code = business_details.bank_ifsc_code or ''
                         bank_account_holder_name = business_details.bank_account_holder_name or ''
                 
-                # Mask account number for security (show last 4 digits)
-                if bank_account_number:
-                    if len(bank_account_number) > 4:
-                        masked_account = '****' + bank_account_number[-4:]
-                    else:
-                        masked_account = '****'
-                else:
-                    masked_account = 'N/A'
-                
-                # Get designer contact info
-                designer_email = designer.email if hasattr(designer, 'email') else ''
-                designer_phone = ''
-                try:
-                    from Authentication.models import MobileNumber
-                    mobile_numbers = get_related(designer, 'User:MobileNumber', MobileNumber)
-                    if mobile_numbers.exists():
-                        mobile = mobile_numbers.first()
-                        designer_phone = str(mobile.mobile_number) if hasattr(mobile, 'mobile_number') else ''
-                except:
-                    pass
-                
-                # Format period
-                period_str = f"{settlement.settlement_period_start.strftime('%b %d, %Y')} - {settlement.settlement_period_end.strftime('%b %d, %Y')}"
-                
+                # Add settlement data with new columns
                 settlement_data.append({
-                    'Settlement ID': settlement.id,
-                    'Designer ID': designer.id,
-                    'Designer Name': f"{designer.first_name} {designer.last_name}".strip() or designer.username,
-                    'Email': designer_email,
-                    'Phone': designer_phone,
-                    'Account Holder Name': bank_account_holder_name or 'N/A',
-                    'Account Number': masked_account,
-                    'IFSC Code': bank_ifsc_code or 'N/A',
-                    'Settlement Period': period_str,
-                    'Settlement Amount (₹)': float(settlement.settlement_amount),
-                    'Status': settlement.get_status_display(),
-                    'Opted In': 'Yes' if settlement.opted_in else 'No',
-                    'Opted In At': settlement.opted_in_at.strftime('%Y-%m-%d %H:%M:%S') if settlement.opted_in_at else 'N/A',
-                    'Settlement Date': settlement.settlement_date.strftime('%Y-%m-%d') if settlement.settlement_date else 'N/A',
-                    'Failure Reason': settlement.failure_reason or 'N/A',
-                    'Created At': settlement.created_at.strftime('%Y-%m-%d %H:%M:%S'),
+                    'Remitter_Account_No': remitter_account_no,
+                    'Remitter_Name': remitter_name,
+                    'IFSC_Code': bank_ifsc_code or 'N/A',
+                    'Amount': float(tds_info['net_amount']),  # Amount after TDS
+                    'Bank_Account_Number': bank_account_number or 'N/A',
+                    'Beneficiary_Name': bank_account_holder_name or 'N/A',
+                    'Beneficiary LEI Code': '',  # Always empty
                 })
                 
                 total_amount += Decimal(str(settlement.settlement_amount))
+                total_net_amount += tds_info['net_amount']
                 
             except Exception as e:
                 import logging
@@ -1417,9 +1462,9 @@ def download_settlement_sheet(request):
         
         # Generate file
         if file_format == 'csv':
-            return _generate_csv_response(settlement_data, filename, total_amount)
+            return _generate_csv_response(settlement_data, filename, total_net_amount)
         else:
-            return _generate_excel_response(settlement_data, filename, total_amount)
+            return _generate_excel_response(settlement_data, filename, total_net_amount)
     
     except Exception as e:
         import logging
@@ -1450,7 +1495,11 @@ def _generate_csv_response(settlement_data, filename, total_amount):
     
     # Write summary
     writer.writerow({})
-    writer.writerow({'Settlement ID': 'SUMMARY', 'Designer Name': f'Total Settlements: {len(settlement_data)}', 'Settlement Amount (₹)': f'Total Amount: ₹{float(total_amount):.2f}'})
+    writer.writerow({
+        'Remitter_Account_No': 'SUMMARY',
+        'Remitter_Name': f'Total Settlements: {len(settlement_data)}',
+        'Amount': f'Total Net Amount: ₹{float(total_amount):.2f}'
+    })
     
     return response
 
@@ -1515,8 +1564,12 @@ def _generate_excel_response(settlement_data, filename, total_amount):
         ws.cell(row=summary_row, column=2, value=f'Total Settlements: {len(settlement_data)}').font = Font(bold=True)
         
         # Find the amount column
-        amount_col = headers.index('Settlement Amount (₹)') + 1
-        ws.cell(row=summary_row, column=amount_col, value=f'Total Amount: ₹{float(total_amount):.2f}').font = Font(bold=True)
+        try:
+            amount_col = headers.index('Amount') + 1
+            ws.cell(row=summary_row, column=amount_col, value=f'Total Net Amount: ₹{float(total_amount):.2f}').font = Font(bold=True)
+        except ValueError:
+            # If Amount column not found, just write summary
+            pass
         
         # Auto-adjust column widths
         for col_num, header in enumerate(headers, 1):
@@ -1662,6 +1715,16 @@ def update_settlement_status(request, settlement_id):
     
     settlement.save()
     
+    # If status is 'completed', generate and send receipt
+    if new_status == 'completed':
+        try:
+            from common.tasks import send_settlement_receipt_email_async
+            send_settlement_receipt_email_async.delay(settlement.id)
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f'Failed to queue receipt email for settlement {settlement_id}: {str(e)}', exc_info=True)
+    
     # Log activity
     try:
         from CoreAdmin.models import AdminActivityLog
@@ -1805,6 +1868,16 @@ def bulk_update_settlement_status(request):
             
             settlement.save()
             updated_count += 1
+            
+            # If status is 'completed', generate and send receipt
+            if new_status == 'completed':
+                try:
+                    from common.tasks import send_settlement_receipt_email_async
+                    send_settlement_receipt_email_async.delay(settlement.id)
+                except Exception as e:
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.error(f'Failed to queue receipt email for settlement {settlement_id}: {str(e)}', exc_info=True)
             
         except SettlementRequest.DoesNotExist:
             failed_updates.append(f"Settlement {settlement_id} not found")
@@ -2028,6 +2101,135 @@ def list_settlements(request):
                 'limit': page_size,  # Added for compatibility
                 'total': total_count,  # Frontend expects 'total'
                 'total_count': total_count,  # Keep for backward compatibility
+                'total_pages': (total_count + page_size - 1) // page_size
+            }
+        }
+    })
+
+
+@swagger_auto_schema(
+    method='get',
+    operation_summary='List TDS Records',
+    operation_description='Get list of TDS records with filtering (Admin only).',
+    manual_parameters=[
+        openapi.Parameter(
+            'month',
+            openapi.IN_QUERY,
+            description='Filter by month (1-12)',
+            type=openapi.TYPE_INTEGER
+        ),
+        openapi.Parameter(
+            'year',
+            openapi.IN_QUERY,
+            description='Filter by year',
+            type=openapi.TYPE_INTEGER
+        ),
+        openapi.Parameter(
+            'page',
+            openapi.IN_QUERY,
+            description='Page number',
+            type=openapi.TYPE_INTEGER
+        ),
+        openapi.Parameter(
+            'page_size',
+            openapi.IN_QUERY,
+            description='Number of items per page',
+            type=openapi.TYPE_INTEGER
+        )
+    ],
+    responses={
+        200: openapi.Response(description='TDS records retrieved successfully'),
+        403: openapi.Response(description='Access denied - Admin privileges required')
+    },
+    tags=['Wallet Admin']
+)
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+@admin_required()
+def list_tds_records(request):
+    """
+    Get list of TDS records with filtering.
+    Admin-only endpoint to view TDS deductions per settlement.
+    """
+    month_filter = request.GET.get('month')
+    year_filter = request.GET.get('year')
+    page = int(request.GET.get('page', 1))
+    page_size = int(request.GET.get('page_size', 20))
+    
+    queryset = SettlementTDS.objects.select_related('settlement_request').all()
+    
+    # Filter by month and year if provided
+    if month_filter and year_filter:
+        try:
+            month = int(month_filter)
+            year = int(year_filter)
+            # Filter by settlement period start month and year
+            queryset = queryset.filter(
+                settlement_request__settlement_period_start__year=year,
+                settlement_request__settlement_period_start__month=month
+            )
+        except ValueError:
+            return Response({
+                'error': 'Invalid month or year format'
+            }, status=status.HTTP_400_BAD_REQUEST)
+    elif year_filter:
+        try:
+            year = int(year_filter)
+            queryset = queryset.filter(
+                settlement_request__settlement_period_start__year=year
+            )
+        except ValueError:
+            return Response({
+                'error': 'Invalid year format'
+            }, status=status.HTTP_400_BAD_REQUEST)
+    
+    # Order by creation date (newest first)
+    queryset = queryset.order_by('-created_at')
+    
+    # Pagination
+    total_count = queryset.count()
+    start = (page - 1) * page_size
+    end = start + page_size
+    tds_page = queryset[start:end]
+    
+    # Serialize TDS records with settlement and designer information
+    tds_data = []
+    for tds in tds_page:
+        settlement = tds.settlement_request
+        designer = settlement.designer
+        designer_name = ''
+        designer_email = ''
+        
+        if designer:
+            designer_name = f"{designer.first_name} {designer.last_name}".strip() or designer.username or ''
+            designer_email = designer.email if hasattr(designer, 'email') else ''
+        
+        tds_data.append({
+            'id': tds.id,
+            'settlement_id': settlement.id,
+            'designer_id': settlement.designer_id,
+            'designer_name': designer_name,
+            'designer_email': designer_email,
+            'settlement_period_start': settlement.settlement_period_start.isoformat(),
+            'settlement_period_end': settlement.settlement_period_end.isoformat(),
+            'settlement_amount': float(tds.settlement_amount),
+            'has_pan': tds.has_pan,
+            'pan_number': tds.pan_number or '',
+            'tds_percentage': float(tds.tds_percentage),
+            'tds_amount': float(tds.tds_amount),
+            'net_amount': float(tds.net_amount),
+            'created_at': tds.created_at.isoformat(),
+        })
+    
+    return Response({
+        'data': {
+            'data': tds_data,
+            'pagination': {
+                'page': page,
+                'page_size': page_size,
+                'limit': page_size,
+                'total': total_count,
+                'total_count': total_count,
                 'total_pages': (total_count + page_size - 1) // page_size
             }
         }

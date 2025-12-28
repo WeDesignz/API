@@ -17,7 +17,7 @@ from Plans.models import Subscription, Plan
 from Coupons.models import Coupon, CouponUsage
 from Orders.models import Order, Cart, Invoice
 from CustomRequests.models import CustomOrderRequest
-from Wallet.models import WalletWithdrawalRequest
+from Wallet.models import WalletWithdrawalRequest, SettlementRequest
 from Profiles.models import Studio, StudioMember
 from Catalog.models import Product
 from django.template.loader import render_to_string
@@ -596,9 +596,9 @@ def send_settlement_reminders(self):
         raise self.retry(exc=e, countdown=60, max_retries=3)
 
 
-@shared_task(bind=True, name='common.tasks.process_monthly_settlements')
-def process_monthly_settlements(self):
-    """Create settlement requests on day 1 of each month."""
+@shared_task(bind=True, name='common.tasks.create_designer_payout_requests')
+def create_designer_payout_requests(self):
+    """Create settlement requests for designers on day 1 of each month."""
     try:
         from datetime import datetime, date, timedelta
         import pytz
@@ -1169,311 +1169,40 @@ def send_customer_invoice_email_async(self, invoice_id, order_id):
         raise self.retry(exc=e, countdown=60, max_retries=3)
 
 
-@shared_task(bind=True, name='common.tasks.send_designer_invoice_email_async')
-def send_designer_invoice_email_async(self, invoice_id, order_id, breakdown_data):
-    """Send designer invoice (bill) email asynchronously."""
+@shared_task(bind=True, name='common.tasks.send_settlement_receipt_email_async')
+def send_settlement_receipt_email_async(self, settlement_id):
+    """Send settlement receipt email asynchronously."""
     try:
-        invoice = Invoice.objects.select_related('user', 'order').get(id=invoice_id)
-        order = Order.objects.select_related('created_by').get(id=order_id)
+        from Wallet.models import SettlementRequest
+        from Orders.invoice_service import create_settlement_receipt
         
-        # Reconstruct breakdown dict from serialized data
-        # breakdown_data should contain: product_total, gst_amount, commission_amount, wallet_amount, product_ids
-        from decimal import Decimal
-        breakdown = {
-            'product_total': Decimal(str(breakdown_data['product_total'])),
-            'gst_amount': Decimal(str(breakdown_data['gst_amount'])),
-            'commission_amount': Decimal(str(breakdown_data['commission_amount'])),
-            'wallet_amount': Decimal(str(breakdown_data['wallet_amount'])),
-        }
+        settlement = SettlementRequest.objects.select_related().get(id=settlement_id)
         
-        # Fetch products from IDs
-        if 'product_ids' in breakdown_data:
-            product_ids = breakdown_data['product_ids']
-            products = Product.objects.filter(id__in=product_ids)
-            breakdown['products'] = list(products)
-        else:
-            breakdown['products'] = []
+        # Create receipt
+        invoice = create_settlement_receipt(settlement)
         
         # Send email
-        EmailService.send_designer_invoice_email(invoice, order, breakdown)
-        logger.info(f"Designer invoice email sent for invoice {invoice_id}")
-        return f"Designer invoice email sent for invoice {invoice_id}"
+        EmailService.send_settlement_receipt_email(invoice, settlement)
+        logger.info(f"Settlement receipt email sent for settlement {settlement_id}")
+        return f"Settlement receipt email sent for settlement {settlement_id}"
         
-    except Invoice.DoesNotExist:
-        logger.error(f"Invoice {invoice_id} not found")
-        return f"Invoice {invoice_id} not found"
-    except Order.DoesNotExist:
-        logger.error(f"Order {order_id} not found")
-        return f"Order {order_id} not found"
+    except SettlementRequest.DoesNotExist:
+        logger.error(f"Settlement {settlement_id} not found")
+        return f"Settlement {settlement_id} not found"
     except Exception as e:
-        logger.error(f"Failed to send designer invoice email for invoice {invoice_id}: {str(e)}", exc_info=True)
+        logger.error(f"Failed to send settlement receipt email for settlement {settlement_id}: {str(e)}", exc_info=True)
         raise self.retry(exc=e, countdown=60, max_retries=3)
 
 
-@shared_task(bind=True, name='common.tasks.send_designer_subscription_invoice_email_async')
-def send_designer_subscription_invoice_email_async(self, invoice_id, subscription_id, breakdown_data):
-    """Send designer subscription invoice (bill) email asynchronously."""
-    try:
-        invoice = Invoice.objects.select_related('user', 'subscription').get(id=invoice_id)
-        subscription = Subscription.objects.select_related('plan', 'created_by').get(id=subscription_id)
-        
-        # Reconstruct breakdown dict from serialized data
-        from decimal import Decimal
-        breakdown = {
-            'product_total': Decimal(str(breakdown_data['product_total'])),
-            'gst_amount': Decimal(str(breakdown_data['gst_amount'])),
-            'commission_amount': Decimal(str(breakdown_data['commission_amount'])),
-            'wallet_amount': Decimal(str(breakdown_data['wallet_amount'])),
-            'download_count': breakdown_data.get('download_count', 0),
-        }
-        
-        # Fetch products from IDs
-        if 'product_ids' in breakdown_data:
-            product_ids = breakdown_data['product_ids']
-            products = Product.objects.filter(id__in=product_ids)
-            breakdown['products'] = list(products)
-        else:
-            breakdown['products'] = []
-        
-        # Send email - we'll need to modify EmailService to handle subscription invoices
-        # For now, use the same email service but with subscription context
-        EmailService.send_designer_invoice_email(invoice, None, breakdown)  # Pass None for order
-        logger.info(f"Designer subscription invoice email sent for invoice {invoice_id}")
-        return f"Designer subscription invoice email sent for invoice {invoice_id}"
-        
-    except Invoice.DoesNotExist:
-        logger.error(f"Invoice {invoice_id} not found")
-        return f"Invoice {invoice_id} not found"
-    except Subscription.DoesNotExist:
-        logger.error(f"Subscription {subscription_id} not found")
-        return f"Subscription {subscription_id} not found"
-    except Exception as e:
-        logger.error(f"Failed to send designer subscription invoice email for invoice {invoice_id}: {str(e)}", exc_info=True)
-        raise self.retry(exc=e, countdown=60, max_retries=3)
-
-
-@shared_task(bind=True, name='common.tasks.generate_and_send_designer_bill_async')
-def generate_and_send_designer_bill_async(self, designer_id, settlement_period_start, settlement_period_end, settlement_request_id):
+@shared_task(bind=True, name='common.tasks.process_subscription_billing')
+def process_subscription_billing(self):
     """
-    Generate monthly designer bill and send via email when designer opts in for settlement.
-    This task is triggered when a designer accepts settlement during the settlement window.
-    """
-    try:
-        from django.contrib.auth.models import User
-        from Orders.models import Order, Invoice
-        from Orders.invoice_service import create_monthly_designer_bill, calculate_order_breakdown
-        from datetime import date
-        from collections import defaultdict
-        from decimal import Decimal
-        
-        designer = User.objects.get(id=designer_id)
-        period_start = date.fromisoformat(settlement_period_start)
-        period_end = date.fromisoformat(settlement_period_end)
-        
-        logger.info(f"Generating monthly bill for designer {designer_id} for period {period_start} to {period_end}")
-        
-        # Get all successful orders up to period_end (not just in period)
-        # We need to check which ones have unsettled wallet transactions
-        from Wallet.models import WalletTransaction
-        from datetime import datetime, time
-        import pytz
-        
-        kolkata_tz = pytz.timezone('Asia/Kolkata')
-        period_end_datetime = kolkata_tz.localize(
-            datetime.combine(period_end, time.max)
-        )
-        
-        # Get all orders up to period_end
-        all_orders = Order.objects.filter(
-            status='success',
-            created_at__date__lte=period_end
-        ).exclude(product_ids__isnull=True).exclude(product_ids='')
-        
-        # Filter to only include orders with unsettled wallet transactions
-        # An order's wallet transaction is unsettled if it hasn't been included in any settlement
-        unsettled_order_ids = []
-        for order in all_orders:
-            # Check if this order has an unsettled wallet transaction
-            order_transaction = WalletTransaction.objects.filter(
-                created_by_id=designer_id,
-                reference_id=f"order_{order.id}",
-                wallet_transaction_type='credit',
-                created_at__lte=period_end_datetime,
-                settlement_request__isnull=True  # Only unsettled transactions
-            ).exists()
-            
-            if order_transaction:
-                unsettled_order_ids.append(order.id)
-        
-        # Get only unsettled orders
-        orders = Order.objects.filter(id__in=unsettled_order_ids)
-        
-        if not orders.exists():
-            logger.warning(f'No unsettled orders found for designer {designer_id} up to period {period_end}')
-            # Still continue to check for subscription transactions
-        
-        # Initialize purchase type breakdowns
-        purchase_type_breakdowns = {
-            'individual': {
-                'gst_amount': Decimal('0'),
-                'commission_amount': Decimal('0'),
-                'product_total': Decimal('0'),
-                'design_count': 0,
-                'orders': []
-            },
-            'basic': {
-                'gst_amount': Decimal('0'),
-                'commission_amount': Decimal('0'),
-                'product_total': Decimal('0'),
-                'design_count': 0,
-                'orders': []
-            },
-            'prime': {
-                'gst_amount': Decimal('0'),
-                'commission_amount': Decimal('0'),
-                'product_total': Decimal('0'),
-                'design_count': 0,
-                'orders': []
-            },
-            'premium': {
-                'gst_amount': Decimal('0'),
-                'commission_amount': Decimal('0'),
-                'product_total': Decimal('0'),
-                'design_count': 0,
-                'orders': []
-            }
-        }
-        
-        # Process each order and categorize by purchase type
-        for order in orders:
-            breakdown = calculate_order_breakdown(order)
-            if breakdown.get('designer_breakdown') and designer_id in breakdown['designer_breakdown']:
-                dbreakdown = breakdown['designer_breakdown'][designer_id]
-                
-                # Determine purchase type
-                purchase_type = 'individual'
-                if order.subscription and order.subscription.plan:
-                    plan_name = order.subscription.plan.plan_name
-                    if plan_name in ['basic', 'prime', 'premium']:
-                        purchase_type = plan_name
-                
-                # Count designs/products for this purchase type
-                design_count = len(dbreakdown.get('products', []))
-                
-                # Add to appropriate category
-                purchase_type_breakdowns[purchase_type]['gst_amount'] += Decimal(str(dbreakdown['gst_amount']))
-                purchase_type_breakdowns[purchase_type]['commission_amount'] += Decimal(str(dbreakdown['commission_amount']))
-                purchase_type_breakdowns[purchase_type]['product_total'] += Decimal(str(dbreakdown['product_total']))
-                purchase_type_breakdowns[purchase_type]['design_count'] += design_count
-                purchase_type_breakdowns[purchase_type]['orders'].append(order)
-        
-        # Include subscription settlement earnings from wallet transactions
-        # Subscription settlements credit wallets but don't create invoices until opt-in
-        # Only include UNSETTLED subscription transactions
-        from Plans.models import Subscription
-        from Orders.invoice_service import extract_gst_and_commission
-        from common.business_config import BusinessConfig
-        
-        # Get GST and commission rates for reverse calculation
-        gst_percentage = Decimal(str(BusinessConfig.get_gst_percentage()))
-        commission_rate = Decimal(str(BusinessConfig.get_commission_rate()))
-        
-        # Find UNSETTLED wallet transactions for subscription settlements up to period_end
-        subscription_transactions = WalletTransaction.objects.filter(
-            created_by_id=designer_id,
-            wallet_transaction_type='credit',
-            reference_id__startswith='subscription_',
-            created_at__lte=period_end_datetime,
-            settlement_request__isnull=True  # Only unsettled transactions
-        )
-        
-        for transaction in subscription_transactions:
-            # Extract subscription ID from reference_id
-            # Format: "subscription_{id}" or "subscription_{id}_{period_date}"
-            ref_parts = transaction.reference_id.split('_')
-            if len(ref_parts) >= 2:
-                try:
-                    subscription_id = int(ref_parts[1])
-                    subscription = Subscription.objects.select_related('plan').filter(id=subscription_id).first()
-                    
-                    if subscription and subscription.plan:
-                        plan_name = subscription.plan.plan_name
-                        if plan_name in ['basic', 'prime', 'premium']:
-                            purchase_type = plan_name
-                            
-                            # Reverse calculate product_total, gst_amount, commission_amount from wallet_amount
-                            # wallet_amount = base_amount (after GST and commission extraction)
-                            # We need to reverse: base_amount -> amount_after_gst -> product_total
-                            wallet_amount = Decimal(str(transaction.amount))
-                            
-                            # Reverse Step 2: base_amount -> amount_after_gst
-                            # y * (1 + commission_rate/100) = amount_after_gst
-                            amount_after_gst = wallet_amount * (Decimal('1') + (commission_rate / Decimal('100')))
-                            commission_amount = amount_after_gst - wallet_amount
-                            
-                            # Reverse Step 1: amount_after_gst -> product_total
-                            # x * (1 + gst_percentage/100) = product_total
-                            product_total = amount_after_gst * (Decimal('1') + (gst_percentage / Decimal('100')))
-                            gst_amount = product_total - amount_after_gst
-                            
-                            # Extract download count from description
-                            # Format: "Earnings from subscription {id} ({count} downloads)" or
-                            #         "Earnings from subscription {id} - {period} ({count} downloads)"
-                            design_count = 0
-                            if transaction.description:
-                                import re
-                                match = re.search(r'\((\d+)\s+downloads?\)', transaction.description)
-                                if match:
-                                    design_count = int(match.group(1))
-                            
-                            # Add subscription settlement amounts to appropriate category
-                            purchase_type_breakdowns[purchase_type]['gst_amount'] += gst_amount
-                            purchase_type_breakdowns[purchase_type]['commission_amount'] += commission_amount
-                            purchase_type_breakdowns[purchase_type]['product_total'] += product_total
-                            purchase_type_breakdowns[purchase_type]['design_count'] += design_count
-                            # Note: subscription settlements don't have orders, so we skip adding to orders list
-                except (ValueError, IndexError):
-                    # Skip if reference_id format is invalid
-                    logger.warning(f"Invalid subscription reference_id format: {transaction.reference_id}")
-                    continue
-        
-        # Remove empty categories
-        purchase_type_breakdowns = {
-            k: v for k, v in purchase_type_breakdowns.items()
-            if v['gst_amount'] > 0 or v['commission_amount'] > 0
-        }
-        
-        if not purchase_type_breakdowns:
-            logger.warning(f'No valid breakdown data for designer {designer_id} in period {period_start} to {period_end}')
-            return f"No valid breakdown data for designer {designer_id}"
-        
-        # Generate monthly bill
-        invoice = create_monthly_designer_bill(designer, purchase_type_breakdowns, period_start, period_end)
-        
-        logger.info(f"Generated bill {invoice.invoice_number} for designer {designer_id}")
-        
-        # Send email with bill
-        EmailService.send_designer_monthly_bill_email(invoice, period_start, period_end)
-        
-        logger.info(f"Generated and sent bill {invoice.invoice_number} to designer {designer_id}")
-        return f"Bill {invoice.invoice_number} generated and sent to designer {designer_id}"
-        
-    except User.DoesNotExist:
-        logger.error(f"Designer {designer_id} not found")
-        return f"Designer {designer_id} not found"
-    except Exception as e:
-        logger.error(f"Failed to generate bill for designer {designer_id}: {str(e)}", exc_info=True)
-        raise self.retry(exc=e, countdown=60, max_retries=3)
-
-
-@shared_task(bind=True, name='common.tasks.process_expired_subscriptions')
-def process_expired_subscriptions(self):
-    """
-    Process subscription settlements:
+    Process subscription billing cycles:
     - Monthly subscriptions: When 30-day period ends
     - Annual subscriptions: Monthly based on purchase date (purchase_date + 30*N days)
       Example: Purchased March 14 → Settles April 14, May 14, June 14, etc.
-    Runs daily to check for subscriptions that need settlement.
+    Creates designer invoices based on subscription downloads.
+    Runs daily to check for subscriptions that need billing processing.
     """
     from datetime import timedelta, date
     from Orders.invoice_service import process_subscription_settlement, process_monthly_subscription_settlement

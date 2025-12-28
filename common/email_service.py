@@ -806,13 +806,13 @@ WeDesignz Team
             return False
     
     @staticmethod
-    def send_designer_invoice_email(invoice, order, breakdown):
-        """Send bill email to designer with PDF attachment."""
+    def send_settlement_receipt_email(invoice, settlement_request):
+        """Send receipt email to designer with PDF attachment."""
         try:
             import os
             import base64
             
-            subject = f"Bill #{invoice.invoice_number} - Your Earnings from WeDesignz"
+            subject = f"Receipt #{invoice.invoice_number} - Settlement Payment from WeDesignz"
             
             # Embed logos as base64 for email
             logo_base64 = None
@@ -858,177 +858,55 @@ WeDesignz Team
             else:
                 text_url = None
             
-            # Handle subscription invoices (order can be None)
-            order_number = order.order_number if order else None
-            subscription_ref = None
-            if invoice.subscription:
-                subscription_ref = f"SUB-{invoice.subscription.id}"
+            designer = settlement_request.designer
+            period_start = settlement_request.settlement_period_start.strftime('%B %d, %Y')
+            period_end = settlement_request.settlement_period_end.strftime('%B %d, %Y')
             
             context = {
-                'user': invoice.user,
+                'user': designer,
                 'invoice': invoice,
-                'order': order,
-                'breakdown': breakdown,
+                'settlement_request': settlement_request,
+                'settlement_period': f"{period_start} - {period_end}",
                 'site_url': settings.SITE_URL,
                 'logo_url': logo_url,
                 'text_url': text_url,
-                'subscription_ref': subscription_ref,  # For subscription invoices
             }
             
-            html_content = render_to_string('emails/invoices/designer_invoice.html', context)
-            
-            # Build text content based on whether it's a subscription or order
-            if order:
-                reference_text = f"order {order.order_number}"
-            elif subscription_ref:
-                reference_text = f"subscription {subscription_ref}"
-            else:
-                reference_text = "your earnings"
-            
+            # Use a simple receipt email template (can reuse customer invoice template or create new one)
+            html_content = render_to_string('emails/invoices/customer_invoice.html', context)
             text_content = f"""
-Hello {invoice.user.first_name or invoice.user.username},
+Hello {designer.first_name or designer.username},
 
-Your earnings from {reference_text} have been processed!
+Your settlement payment has been processed successfully! Your receipt is attached.
 
-Bill Number: {invoice.invoice_number}
-"""
-            
-            if order_number:
-                text_content += f"Order Number: {order_number}\n\n"
-            elif subscription_ref:
-                text_content += f"Subscription: {subscription_ref}\n"
-                if breakdown.get('download_count'):
-                    text_content += f"Downloads: {breakdown['download_count']}\n"
-                text_content += "\n"
-            
-            text_content += "Your Designs Sold:\n"
-            for product in breakdown.get('products', []):
-                text_content += f"- {product.title}: ₹{product.price}\n"
-            
-            text_content += f"""
-Financial Breakdown:
-- Subtotal: ₹{breakdown['product_total']}
-- GST (18%): ₹{breakdown['gst_amount']}
-- Platform Commission: ₹{breakdown['commission_amount']}
-- Amount Added to Wallet: ₹{breakdown['wallet_amount']}
-- Bill Total (GST + Commission): ₹{invoice.total_amount}
+Receipt Number: {invoice.invoice_number}
+Settlement Period: {period_start} - {period_end}
+Settlement Amount: ₹{settlement_request.settlement_amount}
 
-Your earnings have been added to your wallet. You can view your wallet balance and request withdrawals from your designer console.
+The payment has been transferred to your registered bank account.
 
-Visit {settings.SITE_URL}/designer-console to manage your earnings.
+If you have any questions, please contact our support team.
 
 Best regards,
 WeDesignz Team
 """
             
-            msg = EmailMultiAlternatives(subject, text_content, settings.DEFAULT_FROM_EMAIL, [invoice.user.email])
+            msg = EmailMultiAlternatives(subject, text_content, settings.DEFAULT_FROM_EMAIL, [designer.email])
             msg.attach_alternative(html_content, "text/html")
             
-            # Attach PDF bill if it exists
+            # Attach PDF receipt if it exists
             if invoice.pdf_file_path and os.path.exists(invoice.pdf_file_path):
                 with open(invoice.pdf_file_path, 'rb') as pdf:
                     msg.attach(
-                        f'bill_{invoice.invoice_number}.pdf',
+                        f'receipt_{invoice.invoice_number}.pdf',
                         pdf.read(),
                         'application/pdf'
                     )
             
             msg.send()
             
-            logger.info(f"Designer bill email sent to {invoice.user.email} for bill {invoice.invoice_number}")
+            logger.info(f"Settlement receipt email sent to {designer.email} for receipt {invoice.invoice_number}")
             return True
         except Exception as e:
-            logger.error(f"Failed to send designer invoice email to {invoice.user.email}: {str(e)}", exc_info=True)
-            return False
-    
-    @staticmethod
-    def send_designer_monthly_bill_email(invoice: 'Invoice', period_start: date, period_end: date):
-        """
-        Send monthly designer bill email with PDF attachment.
-        Used when designer opts in for settlement.
-        """
-        try:
-            from django.core.mail import EmailMultiAlternatives
-            from django.template.loader import render_to_string
-            from django.conf import settings
-            import os
-            
-            subject = f"Monthly Bill - {invoice.invoice_number} - WeDesignz"
-            
-            # Prepare context for email template
-            context = {
-                'designer_name': invoice.user.get_full_name() or invoice.user.username,
-                'invoice_number': invoice.invoice_number,
-                'period_start': period_start.strftime('%B %d, %Y'),
-                'period_end': period_end.strftime('%B %d, %Y'),
-                'total_amount': float(invoice.total_amount),
-                'gst_amount': float(invoice.gst_amount),
-                'commission_amount': float(invoice.commission_amount),
-                'site_url': settings.SITE_URL,
-            }
-            
-            # Render HTML email
-            try:
-                html_content = render_to_string('emails/designer_monthly_bill.html', context)
-            except:
-                # Fallback to simple HTML if template doesn't exist
-                html_content = f"""
-                <html>
-                <body>
-                    <h2>Monthly Bill - {invoice.invoice_number}</h2>
-                    <p>Dear {context['designer_name']},</p>
-                    <p>Your monthly bill for the period {context['period_start']} to {context['period_end']} has been generated.</p>
-                    <p><strong>Bill Number:</strong> {invoice.invoice_number}</p>
-                    <p><strong>Total Amount:</strong> ₹{context['total_amount']:.2f}</p>
-                    <p><strong>GST:</strong> ₹{context['gst_amount']:.2f}</p>
-                    <p><strong>Platform Commission:</strong> ₹{context['commission_amount']:.2f}</p>
-                    <p>Please find your detailed bill attached as PDF.</p>
-                    <p>This bill is generated as part of your settlement process. Your earnings will be settled on Day 6 of the month.</p>
-                    <p>Visit {settings.SITE_URL}/designer-console to view your wallet and settlement details.</p>
-                    <p>Best regards,<br>WeDesignz Team</p>
-                </body>
-                </html>
-                """
-            
-            # Plain text version
-            text_content = f"""
-Monthly Bill - {invoice.invoice_number}
-
-Dear {context['designer_name']},
-
-Your monthly bill for the period {context['period_start']} to {context['period_end']} has been generated.
-
-Bill Number: {invoice.invoice_number}
-Total Amount: ₹{context['total_amount']:.2f}
-GST: ₹{context['gst_amount']:.2f}
-Platform Commission: ₹{context['commission_amount']:.2f}
-
-Please find your detailed bill attached as PDF.
-
-This bill is generated as part of your settlement process. Your earnings will be settled on Day 6 of the month.
-
-Visit {settings.SITE_URL}/designer-console to view your wallet and settlement details.
-
-Best regards,
-WeDesignz Team
-"""
-            
-            msg = EmailMultiAlternatives(subject, text_content, settings.DEFAULT_FROM_EMAIL, [invoice.user.email])
-            msg.attach_alternative(html_content, "text/html")
-            
-            # Attach PDF bill if it exists
-            if invoice.pdf_file_path and os.path.exists(invoice.pdf_file_path):
-                with open(invoice.pdf_file_path, 'rb') as pdf:
-                    msg.attach(
-                        f'bill_{invoice.invoice_number}.pdf',
-                        pdf.read(),
-                        'application/pdf'
-                    )
-            
-            msg.send()
-            
-            logger.info(f"Monthly designer bill email sent to {invoice.user.email} for bill {invoice.invoice_number}")
-            return True
-        except Exception as e:
-            logger.error(f"Failed to send monthly designer bill email to {invoice.user.email}: {str(e)}", exc_info=True)
+            logger.error(f"Failed to send settlement receipt email to {designer.email}: {str(e)}", exc_info=True)
             return False

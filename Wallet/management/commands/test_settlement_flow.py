@@ -2,7 +2,7 @@ from django.core.management.base import BaseCommand
 from freezegun import freeze_time
 from datetime import datetime, date, timedelta
 import pytz
-from common.tasks import process_monthly_settlements, process_settlement_payouts
+from common.tasks import create_designer_payout_requests, process_settlement_payouts
 from Wallet.models import SettlementRequest
 
 
@@ -60,7 +60,7 @@ class Command(BaseCommand):
         self.stdout.write(f'\n[Day 1 - {day1.strftime("%Y-%m-%d %H:%M")} IST] Creating settlement requests...')
         
         with freeze_time(day1):
-            result = process_monthly_settlements()
+            result = create_designer_payout_requests()
             self.stdout.write(self.style.SUCCESS(f'✓ {result}'))
         
         # Show created settlements
