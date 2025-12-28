@@ -181,7 +181,24 @@ def admin_login(request):
                 'requires_2fa': False
             }, status=status.HTTP_200_OK)
     
-    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    # Format serializer errors for better frontend handling
+    error_message = None
+    if serializer.errors:
+        # Get the first error message from any field
+        for field, errors in serializer.errors.items():
+            if errors:
+                # Extract the actual error message string from ErrorDetail objects
+                if isinstance(errors, list):
+                    error_message = str(errors[0]) if errors else None
+                else:
+                    error_message = str(errors)
+                if error_message:
+                    break
+    
+    return Response({
+        'error': error_message or 'Invalid email or password. Please check your credentials and try again.',
+        'errors': serializer.errors
+    }, status=status.HTTP_400_BAD_REQUEST)
 
 
 @swagger_auto_schema(

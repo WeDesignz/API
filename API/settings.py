@@ -655,10 +655,12 @@ CORS_ALLOWED_ORIGINS = [
     "https://wedesignz.com",
     "https://www.wedesignz.com",
     "https://admin.wedesignz.com",
+    "https://api.wedesignz.com",
     
     # Development domains
-    "https://webapp.wedesignz.com",
-    "https://adminwebapp.wedesignz.com",
+    "https://dev.wedesignz.com",
+    "https://dev.admin.wedesignz.com",
+    "https://dev.api.wedesignz.com",
 
     # Local development domains
     "http://localhost:5000",
