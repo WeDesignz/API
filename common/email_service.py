@@ -71,7 +71,9 @@ class EmailService:
             html_content = render_to_string('emails/auth/welcome.html', context)
             text_content = f"Welcome to WeDesignz, {user.first_name}!\n\nYour account has been created successfully.\n\nVisit {settings.SITE_URL} to start exploring our designs."
             
-            msg = EmailMultiAlternatives(subject, text_content, settings.DEFAULT_FROM_EMAIL, [user.email])
+            # Use INFO_EMAIL for informational emails like welcome
+            from_email = settings.INFO_EMAIL
+            msg = EmailMultiAlternatives(subject, text_content, from_email, [user.email])
             msg.attach_alternative(html_content, "text/html")
             msg.send()
             
@@ -99,7 +101,9 @@ class EmailService:
             html_content = render_to_string('emails/auth/otp_verification.html', context)
             text_content = f"Your OTP for {verification_type} verification is: {otp_code}\n\nThis OTP will expire in 10 minutes."
             
-            msg = EmailMultiAlternatives(subject, text_content, settings.DEFAULT_FROM_EMAIL, [user.email])
+            # Use NO_REPLY_EMAIL for OTP messages
+            from_email = settings.NO_REPLY_EMAIL
+            msg = EmailMultiAlternatives(subject, text_content, from_email, [user.email])
             msg.attach_alternative(html_content, "text/html")
             msg.send()
             
@@ -126,7 +130,9 @@ class EmailService:
             html_content = render_to_string('emails/auth/password_reset.html', context)
             text_content = f"Your password reset OTP is: {otp_code}\n\nThis OTP will expire in 10 minutes."
             
-            msg = EmailMultiAlternatives(subject, text_content, settings.DEFAULT_FROM_EMAIL, [user.email])
+            # Use NO_REPLY_EMAIL for password reset OTP
+            from_email = settings.NO_REPLY_EMAIL
+            msg = EmailMultiAlternatives(subject, text_content, from_email, [user.email])
             msg.attach_alternative(html_content, "text/html")
             msg.send()
             
@@ -379,7 +385,9 @@ class EmailService:
             html_content = render_to_string('emails/designer_console/onboarding_welcome.html', context)
             text_content = f"Welcome to WeDesignz Designer Console, {user.first_name}!\n\nYour designer profile has been created successfully. You can now start uploading designs and earning money.\n\nVisit {settings.SITE_URL}/designer-console to access your dashboard."
             
-            msg = EmailMultiAlternatives(subject, text_content, settings.DEFAULT_FROM_EMAIL, [user.email])
+            # Use INFO_EMAIL for informational welcome emails
+            from_email = settings.INFO_EMAIL
+            msg = EmailMultiAlternatives(subject, text_content, from_email, [user.email])
             msg.attach_alternative(html_content, "text/html")
             msg.send()
             
@@ -544,7 +552,9 @@ class EmailService:
             html_content = render_to_string('emails/custom_requests/admin_response.html', context)
             text_content = f"Admin response to your custom order #{comment.custom_order_request.id}.\n\nResponse: {comment.message}\n\nPlease check your custom order for more details."
             
-            msg = EmailMultiAlternatives(subject, text_content, settings.DEFAULT_FROM_EMAIL, [comment.custom_order_request.created_by.email])
+            # Use SUPPORT_EMAIL for support-related emails
+            from_email = settings.SUPPORT_EMAIL
+            msg = EmailMultiAlternatives(subject, text_content, from_email, [comment.custom_order_request.created_by.email])
             msg.attach_alternative(html_content, "text/html")
             msg.send()
             
@@ -571,7 +581,9 @@ class EmailService:
             html_content = render_to_string('emails/custom_requests/system_update.html', context)
             text_content = f"Update on your custom order #{comment.custom_order_request.id}.\n\nUpdate: {comment.message}\n\nPlease check your custom order for more details."
             
-            msg = EmailMultiAlternatives(subject, text_content, settings.DEFAULT_FROM_EMAIL, [comment.custom_order_request.created_by.email])
+            # Use SUPPORT_EMAIL for support-related order updates
+            from_email = settings.SUPPORT_EMAIL
+            msg = EmailMultiAlternatives(subject, text_content, from_email, [comment.custom_order_request.created_by.email])
             msg.attach_alternative(html_content, "text/html")
             msg.send()
             

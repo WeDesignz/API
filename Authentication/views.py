@@ -30,7 +30,13 @@ def generate_otp():
 
 
 def send_otp_email(email, otp, purpose):
-    """Send OTP via email"""
+    """Send OTP via email (non-blocking)"""
+    import threading
+    import logging
+    import traceback
+    
+    logger = logging.getLogger(__name__)
+    
     subject = f"WeDesignz - {purpose} OTP"
     message = f"""
     Your OTP for {purpose} is: {otp}
@@ -43,18 +49,36 @@ def send_otp_email(email, otp, purpose):
     WeDesignz Team
     """
     
-    try:
-        send_mail(
-            subject=subject,
-            message=message,
-            from_email=settings.DEFAULT_FROM_EMAIL,
-            recipient_list=[email],
-            fail_silently=False,
-        )
-        return True
-    except Exception as e:
-        print(f"Email sending failed: {e}")
-        return False
+    def send_email_async():
+        """Send email in background thread to avoid blocking the request"""
+        try:
+            # Use NO_REPLY_EMAIL for OTP messages
+            from_email = settings.NO_REPLY_EMAIL
+            logger.info(f"Attempting to send OTP email to {email} from {from_email}")
+            logger.info(f"SMTP Config - Host: {settings.EMAIL_HOST}, Port: {settings.EMAIL_PORT}, SSL: {getattr(settings, 'EMAIL_USE_SSL', False)}, TLS: {settings.EMAIL_USE_TLS}, User: {settings.EMAIL_HOST_USER}")
+            
+            send_mail(
+                subject=subject,
+                message=message,
+                from_email=from_email,
+                recipient_list=[email],
+                fail_silently=False,
+            )
+            logger.info(f"OTP email sent successfully to {email}")
+        except Exception as e:
+            error_trace = traceback.format_exc()
+            logger.error(f"Failed to send OTP email to {email}: {str(e)}")
+            logger.error(f"Error traceback: {error_trace}")
+            # Also print to console for immediate visibility
+            print(f"EMAIL ERROR: Failed to send OTP to {email}: {str(e)}")
+            print(f"EMAIL ERROR TRACEBACK: {error_trace}")
+    
+    # Start email sending in background thread to prevent request timeout
+    thread = threading.Thread(target=send_email_async, daemon=True)
+    thread.start()
+    
+    # Return True immediately - email is being sent in background
+    return True
 
 
 def send_otp_sms(mobile_number, otp, purpose):
@@ -407,19 +431,33 @@ def verify_email(request):
     if serializer.is_valid():
         user = serializer.validated_data['user']
         otp_obj = serializer.validated_data.get('otp_obj')
+        email = serializer.validated_data['email']  # Get the email being verified
         
         # Delete OTP record after successful verification
         if otp_obj:
             otp_obj.delete()
         
-        # Mark email as verified
-        email_obj = Email.objects.get(email=user.email, created_by=user)
-        email_obj.is_verified = True
-        email_obj.save()
+        # Get or create email record and mark as verified
+        # Use get_or_create to handle cases where Email record doesn't exist yet (e.g., during onboarding)
+        email_obj, created = Email.objects.get_or_create(
+            email=email,
+            created_by=user,
+            defaults={
+                'is_primary': (email == user.email),  # Set as primary if it matches user.email
+                'is_verified': True
+            }
+        )
         
-        # Activate user account
-        user.is_active = True
-        user.save()
+        # If email record already existed, just mark it as verified
+        if not created:
+            email_obj.is_verified = True
+            email_obj.save()
+        
+        # If this is the user's primary email, update user.email
+        if email == user.email or email_obj.is_primary:
+            user.email = email
+            user.is_active = True
+            user.save()
         
         return Response({
             'message': 'Email verified successfully',

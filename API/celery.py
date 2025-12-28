@@ -74,11 +74,14 @@ app.conf.result_serializer = 'json'
 
 # Task routing
 app.conf.task_routes = {
-    'common.tasks.*': {'queue': 'default'},
-    'common.tasks.send_*': {'queue': 'email'},
+    'common.tasks.*': {'queue': 'celery'},
+    # Only route specific bulk email tasks to email queue
+    # Individual notification emails (like rejection emails) should go to celery queue
+    'common.tasks.send_bulk_emails': {'queue': 'email'},
+    'common.tasks.send_promotional_emails': {'queue': 'email'},
     'common.tasks.*_backup': {'queue': 'backup'},
-    'Catalog.tasks.*': {'queue': 'default'},
-    'Profiles.tasks.*': {'queue': 'default'},
+    'Catalog.tasks.*': {'queue': 'celery'},
+    'Profiles.tasks.*': {'queue': 'celery'},
 }
 
 # Task execution settings
