@@ -231,6 +231,10 @@ class PDFDownload(models.Model):
     price_per_design = models.DecimalField(max_digits=10, decimal_places=2, default=2.00)
     total_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
     
+    # Customer information for mock PDF
+    customer_name = models.CharField(max_length=255, blank=True, null=True, help_text="Customer name for mock PDF")
+    customer_mobile = models.CharField(max_length=20, blank=True, null=True, help_text="Customer mobile number for mock PDF")
+    
     # Payment information (for paid downloads)
     razorpay_payment = models.ForeignKey('Razorpay.RazorpayPayment', on_delete=models.SET_NULL, null=True, blank=True, related_name='pdf_downloads')
     payment_status = models.CharField(max_length=20, choices=[

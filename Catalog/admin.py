@@ -165,9 +165,9 @@ class PDFDownloadAdmin(admin.ModelAdmin):
     Manages PDF download requests with free and paid options.
     One user can have multiple PDF downloads.
     """
-    list_display = ['get_user_display', 'download_type', 'status', 'total_pages', 'products_count', 'total_amount', 'payment_status', 'created_at']
+    list_display = ['get_user_display', 'download_type', 'status', 'total_pages', 'products_count', 'customer_name', 'customer_mobile', 'total_amount', 'payment_status', 'created_at']
     list_filter = ['download_type', 'status', 'payment_status', 'selection_type', 'created_at', 'completed_at']
-    search_fields = ['pdf_file_path']
+    search_fields = ['pdf_file_path', 'customer_name', 'customer_mobile']
     readonly_fields = ['created_at', 'updated_at', 'completed_at', 'products_count']
     list_editable = ['status', 'payment_status']
     ordering = ['-created_at']
@@ -182,6 +182,10 @@ class PDFDownloadAdmin(admin.ModelAdmin):
     fieldsets = (
         ('Download Information', {
             'fields': ('download_type', 'status', 'total_pages', 'selection_type')
+        }),
+        ('Customer Information', {
+            'fields': ('customer_name', 'customer_mobile'),
+            'description': 'Customer details that appear on each page of the mock PDF'
         }),
         ('PDF Configuration', {
             'fields': ('selected_products', 'search_filters', 'included_products', 'products_count')

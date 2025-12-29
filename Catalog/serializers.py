@@ -882,6 +882,18 @@ class PDFDownloadRequestSerializer(serializers.Serializer):
         default=False,
         help_text="Whether to use subscription's mock PDF download (only for free downloads)"
     )
+    customer_name = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        max_length=255,
+        help_text="Customer name for mock PDF"
+    )
+    customer_mobile = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        max_length=20,
+        help_text="Customer mobile number for mock PDF"
+    )
     
     def validate_download_type(self, value):
         """
