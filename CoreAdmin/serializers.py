@@ -22,7 +22,7 @@ class AdminLoginSerializer(serializers.Serializer):
         if email and password:
             # Find user by email
             try:
-                user = User.objects.get(email=email)
+                user = User.objects.get(email__iexact=email)
             except User.DoesNotExist:
                 raise serializers.ValidationError('Invalid credentials')
             

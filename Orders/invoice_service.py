@@ -687,15 +687,11 @@ def get_company_details() -> Dict[str, Any]:
             return logo_path
         return ""
     
-    # Try to find logo (prefer PNG, fallback to SVG)
+    # Try to find logo (PNG only)
     logo_path = find_logo_file('ONLY LOGO.png')
-    if not logo_path:
-        logo_path = find_logo_file('ONLY LOGO.svg')
     
-    # Try to find text logo (prefer PNG, fallback to SVG)
+    # Try to find text logo (PNG only)
     text_logo_path = find_logo_file('ONLY TEXT.png')
-    if not text_logo_path:
-        text_logo_path = find_logo_file('ONLY TEXT.svg')
     
     return {
         "logo": logo_path,
