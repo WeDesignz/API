@@ -2561,7 +2561,9 @@ def create_pdf_download_request(request):
             search_filters=data.get('search_filters', {}),
             status='pending',
             products_count=0,
-            included_products=[]
+            included_products=[],
+            customer_name=data.get('customer_name', ''),
+            customer_mobile=data.get('customer_mobile', '')
         )
         
         # Attach user via relation system
@@ -3011,11 +3013,36 @@ def download_pdf_file(request, download_id):
         
         if os.path.exists(file_path):
             try:
+                # Generate filename using customer name if available
+                import re
+                customer_name = pdf_download.customer_name or ''
+                logger.info(f'Download request for PDF {download_id}: customer_name="{customer_name}"')
+                if customer_name:
+                    # Sanitize customer name for filename (remove special characters, keep spaces)
+                    sanitized_name = re.sub(r'[^a-zA-Z0-9\s-]', '', customer_name)
+                    sanitized_name = re.sub(r'\s+', ' ', sanitized_name.strip())  # Keep spaces, just trim
+                    sanitized_name = sanitized_name[:50]  # Limit length
+                    filename = f'{sanitized_name}.pdf'  # Remove _mock_pdf suffix
+                    logger.info(f'Generated filename from customer name: "{filename}"')
+                else:
+                    filename = f'designs_{download_id}.pdf'
+                    logger.info(f'No customer name found, using default filename: "{filename}"')
+                
                 response = FileResponse(
                     open(file_path, 'rb'),
                     as_attachment=True,
-                    filename=f'designs_{download_id}.pdf'
+                    filename=filename,
+                    content_type='application/pdf'
                 )
+                # Explicitly set Content-Disposition header with proper encoding for filenames with spaces
+                # Use both filename and filename* (RFC 5987) for better browser compatibility
+                from urllib.parse import quote
+                encoded_filename = quote(filename)
+                response['Content-Disposition'] = f'attachment; filename="{filename}"; filename*=UTF-8\'\'{encoded_filename}'
+                # Also set a custom header that's easier to access (will be exposed via CORS)
+                response['X-Filename'] = filename
+                logger.info(f'Setting Content-Disposition header: {response["Content-Disposition"]}')
+                logger.info(f'Setting X-Filename header: {filename}')
                 return response
             except Exception as e:
                 logger.error(f'Error opening PDF file: {str(e)}', exc_info=True)
@@ -3028,11 +3055,32 @@ def download_pdf_file(request, download_id):
             alt_path = os.path.join(settings.MEDIA_ROOT, 'pdfs', f'pdf_download_{download_id}.pdf')
             if os.path.exists(alt_path):
                 try:
+                    # Generate filename using customer name if available
+                    import re
+                    customer_name = pdf_download.customer_name or ''
+                    if customer_name:
+                        # Sanitize customer name for filename (remove special characters, keep spaces)
+                        sanitized_name = re.sub(r'[^a-zA-Z0-9\s-]', '', customer_name)
+                        sanitized_name = re.sub(r'\s+', ' ', sanitized_name.strip())  # Keep spaces, just trim
+                        sanitized_name = sanitized_name[:50]  # Limit length
+                        filename = f'{sanitized_name}.pdf'  # Remove _mock_pdf suffix
+                    else:
+                        filename = f'designs_{download_id}.pdf'
+                    
                     response = FileResponse(
                         open(alt_path, 'rb'),
                         as_attachment=True,
-                        filename=f'designs_{download_id}.pdf'
+                        filename=filename,
+                        content_type='application/pdf'
                     )
+                    # Explicitly set Content-Disposition header with proper encoding for filenames with spaces
+                    from urllib.parse import quote
+                    encoded_filename = quote(filename)
+                    response['Content-Disposition'] = f'attachment; filename="{filename}"; filename*=UTF-8\'\'{encoded_filename}'
+                    # Also set a custom header that's easier to access (will be exposed via CORS)
+                    response['X-Filename'] = filename
+                    logger.info(f'Setting Content-Disposition header (alt path): {response["Content-Disposition"]}')
+                    logger.info(f'Setting X-Filename header (alt path): {filename}')
                     # Update database with correct path
                     pdf_download.pdf_file_path = f'pdfs/pdf_download_{download_id}.pdf'
                     pdf_download.save()

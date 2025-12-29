@@ -333,6 +333,14 @@ def generate_pdf_task(self, pdf_download_id):
             
             # Only generate PDF pages for products with valid mockup images
             # included_products already contains only products with valid mockups
+            # Get customer information from PDF download - refresh from DB to ensure we have latest values
+            pdf_download.refresh_from_db()
+            customer_name = pdf_download.customer_name or ''
+            customer_mobile = pdf_download.customer_mobile or ''
+            
+            # Log customer information for debugging
+            logger.info(f'PDF generation for download {pdf_download_id}: customer_name="{customer_name}", customer_mobile="{customer_mobile}"')
+            
             for idx, product_info in enumerate(included_products, 1):
                 # Add a new page for each product
                 if idx > 1:
@@ -350,7 +358,7 @@ def generate_pdf_task(self, pdf_download_id):
                         img_width, img_height = img.size
                         
                         # Calculate scaling to fit page (with margins)
-                        # Reserve space at top for product number (60 points)
+                        # Reserve space at top for header (60 points - compact three boxes)
                         available_width = page_width - (2 * margin)
                         available_height = page_height - (2 * margin) - 60
                         
@@ -359,45 +367,248 @@ def generate_pdf_task(self, pdf_download_id):
                         scale_y = available_height / img_height
                         scale = min(scale_x, scale_y)
                         
-                        # Calculate centered position for image (below product number)
+                        # Calculate centered position for image (below header)
                         scaled_width = img_width * scale
                         scaled_height = img_height * scale
                         x = (page_width - scaled_width) / 2
-                        y = (page_height - scaled_height) / 2 - 30  # Offset down to make room for product number
+                        y = (page_height - scaled_height) / 2 - 30  # Offset down to make room for compact header
                         
-                        # Draw product number at the top (centered)
-                        c.setFont("Helvetica-Bold", 24)
-                        text_width = c.stringWidth(product_number, "Helvetica-Bold", 24)
-                        text_x = (page_width - text_width) / 2
-                        text_y = page_height - margin - 30
-                        c.drawString(text_x, text_y, product_number)
+                        # Draw compact header with 3 boxes in horizontal line
+                        header_height = 55  # Compact height
+                        header_y = page_height - margin - header_height
+                        header_rect_width = page_width - (2 * margin)
                         
-                        # Draw image below product number
+                        # Calculate box dimensions
+                        box_spacing = 10  # Space between boxes
+                        box_width = (header_rect_width - (2 * box_spacing)) / 3  # Three equal boxes
+                        box_height = header_height - 10  # Slightly smaller than header
+                        box_y = header_y + 5  # Small margin from top
+                        
+                        # Box 1 - For / Customer Name
+                        box1_x = margin + 10
+                        c.setFillColorRGB(1, 1, 1)  # White background for box
+                        c.setStrokeColorRGB(0.85, 0.85, 0.9)
+                        c.setLineWidth(0.5)
+                        c.roundRect(box1_x, box_y, box_width, box_height, 4, fill=1, stroke=1)
+                        
+                        # Label
+                        c.setFillColorRGB(0.5, 0.5, 0.55)
+                        c.setFont("Helvetica", 9)
+                        c.drawString(box1_x + 8, box_y + box_height - 12, "For")
+                        
+                        # Separator line inside box
+                        c.setStrokeColorRGB(0.9, 0.9, 0.95)
+                        c.setLineWidth(0.3)
+                        c.line(box1_x + 6, box_y + box_height - 15, box1_x + box_width - 6, box_y + box_height - 15)
+                        
+                        # Value
+                        c.setFillColorRGB(0.2, 0.2, 0.25)
+                        c.setFont("Helvetica-Bold", 12)
+                        if customer_name:
+                            name_text = customer_name
+                            # Truncate if too long
+                            name_width = c.stringWidth(name_text, "Helvetica-Bold", 12)
+                            max_name_width = box_width - 16
+                            if name_width > max_name_width:
+                                char_width = name_width / len(name_text)
+                                max_chars = int(max_name_width / char_width) - 3
+                                name_text = name_text[:max_chars] + "..."
+                        else:
+                            name_text = "[Not Provided]"
+                        c.drawString(box1_x + 8, box_y + 8, name_text)
+                        
+                        # Box 2 - Contact / Mobile Number
+                        box2_x = box1_x + box_width + box_spacing
+                        c.setFillColorRGB(1, 1, 1)
+                        c.roundRect(box2_x, box_y, box_width, box_height, 4, fill=1, stroke=1)
+                        
+                        # Label
+                        c.setFillColorRGB(0.5, 0.5, 0.55)
+                        c.setFont("Helvetica", 9)
+                        c.drawString(box2_x + 8, box_y + box_height - 12, "Contact")
+                        
+                        # Separator line inside box
+                        c.setStrokeColorRGB(0.9, 0.9, 0.95)
+                        c.setLineWidth(0.3)
+                        c.line(box2_x + 6, box_y + box_height - 15, box2_x + box_width - 6, box_y + box_height - 15)
+                        
+                        # Value
+                        c.setFillColorRGB(0.2, 0.2, 0.25)
+                        c.setFont("Helvetica-Bold", 12)
+                        if customer_mobile:
+                            contact_text = customer_mobile
+                        else:
+                            contact_text = "[Not Provided]"
+                        c.drawString(box2_x + 8, box_y + 8, contact_text)
+                        
+                        # Box 3 - Design ID
+                        box3_x = box2_x + box_width + box_spacing
+                        c.setFillColorRGB(1, 1, 1)
+                        c.roundRect(box3_x, box_y, box_width, box_height, 4, fill=1, stroke=1)
+                        
+                        # Label
+                        c.setFillColorRGB(0.5, 0.5, 0.55)
+                        c.setFont("Helvetica", 9)
+                        c.drawString(box3_x + 8, box_y + box_height - 12, "Design ID")
+                        
+                        # Separator line inside box
+                        c.setStrokeColorRGB(0.9, 0.9, 0.95)
+                        c.setLineWidth(0.3)
+                        c.line(box3_x + 6, box_y + box_height - 15, box3_x + box_width - 6, box_y + box_height - 15)
+                        
+                        # Value
+                        c.setFillColorRGB(0.2, 0.2, 0.25)
+                        c.setFont("Helvetica-Bold", 12)
+                        design_id_text = product_number
+                        c.drawString(box3_x + 8, box_y + 8, design_id_text)
+                        
+                        # Draw image below header
                         c.drawImage(image_path, x, y, width=scaled_width, height=scaled_height, preserveAspectRatio=True)
-                        logger.info(f'Added product number {product_number} and image for product {product_id} on page {idx}')
+                        logger.info(f'Added metadata and image for product {product_id} on page {idx}')
                     except Exception as e:
                         logger.error(f'Error adding image for product {product_id}: {e}', exc_info=True)
-                        # Draw product number even if image fails
-                        c.setFont("Helvetica-Bold", 24)
-                        text_width = c.stringWidth(product_number, "Helvetica-Bold", 24)
-                        text_x = (page_width - text_width) / 2
-                        text_y = page_height - margin - 30
-                        c.drawString(text_x, text_y, product_number)
-                        # Draw placeholder text if image fails
+                        # Draw header even if image fails
+                        header_height = 55
+                        header_y = page_height - margin - header_height
+                        header_rect_width = page_width - (2 * margin)
+                        box_spacing = 10
+                        box_width = (header_rect_width - (2 * box_spacing)) / 3
+                        box_height = header_height - 10
+                        box_y = header_y + 5
+                        
+                        # Box 1 - For
+                        box1_x = margin + 10
+                        c.setFillColorRGB(1, 1, 1)
+                        c.setStrokeColorRGB(0.85, 0.85, 0.9)
+                        c.setLineWidth(0.5)
+                        c.roundRect(box1_x, box_y, box_width, box_height, 4, fill=1, stroke=1)
+                        c.setFillColorRGB(0.5, 0.5, 0.55)
+                        c.setFont("Helvetica", 9)
+                        c.drawString(box1_x + 8, box_y + box_height - 12, "For")
+                        c.setStrokeColorRGB(0.9, 0.9, 0.95)
+                        c.setLineWidth(0.3)
+                        c.line(box1_x + 6, box_y + box_height - 15, box1_x + box_width - 6, box_y + box_height - 15)
+                        c.setFillColorRGB(0.2, 0.2, 0.25)
+                        c.setFont("Helvetica-Bold", 12)
+                        if customer_name:
+                            name_text = customer_name
+                            name_width = c.stringWidth(name_text, "Helvetica-Bold", 12)
+                            max_name_width = box_width - 16
+                            if name_width > max_name_width:
+                                char_width = name_width / len(name_text)
+                                max_chars = int(max_name_width / char_width) - 3
+                                name_text = name_text[:max_chars] + "..."
+                        else:
+                            name_text = "[Not Provided]"
+                        c.drawString(box1_x + 8, box_y + 8, name_text)
+                        
+                        # Box 2 - Contact
+                        box2_x = box1_x + box_width + box_spacing
+                        c.setFillColorRGB(1, 1, 1)
+                        c.roundRect(box2_x, box_y, box_width, box_height, 4, fill=1, stroke=1)
+                        c.setFillColorRGB(0.5, 0.5, 0.55)
+                        c.setFont("Helvetica", 9)
+                        c.drawString(box2_x + 8, box_y + box_height - 12, "Contact")
+                        c.setStrokeColorRGB(0.9, 0.9, 0.95)
+                        c.setLineWidth(0.3)
+                        c.line(box2_x + 6, box_y + box_height - 15, box2_x + box_width - 6, box_y + box_height - 15)
+                        c.setFillColorRGB(0.2, 0.2, 0.25)
+                        c.setFont("Helvetica-Bold", 12)
+                        if customer_mobile:
+                            contact_text = customer_mobile
+                        else:
+                            contact_text = "[Not Provided]"
+                        c.drawString(box2_x + 8, box_y + 8, contact_text)
+                        
+                        # Box 3 - Design ID
+                        box3_x = box2_x + box_width + box_spacing
+                        c.setFillColorRGB(1, 1, 1)
+                        c.roundRect(box3_x, box_y, box_width, box_height, 4, fill=1, stroke=1)
+                        c.setFillColorRGB(0.5, 0.5, 0.55)
+                        c.setFont("Helvetica", 9)
+                        c.drawString(box3_x + 8, box_y + box_height - 12, "Design ID")
+                        c.setStrokeColorRGB(0.9, 0.9, 0.95)
+                        c.setLineWidth(0.3)
+                        c.line(box3_x + 6, box_y + box_height - 15, box3_x + box_width - 6, box_y + box_height - 15)
+                        c.setFillColorRGB(0.2, 0.2, 0.25)
+                        c.setFont("Helvetica-Bold", 12)
+                        design_id_text = product_number
+                        c.drawString(box3_x + 8, box_y + 8, design_id_text)
+                        
                         c.setFont("Helvetica", 16)
-                        c.drawString(margin, page_height - margin - 80, "Image not available")
+                        c.drawString(margin, page_height - margin - 100, "Image not available")
                 else:
-                    # This shouldn't happen since we filter out products without valid images
-                    # But handle it gracefully just in case
+                    # Handle missing image case with header
                     logger.warning(f'No image path for product {product_id} in included_products')
-                    # Draw product number even if image is missing
-                    c.setFont("Helvetica-Bold", 24)
-                    text_width = c.stringWidth(product_number, "Helvetica-Bold", 24)
-                    text_x = (page_width - text_width) / 2
-                    text_y = page_height - margin - 30
-                    c.drawString(text_x, text_y, product_number)
+                    header_height = 55
+                    header_y = page_height - margin - header_height
+                    header_rect_width = page_width - (2 * margin)
+                    box_spacing = 10
+                    box_width = (header_rect_width - (2 * box_spacing)) / 3
+                    box_height = header_height - 10
+                    box_y = header_y + 5
+                    
+                    # Box 1 - For
+                    box1_x = margin + 10
+                    c.setFillColorRGB(1, 1, 1)
+                    c.setStrokeColorRGB(0.85, 0.85, 0.9)
+                    c.setLineWidth(0.5)
+                    c.roundRect(box1_x, box_y, box_width, box_height, 4, fill=1, stroke=1)
+                    c.setFillColorRGB(0.5, 0.5, 0.55)
+                    c.setFont("Helvetica", 9)
+                    c.drawString(box1_x + 8, box_y + box_height - 12, "For")
+                    c.setStrokeColorRGB(0.9, 0.9, 0.95)
+                    c.setLineWidth(0.3)
+                    c.line(box1_x + 6, box_y + box_height - 15, box1_x + box_width - 6, box_y + box_height - 15)
+                    c.setFillColorRGB(0.2, 0.2, 0.25)
+                    c.setFont("Helvetica-Bold", 12)
+                    if customer_name:
+                        name_text = customer_name
+                        name_width = c.stringWidth(name_text, "Helvetica-Bold", 12)
+                        max_name_width = box_width - 16
+                        if name_width > max_name_width:
+                            char_width = name_width / len(name_text)
+                            max_chars = int(max_name_width / char_width) - 3
+                            name_text = name_text[:max_chars] + "..."
+                    else:
+                        name_text = "[Not Provided]"
+                    c.drawString(box1_x + 8, box_y + 8, name_text)
+                    
+                    # Box 2 - Contact
+                    box2_x = box1_x + box_width + box_spacing
+                    c.setFillColorRGB(1, 1, 1)
+                    c.roundRect(box2_x, box_y, box_width, box_height, 4, fill=1, stroke=1)
+                    c.setFillColorRGB(0.5, 0.5, 0.55)
+                    c.setFont("Helvetica", 9)
+                    c.drawString(box2_x + 8, box_y + box_height - 12, "Contact")
+                    c.setStrokeColorRGB(0.9, 0.9, 0.95)
+                    c.setLineWidth(0.3)
+                    c.line(box2_x + 6, box_y + box_height - 15, box2_x + box_width - 6, box_y + box_height - 15)
+                    c.setFillColorRGB(0.2, 0.2, 0.25)
+                    c.setFont("Helvetica-Bold", 12)
+                    if customer_mobile:
+                        contact_text = customer_mobile
+                    else:
+                        contact_text = "[Not Provided]"
+                    c.drawString(box2_x + 8, box_y + 8, contact_text)
+                    
+                    # Box 3 - Design ID
+                    box3_x = box2_x + box_width + box_spacing
+                    c.setFillColorRGB(1, 1, 1)
+                    c.roundRect(box3_x, box_y, box_width, box_height, 4, fill=1, stroke=1)
+                    c.setFillColorRGB(0.5, 0.5, 0.55)
+                    c.setFont("Helvetica", 9)
+                    c.drawString(box3_x + 8, box_y + box_height - 12, "Design ID")
+                    c.setStrokeColorRGB(0.9, 0.9, 0.95)
+                    c.setLineWidth(0.3)
+                    c.line(box3_x + 6, box_y + box_height - 15, box3_x + box_width - 6, box_y + box_height - 15)
+                    c.setFillColorRGB(0.2, 0.2, 0.25)
+                    c.setFont("Helvetica-Bold", 12)
+                    design_id_text = product_number
+                    c.drawString(box3_x + 8, box_y + 8, design_id_text)
+                    
                     c.setFont("Helvetica", 16)
-                    c.drawString(margin, page_height - margin - 80, "No mockup image available")
+                    c.drawString(margin, page_height - margin - 100, "No mockup image available")
             
             # Save PDF
             c.save()

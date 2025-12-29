@@ -704,6 +704,14 @@ CORS_ALLOW_HEADERS = [
     'x-requested-with',
 ]
 
+# Expose headers that JavaScript can access
+CORS_EXPOSE_HEADERS = [
+    'content-disposition',  # Allow frontend to read filename from Content-Disposition header
+    'x-filename',  # Custom header for easier filename access
+    'content-type',
+    'content-length',
+]
+
 # Logging Configuration
 # Create logs directory if it doesn't exist (do this before LOGGING config)
 LOGS_DIR = os.path.join(BASE_DIR, 'logs')
@@ -732,42 +740,112 @@ LOGGING = {
             'class': 'logging.StreamHandler',
             'formatter': 'verbose',
             'stream': 'ext://sys.stderr',  # Output to stderr so Gunicorn/journalctl can capture it reliably
+            'level': 'INFO',  # Show INFO and above in console
         },
     },
     'root': {
         'handlers': ['console'],
-        'level': 'INFO',  # Show INFO and above in console
+        'level': 'INFO',
     },
     'loggers': {
+        # Django framework loggers - keep HTTP request/response logs visible
         'django': {
             'handlers': ['console'],
             'level': 'INFO',
             'propagate': False,
         },
+        'django.server': {
+            'handlers': ['console'],
+            'level': 'INFO',  # Show HTTP request/response logs (which page was requested, status codes)
+            'propagate': False,
+        },
+        'django.utils.autoreload': {
+            'handlers': ['console'],
+            'level': 'WARNING',  # Hide file change detection logs (unnecessary noise)
+            'propagate': False,
+        },
+        # Third-party loggers
+        'jazzmin': {
+            'handlers': ['console'],
+            'level': 'WARNING',  # Hide jazzmin URL reverse warnings (unnecessary)
+            'propagate': False,
+        },
+        # Custom app loggers - filter out verbose internal processing logs
         'common': {
             'handlers': ['console'],
-            'level': 'INFO',  # Show INFO level logs for common app
+            'level': 'WARNING',  # Hide verbose common app logs
             'propagate': False,
         },
         'common.views': {
             'handlers': ['console'],
-            'level': 'INFO',  # Show INFO level logs for views
+            'level': 'WARNING',  # Hide verbose view logs
             'propagate': False,
         },
         'common.tasks': {
             'handlers': ['console'],
-            'level': 'INFO',  # Show INFO level logs for tasks
+            'level': 'WARNING',  # Hide verbose task logs
             'propagate': False,
         },
         'common.instagram_service': {
             'handlers': ['console'],
-            'level': 'INFO',  # Show INFO level logs for Instagram service
+            'level': 'WARNING',  # Hide verbose Instagram service logs
+            'propagate': False,
+        },
+        'CoreAdmin': {
+            'handlers': ['console'],
+            'level': 'WARNING',  # Hide verbose CoreAdmin logs
+            'propagate': False,
+        },
+        'CoreAdmin.views': {
+            'handlers': ['console'],
+            'level': 'WARNING',  # Hide verbose view processing logs (keep HTTP logs from django.server)
+            'propagate': False,
+        },
+        'CoreAdmin.models': {
+            'handlers': ['console'],
+            'level': 'WARNING',  # Hide verbose model logs
+            'propagate': False,
+        },
+        'Catalog': {
+            'handlers': ['console'],
+            'level': 'WARNING',  # Hide verbose Catalog logs
+            'propagate': False,
+        },
+        'Catalog.views': {
+            'handlers': ['console'],
+            'level': 'WARNING',  # Hide verbose view processing logs (keep HTTP logs from django.server)
+            'propagate': False,
+        },
+        'Catalog.models': {
+            'handlers': ['console'],
+            'level': 'WARNING',  # Hide verbose model logs (like design number generation)
+            'propagate': False,
+        },
+        'Feedback': {
+            'handlers': ['console'],
+            'level': 'WARNING',  # Hide verbose Feedback logs
+            'propagate': False,
+        },
+        'Feedback.views': {
+            'handlers': ['console'],
+            'level': 'WARNING',  # Hide verbose view processing logs
+            'propagate': False,
+        },
+        'Authentication': {
+            'handlers': ['console'],
+            'level': 'WARNING',  # Hide verbose Authentication logs
+            'propagate': False,
+        },
+        'Authentication.views': {
+            'handlers': ['console'],
+            'level': 'WARNING',  # Hide verbose view processing logs
             'propagate': False,
         },
     },
 }
 
 # Add file handler only if logs directory exists and is writable
+# File handler will log at INFO level (more detailed) while console shows HTTP requests + WARNING+
 if os.path.exists(LOGS_DIR) and os.access(LOGS_DIR, os.W_OK):
     LOGGING['handlers']['file'] = {
         'class': 'logging.handlers.RotatingFileHandler',
@@ -775,8 +853,19 @@ if os.path.exists(LOGS_DIR) and os.access(LOGS_DIR, os.W_OK):
         'maxBytes': 1024 * 1024 * 10,  # 10 MB
         'backupCount': 5,
         'formatter': 'verbose',
+        'level': 'INFO',  # File logs include INFO level for debugging
     }
-    # Add file handler to all loggers
-    for logger_name in ['django', 'common', 'common.views', 'common.tasks', 'common.instagram_service']:
-        if 'file' not in LOGGING['loggers'][logger_name]['handlers']:
-            LOGGING['loggers'][logger_name]['handlers'].append('file')
+    # Add file handler to all loggers (file will have INFO, console only WARNING+)
+    logger_names = [
+        'django', 'django.server', 'django.utils.autoreload',
+        'jazzmin',
+        'common', 'common.views', 'common.tasks', 'common.instagram_service',
+        'CoreAdmin', 'CoreAdmin.views', 'CoreAdmin.models',
+        'Catalog', 'Catalog.views', 'Catalog.models',
+        'Feedback', 'Feedback.views',
+        'Authentication', 'Authentication.views',
+    ]
+    for logger_name in logger_names:
+        if logger_name in LOGGING['loggers']:
+            if 'file' not in LOGGING['loggers'][logger_name]['handlers']:
+                LOGGING['loggers'][logger_name]['handlers'].append('file')
