@@ -1146,10 +1146,20 @@ def create_subcategory(request, category_id):
     # Set parent_id to the category_id
     data = request.data.copy()
     data['parent_id'] = category_id
+    # Remove any created_by fields (read-only) - we'll set it via context
+    data.pop('created_by', None)
+    data.pop('created_by_id', None)
     
-    serializer = CategorySerializer(data=data)
+    # Pass created_by and request via context so serializer can use it
+    serializer = CategorySerializer(
+        data=data,
+        context={
+            'created_by': request.user,
+            'request': request
+        }
+    )
     if serializer.is_valid():
-        subcategory = serializer.save(created_by=request.user)
+        subcategory = serializer.save()
         
         return Response({
             'subcategory': CategoryListSerializer(subcategory).data

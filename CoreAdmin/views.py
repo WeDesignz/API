@@ -3526,29 +3526,40 @@ def design_action(request, design_id):
                 # Store flag information in product_metadata
                 if not design.product_metadata:
                     design.product_metadata = {}
+                # Store previous visibility_status before hiding (so we can restore it later)
+                design.product_metadata['previous_visibility_status'] = design.visibility_status
                 design.product_metadata['flagged'] = True
                 design.product_metadata['flag_reason'] = reason
                 design.product_metadata['flagged_by'] = request.user.id
                 design.product_metadata['flagged_at'] = timezone.now().isoformat()
-                # Use update() to bypass signals - only updating metadata, but safer to avoid signals
-                Product.objects.filter(pk=design.pk).update(product_metadata=design.product_metadata)
+                # Use update() to bypass signals - hide design from feed by setting visibility_status to 'hide'
+                Product.objects.filter(pk=design.pk).update(
+                    product_metadata=design.product_metadata,
+                    visibility_status='hide'
+                )
                 success = True
-                message = "Design flagged successfully"
-                logger.info(f'[design_action] Design flagged successfully: design_id={design_id}')
+                message = "Design flagged successfully and hidden from feed"
+                logger.info(f'[design_action] Design flagged and hidden from feed: design_id={design_id}')
             
             elif action == 'resolve_flag':
                 logger.debug(f'[design_action] Processing resolve_flag action')
-                # Clear flag information from product_metadata
+                # Get previous visibility_status before clearing flag (default to 'show' if not stored)
+                previous_visibility = 'show'
                 if design.product_metadata:
+                    previous_visibility = design.product_metadata.get('previous_visibility_status', 'show')
                     design.product_metadata.pop('flagged', None)
                     design.product_metadata.pop('flag_reason', None)
                     design.product_metadata.pop('flagged_by', None)
                     design.product_metadata.pop('flagged_at', None)
-                # Use update() to bypass signals - only updating metadata, but safer to avoid signals
-                Product.objects.filter(pk=design.pk).update(product_metadata=design.product_metadata)
+                    design.product_metadata.pop('previous_visibility_status', None)
+                # Use update() to bypass signals - restore visibility_status to previous value
+                Product.objects.filter(pk=design.pk).update(
+                    product_metadata=design.product_metadata,
+                    visibility_status=previous_visibility
+                )
                 success = True
-                message = "Flag resolved successfully"
-                logger.info(f'[design_action] Flag resolved successfully: design_id={design_id}')
+                message = "Flag resolved successfully and design restored to feed"
+                logger.info(f'[design_action] Flag resolved and design restored to feed: design_id={design_id}, visibility={previous_visibility}')
             
             else:
                 # Get or create design approval record for approve/reject/disable actions
@@ -3682,18 +3693,30 @@ def categories_list(request):
         }, status=status.HTTP_403_FORBIDDEN)
     
     from Catalog.models import Category
-    categories = Category.objects.all().order_by('name')
+    # Get only parent categories (categories without a parent) and prefetch subcategories
+    # Use select_related and prefetch_related to optimize queries
+    categories = Category.objects.filter(
+        parent__isnull=True
+    ).prefetch_related(
+        'subcategories'
+    ).select_related(
+        'created_by', 'updated_by'
+    ).order_by('name')
     
     serializer = CategorySerializer(categories, many=True)
     
-    # Log activity
-    AdminActivityLog.log_activity(
-        user=request.user,
-        activity_type='CATEGORIES_LIST_VIEWED',
-        description='Viewed categories list',
-        request=request,
-        metadata={}
-    )
+    # Log activity (shortened activity_type to fit varchar(20) constraint)
+    try:
+        AdminActivityLog.log_activity(
+            user=request.user,
+            activity_type='CATEGORIES_VIEWED',
+            description='Viewed categories list',
+            request=request,
+            metadata={}
+        )
+    except Exception:
+        # If activity logging fails, continue anyway
+        pass
     
     return Response({
         'message': 'Categories retrieved successfully',
@@ -3730,21 +3753,39 @@ def create_category(request):
             'error': 'Admin profile required'
         }, status=status.HTTP_403_FORBIDDEN)
     
-    serializer = CategorySerializer(data=request.data)
+    # Ensure parent_id is None for parent categories
+    data = request.data.copy()
+    data['parent_id'] = None
+    # Remove any created_by fields (read-only) - we'll set it via context
+    data.pop('created_by', None)
+    data.pop('created_by_id', None)
+    
+    # Pass created_by and request via context so serializer can use it
+    serializer = CategorySerializer(
+        data=data, 
+        context={
+            'created_by': request.user,
+            'request': request
+        }
+    )
     if serializer.is_valid():
-        category = serializer.save(created_by=request.user)
+        category = serializer.save()
         
         # Log activity
-        AdminActivityLog.log_activity(
-            user=request.user,
-            activity_type='CATEGORY_CREATED',
-            ip_address=AdminActivityLog.get_client_ip(request),
-            user_agent=request.META.get('HTTP_USER_AGENT', ''),
-            metadata={
-                'category_id': category.id,
-                'category_name': category.name
-            }
-        )
+        try:
+            AdminActivityLog.log_activity(
+                user=request.user,
+                activity_type='CATEGORY_CREATED',
+                description=f'Created category: {category.name}',
+                request=request,
+                metadata={
+                    'category_id': category.id,
+                    'category_name': category.name
+                }
+            )
+        except Exception:
+            # If activity logging fails, continue anyway
+            pass
         
         return Response({
             'message': 'Category created successfully',
@@ -3755,6 +3796,88 @@ def create_category(request):
             'error': 'Invalid data',
             'details': serializer.errors
         }, status=status.HTTP_400_BAD_REQUEST)
+
+
+@swagger_auto_schema(
+    method='delete',
+    operation_summary="Delete Category",
+    operation_description="Delete a category or subcategory (SuperAdmin access only).",
+    responses={
+        200: openapi.Response(description="Category deleted successfully"),
+        404: openapi.Response(description="Category not found"),
+        403: openapi.Response(description="Access denied - SuperAdmin privileges required"),
+        400: openapi.Response(description="Cannot delete category with products or subcategories")
+    },
+    tags=['CoreAdmin Design Management']
+)
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
+def delete_category(request, category_id):
+    """
+    Delete a category or subcategory.
+    """
+    try:
+        admin_profile = AdminUserProfile.objects.get(user=request.user)
+        if admin_profile.admin_group != 'superadmin' and not request.user.is_superuser:
+            return Response({
+                'error': 'SuperAdmin privileges required'
+            }, status=status.HTTP_403_FORBIDDEN)
+    except AdminUserProfile.DoesNotExist:
+        return Response({
+            'error': 'Admin profile required'
+        }, status=status.HTTP_403_FORBIDDEN)
+    
+    from Catalog.models import Category, Product
+    
+    try:
+        category = Category.objects.get(id=category_id)
+    except Category.DoesNotExist:
+        return Response({
+            'error': 'Category not found'
+        }, status=status.HTTP_404_NOT_FOUND)
+    
+    category_name = category.name
+    
+    # Check if category has products
+    products_count = Product.objects.filter(category=category).count()
+    if products_count > 0:
+        return Response({
+            'error': f'Cannot delete category. It has {products_count} product(s). Please remove or reassign products first.'
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    # Check if it's a parent category with subcategories
+    if category.parent is None:
+        subcategories_count = category.subcategories.count()
+        if subcategories_count > 0:
+            return Response({
+                'error': f'Cannot delete category. It has {subcategories_count} subcategor{("ies" if subcategories_count > 1 else "y")}. Please delete subcategories first.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+    
+    # Log activity
+    try:
+        AdminActivityLog.log_activity(
+            user=request.user,
+            activity_type='CATEGORY_DELETED',
+            description=f'Deleted category: {category_name}',
+            request=request,
+            metadata={
+                'category_id': category.id,
+                'category_name': category_name
+            }
+        )
+    except Exception:
+        # If activity logging fails, continue anyway
+        pass
+    
+    category.delete()
+    
+    return Response({
+        'message': 'Category deleted successfully',
+        'data': {
+            'category_id': category_id,
+            'category_name': category_name
+        }
+    }, status=status.HTTP_200_OK)
 
 
 @swagger_auto_schema(
