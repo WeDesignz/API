@@ -3526,29 +3526,40 @@ def design_action(request, design_id):
                 # Store flag information in product_metadata
                 if not design.product_metadata:
                     design.product_metadata = {}
+                # Store previous visibility_status before hiding (so we can restore it later)
+                design.product_metadata['previous_visibility_status'] = design.visibility_status
                 design.product_metadata['flagged'] = True
                 design.product_metadata['flag_reason'] = reason
                 design.product_metadata['flagged_by'] = request.user.id
                 design.product_metadata['flagged_at'] = timezone.now().isoformat()
-                # Use update() to bypass signals - only updating metadata, but safer to avoid signals
-                Product.objects.filter(pk=design.pk).update(product_metadata=design.product_metadata)
+                # Use update() to bypass signals - hide design from feed by setting visibility_status to 'hide'
+                Product.objects.filter(pk=design.pk).update(
+                    product_metadata=design.product_metadata,
+                    visibility_status='hide'
+                )
                 success = True
-                message = "Design flagged successfully"
-                logger.info(f'[design_action] Design flagged successfully: design_id={design_id}')
+                message = "Design flagged successfully and hidden from feed"
+                logger.info(f'[design_action] Design flagged and hidden from feed: design_id={design_id}')
             
             elif action == 'resolve_flag':
                 logger.debug(f'[design_action] Processing resolve_flag action')
-                # Clear flag information from product_metadata
+                # Get previous visibility_status before clearing flag (default to 'show' if not stored)
+                previous_visibility = 'show'
                 if design.product_metadata:
+                    previous_visibility = design.product_metadata.get('previous_visibility_status', 'show')
                     design.product_metadata.pop('flagged', None)
                     design.product_metadata.pop('flag_reason', None)
                     design.product_metadata.pop('flagged_by', None)
                     design.product_metadata.pop('flagged_at', None)
-                # Use update() to bypass signals - only updating metadata, but safer to avoid signals
-                Product.objects.filter(pk=design.pk).update(product_metadata=design.product_metadata)
+                    design.product_metadata.pop('previous_visibility_status', None)
+                # Use update() to bypass signals - restore visibility_status to previous value
+                Product.objects.filter(pk=design.pk).update(
+                    product_metadata=design.product_metadata,
+                    visibility_status=previous_visibility
+                )
                 success = True
-                message = "Flag resolved successfully"
-                logger.info(f'[design_action] Flag resolved successfully: design_id={design_id}')
+                message = "Flag resolved successfully and design restored to feed"
+                logger.info(f'[design_action] Flag resolved and design restored to feed: design_id={design_id}, visibility={previous_visibility}')
             
             else:
                 # Get or create design approval record for approve/reject/disable actions
