@@ -12,12 +12,12 @@ class CategorySerializer(serializers.ModelSerializer):
     Serializer for Category model with full CRUD operations.
     Handles category hierarchy and management.
     """
-    created_by = UserSerializer(read_only=True)
-    updated_by = UserSerializer(read_only=True)
+    created_by = UserSerializer(read_only=True, required=False)
+    updated_by = UserSerializer(read_only=True, required=False)
     parent = serializers.StringRelatedField(read_only=True)
     parent_id = serializers.IntegerField(write_only=True, required=False, allow_null=True)
-    created_by_id = serializers.IntegerField(write_only=True, required=False)
-    updated_by_id = serializers.IntegerField(write_only=True, required=False)
+    created_by_id = serializers.IntegerField(write_only=True, required=False, allow_null=True)
+    updated_by_id = serializers.IntegerField(write_only=True, required=False, allow_null=True)
     subcategories = serializers.SerializerMethodField()
     products_count = serializers.SerializerMethodField()
     
@@ -28,16 +28,32 @@ class CategorySerializer(serializers.ModelSerializer):
             'created_by', 'created_at', 'updated_by', 'updated_at',
             'created_by_id', 'updated_by_id'
         ]
-        read_only_fields = ['id', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'created_at', 'updated_at', 'created_by', 'updated_by']
     
     def get_subcategories(self, obj):
         """
         Get subcategories for this category.
         """
-        if obj:
-            subcategories = obj.subcategories.all()
-            return CategoryListSerializer(subcategories, many=True).data
-        return []
+        if not obj:
+            return []
+        
+        try:
+            # Access subcategories - prefetch_related should have loaded them
+            if hasattr(obj, 'subcategories'):
+                # Use prefetched subcategories if available
+                subcategories = obj.subcategories.all()
+                # Always return an array, even if empty
+                result = CategoryListSerializer(subcategories, many=True).data
+                return result if result is not None else []
+            return []
+        except Exception as e:
+            # Log error but return empty array
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Error getting subcategories for category {obj.id if obj else 'unknown'}: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return []
     
     def get_products_count(self, obj):
         """Get count of active and visible products in category and its subcategories"""
@@ -72,6 +88,41 @@ class CategorySerializer(serializers.ModelSerializer):
             except Category.DoesNotExist:
                 raise serializers.ValidationError("Parent category does not exist.")
         return value
+    
+    def validate(self, attrs):
+        """
+        Override validate to ensure created_by is not validated as required.
+        It will be set in create() method from context.
+        """
+        # Don't validate created_by here - it will be set in create()
+        return attrs
+    
+    def create(self, validated_data):
+        """
+        Create a new category instance.
+        If created_by is not in validated_data, it will be set from the context.
+        """
+        # Remove created_by_id if present (we'll use created_by from context)
+        validated_data.pop('created_by_id', None)
+        validated_data.pop('updated_by_id', None)
+        
+        # Get created_by from context if available - this is required for the model
+        created_by = self.context.get('created_by')
+        if not created_by:
+            # If no created_by in context, try to get from request if available
+            request = self.context.get('request')
+            if request and hasattr(request, 'user'):
+                created_by = request.user
+        
+        if created_by:
+            validated_data['created_by'] = created_by
+        else:
+            # This should not happen, but raise an error if it does
+            raise serializers.ValidationError({
+                'created_by': 'Created by user is required. Please ensure you are authenticated.'
+            })
+        
+        return super().create(validated_data)
 
 
 class CategoryListSerializer(serializers.ModelSerializer):
@@ -80,16 +131,37 @@ class CategoryListSerializer(serializers.ModelSerializer):
     """
     parent = serializers.StringRelatedField(read_only=True)
     subcategories_count = serializers.SerializerMethodField()
+    products_count = serializers.SerializerMethodField()
     
     class Meta:
         model = Category
-        fields = ['id', 'name', 'parent', 'subcategories_count', 'created_at']
+        fields = ['id', 'name', 'parent', 'subcategories_count', 'products_count', 'created_at']
     
     def get_subcategories_count(self, obj):
         """
         Get count of subcategories.
         """
         return obj.subcategories.count()
+    
+    def get_products_count(self, obj):
+        """Get count of active and visible products in category and its subcategories"""
+        # Get all subcategory IDs (including nested subcategories)
+        def get_all_subcategory_ids(category):
+            subcategory_ids = [category.id]
+            for subcat in category.subcategories.all():
+                subcategory_ids.extend(get_all_subcategory_ids(subcat))
+            return subcategory_ids
+        
+        # Get all category IDs (this category + all subcategories)
+        all_category_ids = get_all_subcategory_ids(obj)
+        
+        # Count products in this category and all subcategories
+        from .models import Product
+        return Product.objects.filter(
+            category_id__in=all_category_ids,
+            status='active',
+            visibility_status='show'
+        ).count()
 
 
 class TagsSerializer(serializers.ModelSerializer):
@@ -1638,17 +1710,45 @@ class CategorySerializer(serializers.ModelSerializer):
     """
     Serializer for category management.
     """
+    parent = serializers.StringRelatedField(read_only=True)
+    parent_id = serializers.IntegerField(write_only=True, required=False, allow_null=True)
     parent_name = serializers.CharField(source='parent.name', read_only=True)
+    subcategories = serializers.SerializerMethodField()
     subcategories_count = serializers.SerializerMethodField()
     products_count = serializers.SerializerMethodField()
     
     class Meta:
         model = Category
         fields = [
-            'id', 'name', 'parent', 'parent_name', 'created_by', 'created_at',
+            'id', 'name', 'parent', 'parent_id', 'parent_name', 'subcategories', 'created_by', 'created_at',
             'updated_by', 'updated_at', 'subcategories_count', 'products_count'
         ]
-        read_only_fields = ['id', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'created_at', 'updated_at', 'created_by', 'updated_by']
+    
+    def get_subcategories(self, obj):
+        """
+        Get subcategories for this category.
+        """
+        if not obj:
+            return []
+        
+        try:
+            # Access subcategories - prefetch_related should have loaded them
+            if hasattr(obj, 'subcategories'):
+                # Use prefetched subcategories if available
+                subcategories = obj.subcategories.all()
+                # Always return an array, even if empty
+                result = CategoryListSerializer(subcategories, many=True).data
+                return result if result is not None else []
+            return []
+        except Exception as e:
+            # Log error but return empty array
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Error getting subcategories for category {obj.id if obj else 'unknown'}: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return []
     
     def get_subcategories_count(self, obj):
         """Get count of subcategories"""
@@ -1675,6 +1775,46 @@ class CategorySerializer(serializers.ModelSerializer):
             status='active',
             visibility_status='show'
         ).count()
+    
+    def validate(self, attrs):
+        """
+        Override validate to ensure created_by is not validated as required.
+        It will be set in create() method from context.
+        """
+        # Don't validate created_by here - it will be set in create()
+        return attrs
+    
+    def create(self, validated_data):
+        """
+        Create a new category instance.
+        If created_by is not in validated_data, it will be set from the context.
+        """
+        # Remove created_by_id if present (we'll use created_by from context)
+        validated_data.pop('created_by_id', None)
+        validated_data.pop('updated_by_id', None)
+        
+        # Get created_by from context if available - this is required for the model
+        created_by = self.context.get('created_by')
+        if not created_by:
+            # If no created_by in context, try to get from request if available
+            request = self.context.get('request')
+            if request and hasattr(request, 'user'):
+                created_by = request.user
+        
+        if not created_by:
+            # This should not happen, but raise an error if it does
+            raise serializers.ValidationError({
+                'created_by': 'Created by user is required. Please ensure you are authenticated.'
+            })
+        
+        # Create the category instance directly with created_by
+        from .models import Category
+        category = Category.objects.create(
+            **validated_data,
+            created_by=created_by
+        )
+        
+        return category
 
 
 class TagSerializer(serializers.ModelSerializer):

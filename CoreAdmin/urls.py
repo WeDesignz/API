@@ -54,6 +54,7 @@ urlpatterns = [
     path('designs/stats/', views.design_stats, name='design_stats'),
     path('categories/', views.categories_list, name='categories_list'),
     path('categories/create/', views.create_category, name='create_category'),
+    path('categories/<int:category_id>/delete/', views.delete_category, name='delete_category'),
     path('tags/', views.tags_list, name='tags_list'),
     path('copyright-reports/', views.copyright_reports_list, name='copyright_reports_list'),
     path('copyright-reports/<int:report_id>/action/', views.copyright_report_action, name='copyright_report_action'),
