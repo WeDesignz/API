@@ -566,7 +566,7 @@ def request_password_reset(request):
         
         # Default: Send via email
         email = serializer.validated_data['email']
-        user = User.objects.get(email=email)
+        user = User.objects.get(email__iexact=email)
         
         OTP.objects.create(
             otp=otp,
@@ -648,7 +648,7 @@ def verify_password_reset_otp(request):
     # Find user by email or phone number
     if email:
         try:
-            user = User.objects.get(email=email)
+            user = User.objects.get(email__iexact=email)
         except User.DoesNotExist:
             return Response({
                 'error': 'User with this email does not exist.'
@@ -1216,11 +1216,11 @@ def resend_otp(request):
         if email:
             # Check if email exists in Email model (for additional emails)
             try:
-                email_obj = Email.objects.get(email=email, created_by=request.user)
+                email_obj = Email.objects.get(email__iexact=email, created_by=request.user)
                 user = request.user
             except Email.DoesNotExist:
                 # Fallback to User model (for primary email)
-                if request.user.email == email:
+                if request.user.email.lower() == email.lower():
                     user = request.user
                 else:
                     return Response({

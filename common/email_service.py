@@ -29,31 +29,20 @@ class EmailService:
             static_root = os.path.join(settings.BASE_DIR, 'staticfiles')
         
         logo_path = os.path.join(static_root, 'Logos', 'ONLY LOGO.png')
-        if not os.path.exists(logo_path):
-            logo_path = os.path.join(static_root, 'Logos', 'ONLY LOGO.svg')
-        
         text_path = os.path.join(static_root, 'Logos', 'ONLY TEXT.png')
-        if not os.path.exists(text_path):
-            text_path = os.path.join(static_root, 'Logos', 'ONLY TEXT.svg')
         
         if os.path.exists(logo_path):
             with open(logo_path, 'rb') as f:
                 logo_data = f.read()
                 logo_base64 = base64.b64encode(logo_data).decode('utf-8')
-                if logo_path.endswith('.svg'):
-                    logo_mime = 'image/svg+xml'
-                else:
-                    logo_mime = 'image/png'
+                logo_mime = 'image/png'
                 logo_url = f"data:{logo_mime};base64,{logo_base64}"
         
         if os.path.exists(text_path):
             with open(text_path, 'rb') as f:
                 text_data = f.read()
                 text_base64 = base64.b64encode(text_data).decode('utf-8')
-                if text_path.endswith('.svg'):
-                    text_mime = 'image/svg+xml'
-                else:
-                    text_mime = 'image/png'
+                text_mime = 'image/png'
                 text_url = f"data:{text_mime};base64,{text_base64}"
         
         return logo_url, text_url
@@ -730,22 +719,13 @@ WeDesignz Team
                 static_root = os.path.join(settings.BASE_DIR, 'staticfiles')
             
             logo_path = os.path.join(static_root, 'Logos', 'ONLY LOGO.png')
-            if not os.path.exists(logo_path):
-                logo_path = os.path.join(static_root, 'Logos', 'ONLY LOGO.svg')
-            
             text_path = os.path.join(static_root, 'Logos', 'ONLY TEXT.png')
-            if not os.path.exists(text_path):
-                text_path = os.path.join(static_root, 'Logos', 'ONLY TEXT.svg')
             
             if os.path.exists(logo_path):
                 with open(logo_path, 'rb') as f:
                     logo_data = f.read()
                     logo_base64 = base64.b64encode(logo_data).decode('utf-8')
-                    # Determine MIME type
-                    if logo_path.endswith('.svg'):
-                        logo_mime = 'image/svg+xml'
-                    else:
-                        logo_mime = 'image/png'
+                    logo_mime = 'image/png'
                     logo_url = f"data:{logo_mime};base64,{logo_base64}"
             else:
                 logo_url = None
@@ -754,11 +734,7 @@ WeDesignz Team
                 with open(text_path, 'rb') as f:
                     text_data = f.read()
                     text_base64 = base64.b64encode(text_data).decode('utf-8')
-                    # Determine MIME type
-                    if text_path.endswith('.svg'):
-                        text_mime = 'image/svg+xml'
-                    else:
-                        text_mime = 'image/png'
+                    text_mime = 'image/png'
                     text_url = f"data:{text_mime};base64,{text_base64}"
             else:
                 text_url = None
@@ -837,22 +813,13 @@ WeDesignz Team
                 static_root = os.path.join(settings.BASE_DIR, 'staticfiles')
             
             logo_path = os.path.join(static_root, 'Logos', 'ONLY LOGO.png')
-            if not os.path.exists(logo_path):
-                logo_path = os.path.join(static_root, 'Logos', 'ONLY LOGO.svg')
-            
             text_path = os.path.join(static_root, 'Logos', 'ONLY TEXT.png')
-            if not os.path.exists(text_path):
-                text_path = os.path.join(static_root, 'Logos', 'ONLY TEXT.svg')
             
             if os.path.exists(logo_path):
                 with open(logo_path, 'rb') as f:
                     logo_data = f.read()
                     logo_base64 = base64.b64encode(logo_data).decode('utf-8')
-                    # Determine MIME type
-                    if logo_path.endswith('.svg'):
-                        logo_mime = 'image/svg+xml'
-                    else:
-                        logo_mime = 'image/png'
+                    logo_mime = 'image/png'
                     logo_url = f"data:{logo_mime};base64,{logo_base64}"
             else:
                 logo_url = None
@@ -861,11 +828,7 @@ WeDesignz Team
                 with open(text_path, 'rb') as f:
                     text_data = f.read()
                     text_base64 = base64.b64encode(text_data).decode('utf-8')
-                    # Determine MIME type
-                    if text_path.endswith('.svg'):
-                        text_mime = 'image/svg+xml'
-                    else:
-                        text_mime = 'image/png'
+                    text_mime = 'image/png'
                     text_url = f"data:{text_mime};base64,{text_base64}"
             else:
                 text_url = None

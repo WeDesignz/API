@@ -275,7 +275,7 @@ class LoginSerializer(serializers.Serializer):
         # If not found, try with email
         if not user:
             try:
-                user_obj = User.objects.get(email=username)
+                user_obj = User.objects.get(email__iexact=username)
                 user = authenticate(username=user_obj.username, password=password)
             except User.DoesNotExist:
                 pass
@@ -311,7 +311,7 @@ class EmailVerificationSerializer(serializers.Serializer):
         otp = attrs.get('otp')
         
         try:
-            user = User.objects.get(email=email)
+            user = User.objects.get(email__iexact=email)
         except User.DoesNotExist:
             raise serializers.ValidationError("User with this email does not exist.")
         
@@ -353,9 +353,9 @@ class PasswordResetRequestSerializer(serializers.Serializer):
         if not value:
             return value
         try:
-            user = User.objects.get(email=value)
+            user = User.objects.get(email__iexact=value)
             # Check if email is verified
-            email_obj = Email.objects.get(email=value, created_by=user, is_verified=True)
+            email_obj = Email.objects.get(email__iexact=value, created_by=user, is_verified=True)
         except User.DoesNotExist:
             raise serializers.ValidationError("User with this email does not exist.")
         except Email.DoesNotExist:
@@ -455,7 +455,7 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
         # Find user by email or phone number
         if email:
             try:
-                user = User.objects.get(email=email)
+                user = User.objects.get(email__iexact=email)
             except User.DoesNotExist:
                 raise serializers.ValidationError("User with this email does not exist.")
         elif phone_number:
@@ -706,7 +706,7 @@ class EmailAddressVerificationSerializer(serializers.Serializer):
         user = self.context.get('user')
         
         try:
-            email_obj = Email.objects.get(email=email, created_by=user)
+            email_obj = Email.objects.get(email__iexact=email, created_by=user)
         except Email.DoesNotExist:
             raise serializers.ValidationError("Email address not found for this user.")
         
