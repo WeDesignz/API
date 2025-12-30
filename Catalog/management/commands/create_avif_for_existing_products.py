@@ -83,6 +83,18 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS('AVIF Conversion for Existing Products'))
         self.stdout.write(self.style.SUCCESS('=' * 80 + '\n'))
 
+        # Check AVIF support upfront
+        from common.avif_converter import is_avif_supported
+        if not is_avif_supported():
+            self.stdout.write(self.style.ERROR('\n❌ AVIF format is not supported!\n'))
+            self.stdout.write(self.style.WARNING('To enable AVIF support, please install the required package:\n'))
+            self.stdout.write('   pip install pillow-avif-plugin\n')
+            self.stdout.write('\nNote: You may also need to install system libraries:\n')
+            self.stdout.write('   Ubuntu/Debian: sudo apt-get install libavif-dev libavif-bin\n')
+            self.stdout.write('   CentOS/RHEL: sudo yum install libavif-devel\n')
+            self.stdout.write('\nAfter installation, restart your application and run this command again.\n')
+            return
+
         if dry_run:
             self.stdout.write(self.style.WARNING('DRY RUN MODE: No AVIF files will be created\n'))
 
