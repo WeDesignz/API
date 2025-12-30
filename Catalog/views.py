@@ -1707,7 +1707,7 @@ def upload_designs_bulk(request):
                                     root_folder = parts[0]
                                     break
                         
-                        # Extract actual design folders from zip
+                        # Extract actual design folders from zip - handle both 2-part and 3-part paths
                         zip_folders = {}
                         required_files = {'.eps', '.cdr', '.jpg', '.png'}
                         folders_with_wrong_structure = []  # Track folders with wrong path structure
@@ -1719,46 +1719,88 @@ def upload_designs_bulk(request):
                             if '/' in file_name:
                                 parts = file_name.split('/')
                                 
-                                # Track folders with wrong structure
-                                if len(parts) < 3:
-                                    # Try to identify the folder name for better error message
-                                    if len(parts) == 2:
-                                        potential_folder = parts[0]
-                                        if potential_folder not in folders_with_wrong_structure:
-                                            folders_with_wrong_structure.append(potential_folder)
+                                # Handle both cases:
+                                # 1. root_folder/design_folder/file.ext (3 parts) - e.g., "123/WD01/WD01.eps"
+                                # 2. design_folder/file.ext (2 parts) - e.g., "WD01/WD01.eps" (if zip created from inside root folder)
+                                
+                                if len(parts) < 2:
+                                    # Skip files at root level (not in any folder)
                                     continue
                                 
-                                root_folder_name = parts[0].lower()
-                                folder_name = parts[1]
-                                file_name_only = parts[-1]
+                                # Determine folder name and file info based on path length
+                                if len(parts) == 2:
+                                    # Case 2: design_folder/file.ext (zip created from inside root folder)
+                                    folder_name = parts[0]
+                                    file_name_only = parts[1]
+                                elif len(parts) == 3:
+                                    # Case 1: root_folder/design_folder/file.ext (normal case)
+                                    root_folder_name = parts[0].lower()
+                                    folder_name = parts[1]
+                                    file_name_only = parts[2]
+                                    
+                                    # Skip system folders
+                                    if root_folder_name in SYSTEM_FOLDERS or folder_name.lower() in SYSTEM_FOLDERS:
+                                        continue
+                                else:
+                                    # More than 3 parts - wrong structure
+                                    if len(parts) >= 2:
+                                        folder_name = parts[1]  # Still use second part as folder name for error reporting
+                                    else:
+                                        continue
+                                    if folder_name not in folders_with_wrong_structure:
+                                        folders_with_wrong_structure.append(folder_name)
+                                    continue
+                                
                                 file_ext = os.path.splitext(file_name_only)[1].lower()
                                 file_name_lower = file_name_only.lower()
                                 
+                                # Check if it's an optional mockup file (case insensitive - any case of "mockup")
                                 is_mockup_file = file_name_lower == 'mockup.jpg' or file_name_lower == 'mockup.png'
                                 
-                                if root_folder_name in SYSTEM_FOLDERS or folder_name.lower() in SYSTEM_FOLDERS:
+                                # Skip system folders (check folder name)
+                                if folder_name.lower() in SYSTEM_FOLDERS:
                                     continue
                                 
-                                # Track folders with too many levels
-                                if len(parts) > 3:
-                                    if folder_name not in folders_with_wrong_structure:
-                                        folders_with_wrong_structure.append(folder_name)
-                                
-                                if len(parts) == 3 and (file_ext in required_files or is_mockup_file):
-                                    if folder_name not in zip_folders:
-                                        zip_folders[folder_name] = set()
-                                    if file_ext in required_files:
-                                        zip_folders[folder_name].add(file_ext)
+                                # Process files in design folders
+                                # Accept required files or optional mockup files
+                                if len(parts) == 2 or len(parts) == 3:
+                                    if file_ext in required_files or is_mockup_file:
+                                        if folder_name not in zip_folders:
+                                            zip_folders[folder_name] = set()
+                                        # Only add required files to the set (mockup is optional)
+                                        if file_ext in required_files:
+                                            zip_folders[folder_name].add(file_ext)
                         
                         # Check for folder structure issues first
                         if folders_with_wrong_structure:
                             structure_examples = list(folders_with_wrong_structure)[:5]
                             more_count = len(folders_with_wrong_structure) - 5 if len(folders_with_wrong_structure) > 5 else 0
-                            validation_errors.append(f'❌ Incorrect folder structure detected: Some folders have the wrong path structure. Expected format: root_folder/design_folder/file.ext (exactly 3 levels). Found issues in: {", ".join(structure_examples)}{f" (and {more_count} more)" if more_count > 0 else ""}. Please ensure your zip has the structure: root_folder/design_folder/file.ext')
+                            validation_errors.append(f'❌ Incorrect folder structure detected: Some folders have the wrong path structure. Expected format: root_folder/design_folder/file.ext (3 levels) or design_folder/file.ext (2 levels). Found issues in: {", ".join(structure_examples)}{f" (and {more_count} more)" if more_count > 0 else ""}. Please ensure your zip has the structure: root_folder/design_folder/file.ext or design_folder/file.ext')
                         
                         # Check if any folders were detected at all
                         if not zip_folders:
-                            validation_errors.append('❌ No design folders detected: The system could not find any design folders in your zip file. Please ensure: (1) Your zip has the structure: root_folder/design_folder/file.ext (exactly 3 levels), (2) Each folder contains files with extensions: .eps, .cdr, .jpg, .png')
+                            # Provide more diagnostic information
+                            design_file_count = 0
+                            sample_paths = []
+                            for file_name in all_files:
+                                if file_name == metadata_file or file_name.endswith('/'):
+                                    continue
+                                if '/' in file_name:
+                                    parts = file_name.split('/')
+                                    if len(parts) >= 2:
+                                        file_ext = os.path.splitext(parts[-1])[1].lower()
+                                        if file_ext in required_files:
+                                            design_file_count += 1
+                                            if len(sample_paths) < 3:
+                                                sample_paths.append(file_name)
+                            
+                            error_msg = '❌ No design folders detected: The system could not find any design folders in your zip file. '
+                            if design_file_count > 0:
+                                error_msg += f'Found {design_file_count} design files, but they may have incorrect folder structure. '
+                                if sample_paths:
+                                    error_msg += f'Sample file paths: {", ".join(sample_paths[:3])}. '
+                            error_msg += 'Please ensure: (1) Your zip has the structure: root_folder/design_folder/file.ext (3 levels) or design_folder/file.ext (2 levels), (2) Each folder contains files with extensions: .eps, .cdr, .jpg, .png'
+                            validation_errors.append(error_msg)
                         else:
                             # Analyze which folders are missing which files BEFORE filtering
                             invalid_folders_detailed = []
