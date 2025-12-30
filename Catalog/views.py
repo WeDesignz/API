@@ -1710,6 +1710,7 @@ def upload_designs_bulk(request):
                         # Extract actual design folders from zip
                         zip_folders = {}
                         required_files = {'.eps', '.cdr', '.jpg', '.png'}
+                        folders_with_wrong_structure = []  # Track folders with wrong path structure
                         
                         for file_name in all_files:
                             if file_name == metadata_file or file_name.endswith('/'):
@@ -1718,7 +1719,13 @@ def upload_designs_bulk(request):
                             if '/' in file_name:
                                 parts = file_name.split('/')
                                 
+                                # Track folders with wrong structure
                                 if len(parts) < 3:
+                                    # Try to identify the folder name for better error message
+                                    if len(parts) == 2:
+                                        potential_folder = parts[0]
+                                        if potential_folder not in folders_with_wrong_structure:
+                                            folders_with_wrong_structure.append(potential_folder)
                                     continue
                                 
                                 root_folder_name = parts[0].lower()
@@ -1732,35 +1739,83 @@ def upload_designs_bulk(request):
                                 if root_folder_name in SYSTEM_FOLDERS or folder_name.lower() in SYSTEM_FOLDERS:
                                     continue
                                 
+                                # Track folders with too many levels
+                                if len(parts) > 3:
+                                    if folder_name not in folders_with_wrong_structure:
+                                        folders_with_wrong_structure.append(folder_name)
+                                
                                 if len(parts) == 3 and (file_ext in required_files or is_mockup_file):
                                     if folder_name not in zip_folders:
                                         zip_folders[folder_name] = set()
                                     if file_ext in required_files:
                                         zip_folders[folder_name].add(file_ext)
                         
-                        # Filter folders that have all required files
-                        valid_design_folders = {}
-                        for folder_name, files in zip_folders.items():
-                            if all(ext in files for ext in required_files):
-                                valid_design_folders[folder_name] = files
+                        # Check for folder structure issues first
+                        if folders_with_wrong_structure:
+                            structure_examples = list(folders_with_wrong_structure)[:5]
+                            more_count = len(folders_with_wrong_structure) - 5 if len(folders_with_wrong_structure) > 5 else 0
+                            validation_errors.append(f'❌ Incorrect folder structure detected: Some folders have the wrong path structure. Expected format: root_folder/design_folder/file.ext (exactly 3 levels). Found issues in: {", ".join(structure_examples)}{f" (and {more_count} more)" if more_count > 0 else ""}. Please ensure your zip has the structure: root_folder/design_folder/file.ext')
+                        
+                        # Check if any folders were detected at all
+                        if not zip_folders:
+                            validation_errors.append('❌ No design folders detected: The system could not find any design folders in your zip file. Please ensure: (1) Your zip has the structure: root_folder/design_folder/file.ext (exactly 3 levels), (2) Each folder contains files with extensions: .eps, .cdr, .jpg, .png')
+                        else:
+                            # Analyze which folders are missing which files BEFORE filtering
+                            invalid_folders_detailed = []
+                            for folder_name, files in zip_folders.items():
+                                missing_files = required_files - files
+                                if missing_files:
+                                    invalid_folders_detailed.append({
+                                        'folder': folder_name,
+                                        'missing': list(missing_files),
+                                        'has': list(files)
+                                    })
+                            
+                            # Filter folders that have all required files
+                            valid_design_folders = {}
+                            for folder_name, files in zip_folders.items():
+                                if all(ext in files for ext in required_files):
+                                    valid_design_folders[folder_name] = files
+                            
+                            # Provide detailed feedback about missing files
+                            if invalid_folders_detailed:
+                                total_invalid = len(invalid_folders_detailed)
+                                total_detected = len(zip_folders)
+                                
+                                # Show first few examples with details
+                                examples = invalid_folders_detailed[:5]
+                                example_texts = []
+                                for item in examples:
+                                    has_files = ', '.join(item['has']) if item['has'] else 'none'
+                                    example_texts.append(f"{item['folder']} (missing: {', '.join(item['missing'])}, has: {has_files})")
+                                
+                                more_count = total_invalid - 5 if total_invalid > 5 else 0
+                                
+                                if len(valid_design_folders) == 0:
+                                    # All folders are invalid - provide comprehensive error
+                                    validation_errors.append(f'❌ All {total_detected} design folders are missing required files: Each folder must contain all 4 file types (.eps, .cdr, .jpg, .png). Examples: {"; ".join(example_texts)}{f" (and {more_count} more folders with similar issues)" if more_count > 0 else ""}. Please add the missing file types to each folder.')
+                                else:
+                                    # Some folders are valid, some are not
+                                    validation_errors.append(f'❌ {total_invalid} out of {total_detected} design folders are missing required files. Each folder must contain all 4 file types (.eps, .cdr, .jpg, .png). Examples: {"; ".join(example_texts)}{f" (and {more_count} more)" if more_count > 0 else ""}')
                         
                         # NOTE: No minimum design requirement for regular bulk uploads
                         # (unlike onboarding which requires minimum designs)
                         
-                        # Validate folder_name mapping
-                        zip_folder_names = set(valid_design_folders.keys())
-                        missing_in_zip = excel_folders - zip_folder_names
-                        missing_in_excel = zip_folder_names - excel_folders
-                        
-                        if missing_in_zip:
-                            missing_list = list(missing_in_zip)[:10]
-                            more_count = len(missing_in_zip) - 10 if len(missing_in_zip) > 10 else 0
-                            validation_errors.append(f'❌ Folders listed in metadata.xlsx but not found in zip file: {", ".join(missing_list)}{f" (and {more_count} more)" if more_count > 0 else ""}. Please ensure these folders exist in your zip file.')
-                        
-                        if missing_in_excel:
-                            missing_list = list(missing_in_excel)[:10]
-                            more_count = len(missing_in_excel) - 10 if len(missing_in_excel) > 10 else 0
-                            validation_errors.append(f'❌ Folders found in zip file but not listed in metadata.xlsx: {", ".join(missing_list)}{f" (and {more_count} more)" if more_count > 0 else ""}. Please add these folders to the "folder_name" column in your metadata.xlsx file.')
+                        # Validate folder_name mapping (only if we have valid folders)
+                        if valid_design_folders:
+                            zip_folder_names = set(valid_design_folders.keys())
+                            missing_in_zip = excel_folders - zip_folder_names
+                            missing_in_excel = zip_folder_names - excel_folders
+                            
+                            if missing_in_zip:
+                                missing_list = list(missing_in_zip)[:10]
+                                more_count = len(missing_in_zip) - 10 if len(missing_in_zip) > 10 else 0
+                                validation_errors.append(f'❌ Folders listed in metadata.xlsx but not found in zip file: {", ".join(missing_list)}{f" (and {more_count} more)" if more_count > 0 else ""}. Please ensure these folders exist in your zip file and contain all required files (.eps, .cdr, .jpg, .png).')
+                            
+                            if missing_in_excel:
+                                missing_list = list(missing_in_excel)[:10]
+                                more_count = len(missing_in_excel) - 10 if len(missing_in_excel) > 10 else 0
+                                validation_errors.append(f'❌ Folders found in zip file but not listed in metadata.xlsx: {", ".join(missing_list)}{f" (and {more_count} more)" if more_count > 0 else ""}. Please add these folders to the "folder_name" column in your metadata.xlsx file.')
                         
                         # Validate each design folder has required files
                         invalid_folders = []

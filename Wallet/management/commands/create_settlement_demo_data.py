@@ -389,3 +389,4 @@ class Command(BaseCommand):
         self.stdout.write('\nYou can now test the admin settlement page with this demo data.')
         self.stdout.write('All demo designers have password: demo123')
         self.stdout.write('\n')
+
