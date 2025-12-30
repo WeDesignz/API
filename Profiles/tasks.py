@@ -430,6 +430,17 @@ def process_design_upload_task(self, task_id, zip_file_path):
                         
                         # Create Media instances
                         logger.info(f"Task {task_id}: Creating media files for {folder_name}...")
+                        
+                        # Ensure product_number is available
+                        if not product.product_number:
+                            logger.warning(f"Task {task_id}: Product {product.id} has no product_number, refreshing from DB...")
+                            product.refresh_from_db()
+                            if not product.product_number:
+                                logger.error(f"Task {task_id}: Product {product.id} still has no product_number after refresh")
+                                raise ValueError(f"Product {product.id} has no product_number")
+                        
+                        product_number = product.product_number
+                        
                         # Set product context for file path generation
                         Media.set_product_context(product.id)
                         try:
@@ -439,9 +450,13 @@ def process_design_upload_task(self, task_id, zip_file_path):
                                     file_data = zip_ref.read(file_path)
                                     file_name = os.path.basename(file_path)
                                     media_type = 'image'
-                                    safe_file_name = f"{folder_name}_{file_name}"
-                                    media_file = ContentFile(file_data, name=safe_file_name)
-                                    logger.info(f"Task {task_id}: Creating Media object for {file_name}...")
+                                    
+                                    # Generate new filename using product_number
+                                    # file_ext already includes the dot (e.g., '.eps')
+                                    new_filename = f'{product_number}{file_ext}'
+                                    
+                                    media_file = ContentFile(file_data, name=new_filename)
+                                    logger.info(f"Task {task_id}: Creating Media object for {file_name} -> {new_filename}...")
                                     media = Media.objects.create(
                                         file=media_file,
                                         media_type=media_type,
@@ -471,9 +486,13 @@ def process_design_upload_task(self, task_id, zip_file_path):
                                     file_data = zip_ref.read(mockup_file)
                                     file_name = os.path.basename(mockup_file)
                                     media_type = 'image'
-                                    safe_file_name = f"{folder_name}_{file_name}"
-                                    media_file = ContentFile(file_data, name=safe_file_name)
-                                    logger.info(f"Task {task_id}: Creating Media object for mockup {file_name}...")
+                                    
+                                    # Generate new filename using product_number with MOCKUP suffix
+                                    file_ext = os.path.splitext(file_name)[1].lower()
+                                    new_filename = f'{product_number}_MOCKUP{file_ext}'
+                                    
+                                    media_file = ContentFile(file_data, name=new_filename)
+                                    logger.info(f"Task {task_id}: Creating Media object for mockup {file_name} -> {new_filename}...")
                                     media = Media.objects.create(
                                         file=media_file,
                                         media_type=media_type,

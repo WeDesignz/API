@@ -39,6 +39,16 @@ def process_single_design_upload(
             logger.error(f'Product {product_id} not found')
             return {'status': 'failed', 'error': 'Product not found'}
         
+        # Ensure product_number is available
+        if not product.product_number:
+            logger.warning(f'Product {product_id} has no product_number, refreshing from DB...')
+            product.refresh_from_db()
+            if not product.product_number:
+                logger.error(f'Product {product_id} still has no product_number after refresh')
+                return {'status': 'failed', 'error': 'Product has no product_number'}
+        
+        product_number = product.product_number
+        
         # Process files
         from django.conf import settings
         from django.core.files.storage import default_storage
@@ -66,12 +76,23 @@ def process_single_design_upload(
                 else:
                     media_type = 'image'
                 
+                # Detect if this is a mockup file (filename must be exactly "mockup" or contains "mockup")
+                base_name = os.path.splitext(os.path.basename(file_name_lower))[0]
+                is_mockup = base_name == 'mockup' or 'mockup' in file_name_lower
+                
+                # Generate new filename using product_number
+                file_ext = os.path.splitext(file_name)[1].lower()
+                if is_mockup:
+                    new_filename = f'{product_number}_MOCKUP{file_ext}'
+                else:
+                    new_filename = f'{product_number}{file_ext}'
+                
                 # Set product context for file path generation
                 Media.set_product_context(product.id)
                 try:
-                    # Open file from storage and create Media object
+                    # Open file from storage and create Media object with new filename
                     with default_storage.open(file_path, 'rb') as storage_file:
-                        django_file = File(storage_file, name=file_name)
+                        django_file = File(storage_file, name=new_filename)
                         media_obj = Media.objects.create(
                             file=django_file,
                             media_type=media_type,
@@ -87,10 +108,6 @@ def process_single_design_upload(
                     logger.info(f'Deleted temp file: {file_path}')
                 except Exception as e:
                     logger.warning(f'Failed to delete temp file {file_path}: {str(e)}')
-                
-                # Detect if this is a mockup file (filename must be exactly "mockup")
-                base_name = os.path.splitext(os.path.basename(file_name_lower))[0]
-                is_mockup = base_name == 'mockup'
                 
                 # Attach metadata
                 upload_metadata = {
@@ -109,7 +126,7 @@ def process_single_design_upload(
                 # Attach media to product
                 product.attach_media(media_obj, meta=upload_metadata, created_by=product.created_by)
                 processed_files += 1
-                logger.info(f'Processed file {file_name} for product {product_id}')
+                logger.info(f'Processed file {file_name} -> {new_filename} for product {product_id}')
                 
             except Exception as e:
                 logger.error(f'Failed to process file {file_data.get("name", "unknown")}: {str(e)}', exc_info=True)
