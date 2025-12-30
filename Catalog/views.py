@@ -1512,7 +1512,7 @@ def upload_design(request):
         for idx, file in enumerate(design_files):
             try:
                 file_name = f"{timestamp}_{file.name}"
-                relative_path = f'temp_uploads/{request.user.id}/{file_name}'
+                relative_path = f'{request.user.id}/temp/{file_name}'
                 
                 logger.info(f'Saving file {idx+1}/{len(design_files)}: {file.name} ({file.size} bytes)')
                 # Use default_storage.save() which handles file writing efficiently
@@ -1886,10 +1886,10 @@ def upload_designs_bulk(request):
         # Save zip file to storage
         try:
             timestamp = timezone.now().strftime('%Y%m%d_%H%M%S')
-            user_upload_dir = os.path.join(settings.MEDIA_ROOT, 'design_uploads', str(request.user.id))
+            user_upload_dir = os.path.join(settings.MEDIA_ROOT, str(request.user.id), 'uploads')
             os.makedirs(user_upload_dir, exist_ok=True)
             
-            zip_file_path = f'design_uploads/{request.user.id}/{timestamp}_{zip_file.name}'
+            zip_file_path = f'{request.user.id}/uploads/{timestamp}_{zip_file.name}'
             
             # Reset file pointer before saving
             zip_file.seek(0)
@@ -2216,22 +2216,28 @@ def design_detail(request, design_id):
                     # Handle file uploads if present
                     if has_file_updates:
                         design_files = request.FILES.getlist('design_files')
-                        for file in design_files:
-                            media_obj = Media.objects.create(
-                                file=file,
-                                media_type='image' if file.content_type and file.content_type.startswith('image/') else 'video',
-                                created_by=request.user
-                            )
-                            
-                            # Attach upload metadata
-                            upload_metadata = {
-                                'timestamp': timezone.now().isoformat(),
-                                'original_filename': file.name,
-                                'file_size': file.size,
-                                'content_type': file.content_type if file.content_type else 'application/octet-stream'
-                            }
-                            
-                            design.attach_media(media_obj, meta=upload_metadata, created_by=request.user)
+                        # Set product context for file path generation
+                        Media.set_product_context(design.id)
+                        try:
+                            for file in design_files:
+                                media_obj = Media.objects.create(
+                                    file=file,
+                                    media_type='image' if file.content_type and file.content_type.startswith('image/') else 'video',
+                                    created_by=request.user
+                                )
+                                
+                                # Attach upload metadata
+                                upload_metadata = {
+                                    'timestamp': timezone.now().isoformat(),
+                                    'original_filename': file.name,
+                                    'file_size': file.size,
+                                    'content_type': file.content_type if file.content_type else 'application/octet-stream'
+                                }
+                                
+                                design.attach_media(media_obj, meta=upload_metadata, created_by=request.user)
+                        finally:
+                            # Clear product context
+                            Media.clear_product_context()
                     
                     # Handle tags if provided
                     if 'tags' in request.data:
@@ -3078,22 +3084,45 @@ def download_pdf_file(request, download_id):
             logger = logging.getLogger(__name__)
             logger.warning(f'PDF download {download_id} has no file path but status is completed. Attempting to locate file.')
             
-            # Try to find the file with expected name
+            # Try to find the file - check both new and old locations
             from django.http import FileResponse
             import os
             expected_filename = f'pdf_download_{download_id}.pdf'
-            pdf_dir = os.path.join(settings.MEDIA_ROOT, 'pdfs')
-            expected_path = os.path.join(pdf_dir, expected_filename)
             
-            if os.path.exists(expected_path):
-                # Update the database with the correct path
-                pdf_download.pdf_file_path = f'pdfs/{expected_filename}'
-                pdf_download.file_size = os.path.getsize(expected_path)
-                pdf_download.save()
+            # Try new location first (user-specific)
+            user = pdf_download.get_user()
+            if user:
+                user_id = user.id
+                pdf_dir = os.path.join(settings.MEDIA_ROOT, str(user_id), 'pdfs')
+                expected_path = os.path.join(pdf_dir, expected_filename)
+                if os.path.exists(expected_path):
+                    pdf_download.pdf_file_path = f'{user_id}/pdfs/{expected_filename}'
+                    pdf_download.file_size = os.path.getsize(expected_path)
+                    pdf_download.save()
+                else:
+                    # Try old location as fallback
+                    pdf_dir = os.path.join(settings.MEDIA_ROOT, 'pdfs')
+                    expected_path = os.path.join(pdf_dir, expected_filename)
+                    if os.path.exists(expected_path):
+                        pdf_download.pdf_file_path = f'pdfs/{expected_filename}'
+                        pdf_download.file_size = os.path.getsize(expected_path)
+                        pdf_download.save()
+                    else:
+                        return Response({
+                            'error': 'PDF file not available. The file may not have been generated yet.'
+                        }, status=status.HTTP_404_NOT_FOUND)
             else:
-                return Response({
-                    'error': 'PDF file not available. The file may not have been generated yet.'
-                }, status=status.HTTP_404_NOT_FOUND)
+                # No user found, try old location
+                pdf_dir = os.path.join(settings.MEDIA_ROOT, 'pdfs')
+                expected_path = os.path.join(pdf_dir, expected_filename)
+                if os.path.exists(expected_path):
+                    pdf_download.pdf_file_path = f'pdfs/{expected_filename}'
+                    pdf_download.file_size = os.path.getsize(expected_path)
+                    pdf_download.save()
+                else:
+                    return Response({
+                        'error': 'PDF file not available. The file may not have been generated yet.'
+                    }, status=status.HTTP_404_NOT_FOUND)
         
         # Implement file download logic
         from django.http import FileResponse
@@ -3148,9 +3177,20 @@ def download_pdf_file(request, download_id):
                 }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         else:
             logger.error(f'PDF file not found at path: {file_path}')
-            # Try alternative path (in case of path issues)
-            alt_path = os.path.join(settings.MEDIA_ROOT, 'pdfs', f'pdf_download_{download_id}.pdf')
-            if os.path.exists(alt_path):
+            # Try alternative paths (check new location first, then old location)
+            user = pdf_download.get_user()
+            alt_path = None
+            if user:
+                # Try new user-specific location
+                alt_path = os.path.join(settings.MEDIA_ROOT, str(user.id), 'pdfs', f'pdf_download_{download_id}.pdf')
+                if not os.path.exists(alt_path):
+                    # Fallback to old location
+                    alt_path = os.path.join(settings.MEDIA_ROOT, 'pdfs', f'pdf_download_{download_id}.pdf')
+            else:
+                # No user, try old location
+                alt_path = os.path.join(settings.MEDIA_ROOT, 'pdfs', f'pdf_download_{download_id}.pdf')
+            
+            if alt_path and os.path.exists(alt_path):
                 try:
                     # Generate filename using customer name if available
                     import re
@@ -3178,8 +3218,12 @@ def download_pdf_file(request, download_id):
                     response['X-Filename'] = filename
                     logger.info(f'Setting Content-Disposition header (alt path): {response["Content-Disposition"]}')
                     logger.info(f'Setting X-Filename header (alt path): {filename}')
-                    # Update database with correct path
-                    pdf_download.pdf_file_path = f'pdfs/pdf_download_{download_id}.pdf'
+                    # Update database with correct path based on location found
+                    user = pdf_download.get_user()
+                    if user and alt_path.startswith(os.path.join(settings.MEDIA_ROOT, str(user.id))):
+                        pdf_download.pdf_file_path = f'{user.id}/pdfs/pdf_download_{download_id}.pdf'
+                    else:
+                        pdf_download.pdf_file_path = f'pdfs/pdf_download_{download_id}.pdf'
                     pdf_download.save()
                     return response
                 except Exception as e:

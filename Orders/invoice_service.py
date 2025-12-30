@@ -860,15 +860,18 @@ def create_customer_invoice(order: Order) -> Invoice:
     invoice.invoice_data = invoice_data
     invoice.save()
     
-    # Generate PDF
+    # Generate PDF - store in user-specific folder
     media_root = getattr(settings, 'MEDIA_ROOT', 'media')
-    invoice_dir = os.path.join(media_root, 'invoices')
+    user_id = invoice.user.id
+    invoice_dir = os.path.join(media_root, str(user_id), 'invoices')
+    os.makedirs(invoice_dir, exist_ok=True)
     pdf_filename = f"{invoice.invoice_number}.pdf"
     pdf_path = os.path.join(invoice_dir, pdf_filename)
     
     generate_invoice_pdf(invoice_data, pdf_path)
     
-    invoice.pdf_file_path = pdf_path
+    # Store relative path from MEDIA_ROOT
+    invoice.pdf_file_path = f'{user_id}/invoices/{pdf_filename}'
     invoice.save()
     
     # Send email to customer asynchronously
@@ -946,16 +949,19 @@ def create_settlement_receipt(settlement_request: 'SettlementRequest') -> Invoic
     invoice.invoice_data = receipt_data
     invoice.save()
     
-    # Generate PDF
+    # Generate PDF - store in user-specific folder
     media_root = getattr(settings, 'MEDIA_ROOT', 'media')
-    invoice_dir = os.path.join(media_root, 'invoices')
+    user_id = invoice.user.id
+    invoice_dir = os.path.join(media_root, str(user_id), 'invoices')
+    os.makedirs(invoice_dir, exist_ok=True)
     pdf_filename = f"receipt_{invoice.invoice_number}.pdf"
     pdf_path = os.path.join(invoice_dir, pdf_filename)
     
     # Generate receipt PDF (same function but with receipt type)
     generate_invoice_pdf(receipt_data, pdf_path)
     
-    invoice.pdf_file_path = pdf_path
+    # Store relative path from MEDIA_ROOT
+    invoice.pdf_file_path = f'{user_id}/invoices/{pdf_filename}'
     invoice.save()
     
     return invoice

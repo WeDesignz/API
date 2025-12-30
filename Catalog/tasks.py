@@ -66,14 +66,20 @@ def process_single_design_upload(
                 else:
                     media_type = 'image'
                 
-                # Open file from storage and create Media object
-                with default_storage.open(file_path, 'rb') as storage_file:
-                    django_file = File(storage_file, name=file_name)
-                    media_obj = Media.objects.create(
-                        file=django_file,
-                        media_type=media_type,
-                        created_by=product.created_by
-                    )
+                # Set product context for file path generation
+                Media.set_product_context(product.id)
+                try:
+                    # Open file from storage and create Media object
+                    with default_storage.open(file_path, 'rb') as storage_file:
+                        django_file = File(storage_file, name=file_name)
+                        media_obj = Media.objects.create(
+                            file=django_file,
+                            media_type=media_type,
+                            created_by=product.created_by
+                        )
+                finally:
+                    # Clear product context
+                    Media.clear_product_context()
                 
                 # Delete temporary file after processing
                 try:
@@ -197,11 +203,24 @@ def generate_pdf_task(self, pdf_download_id):
         SUPPORTED_IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'}
         UNSUPPORTED_EXTENSIONS = {'.cdr', '.eps', '.ai', '.svg', '.pdf'}
         
-        # Create PDF file path
-        pdf_filename = f'pdf_download_{pdf_download_id}.pdf'
-        pdf_dir = os.path.join(settings.MEDIA_ROOT, 'pdfs')
-        os.makedirs(pdf_dir, exist_ok=True)
-        pdf_file_path = os.path.join(pdf_dir, pdf_filename)
+        # Get user from PDFDownload
+        user = pdf_download.get_user()
+        if not user:
+            logger.warning(f'PDF download {pdf_download_id} has no associated user, using fallback location')
+            # Fallback to old location if user not found
+            pdf_dir = os.path.join(settings.MEDIA_ROOT, 'pdfs')
+            os.makedirs(pdf_dir, exist_ok=True)
+            pdf_filename = f'pdf_download_{pdf_download_id}.pdf'
+            pdf_file_path = os.path.join(pdf_dir, pdf_filename)
+            relative_path = f'pdfs/{pdf_filename}'
+        else:
+            # Create PDF file path in user-specific folder
+            user_id = user.id
+            pdf_filename = f'pdf_download_{pdf_download_id}.pdf'
+            pdf_dir = os.path.join(settings.MEDIA_ROOT, str(user_id), 'pdfs')
+            os.makedirs(pdf_dir, exist_ok=True)
+            pdf_file_path = os.path.join(pdf_dir, pdf_filename)
+            relative_path = f'{user_id}/pdfs/{pdf_filename}'
         
         # Update PDF download with included products
         # Only include products that have valid mockup images
@@ -627,7 +646,7 @@ def generate_pdf_task(self, pdf_download_id):
             logger.info(f'PDF file size: {file_size} bytes')
             
             # Store relative path (without MEDIA_ROOT)
-            pdf_download.pdf_file_path = f'pdfs/{pdf_filename}'
+            pdf_download.pdf_file_path = relative_path
             pdf_download.file_size = file_size
             
             # Update status to completed

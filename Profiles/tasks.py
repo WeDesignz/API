@@ -430,57 +430,69 @@ def process_design_upload_task(self, task_id, zip_file_path):
                         
                         # Create Media instances
                         logger.info(f"Task {task_id}: Creating media files for {folder_name}...")
-                        for file_ext, file_path in design_files.items():
-                            try:
-                                logger.info(f"Task {task_id}: Reading file {file_path}...")
-                                file_data = zip_ref.read(file_path)
-                                file_name = os.path.basename(file_path)
-                                media_type = 'image'
-                                safe_file_name = f"{folder_name}_{file_name}"
-                                media_file = ContentFile(file_data, name=safe_file_name)
-                                logger.info(f"Task {task_id}: Creating Media object for {file_name}...")
-                                media = Media.objects.create(
-                                    file=media_file,
-                                    media_type=media_type,
-                                    created_by=task.user
-                                )
-                                
-                                meta_info = {
-                                    'type': file_ext[1:].upper(),
-                                    'folder_name': folder_name,
-                                    'original_filename': file_name
-                                }
-                                logger.info(f"Task {task_id}: Attaching media {media.id} to product {product.id}...")
-                                product.attach_media(media, meta=meta_info, created_by=task.user)
-                            except Exception as e:
-                                logger.error(f"Task {task_id}: Error creating media for {file_path}: {str(e)}", exc_info=True)
+                        # Set product context for file path generation
+                        Media.set_product_context(product.id)
+                        try:
+                            for file_ext, file_path in design_files.items():
+                                try:
+                                    logger.info(f"Task {task_id}: Reading file {file_path}...")
+                                    file_data = zip_ref.read(file_path)
+                                    file_name = os.path.basename(file_path)
+                                    media_type = 'image'
+                                    safe_file_name = f"{folder_name}_{file_name}"
+                                    media_file = ContentFile(file_data, name=safe_file_name)
+                                    logger.info(f"Task {task_id}: Creating Media object for {file_name}...")
+                                    media = Media.objects.create(
+                                        file=media_file,
+                                        media_type=media_type,
+                                        created_by=product_owner
+                                    )
+                                    
+                                    meta_info = {
+                                        'type': file_ext[1:].upper(),
+                                        'folder_name': folder_name,
+                                        'original_filename': file_name
+                                    }
+                                    logger.info(f"Task {task_id}: Attaching media {media.id} to product {product.id}...")
+                                    product.attach_media(media, meta=meta_info, created_by=task.user)
+                                except Exception as e:
+                                    logger.error(f"Task {task_id}: Error creating media for {file_path}: {str(e)}", exc_info=True)
+                        finally:
+                            # Clear product context
+                            Media.clear_product_context()
                         
                         # Process optional mockup file if present
                         if mockup_file:
+                            # Set product context for mockup file path generation
+                            Media.set_product_context(product.id)
                             try:
-                                logger.info(f"Task {task_id}: Processing mockup file {mockup_file}...")
-                                file_data = zip_ref.read(mockup_file)
-                                file_name = os.path.basename(mockup_file)
-                                media_type = 'image'
-                                safe_file_name = f"{folder_name}_{file_name}"
-                                media_file = ContentFile(file_data, name=safe_file_name)
-                                logger.info(f"Task {task_id}: Creating Media object for mockup {file_name}...")
-                                media = Media.objects.create(
-                                    file=media_file,
-                                    media_type=media_type,
-                                    created_by=task.user
-                                )
-                                
-                                meta_info = {
-                                    'type': 'MOCKUP',
-                                    'folder_name': folder_name,
-                                    'original_filename': file_name
-                                }
-                                logger.info(f"Task {task_id}: Attaching mockup media {media.id} to product {product.id}...")
-                                product.attach_media(media, meta=meta_info, created_by=task.user)
-                            except Exception as e:
-                                logger.error(f"Task {task_id}: Error creating mockup media for {mockup_file}: {str(e)}", exc_info=True)
-                                # Don't fail the whole process if mockup fails
+                                try:
+                                    logger.info(f"Task {task_id}: Processing mockup file {mockup_file}...")
+                                    file_data = zip_ref.read(mockup_file)
+                                    file_name = os.path.basename(mockup_file)
+                                    media_type = 'image'
+                                    safe_file_name = f"{folder_name}_{file_name}"
+                                    media_file = ContentFile(file_data, name=safe_file_name)
+                                    logger.info(f"Task {task_id}: Creating Media object for mockup {file_name}...")
+                                    media = Media.objects.create(
+                                        file=media_file,
+                                        media_type=media_type,
+                                        created_by=product_owner
+                                    )
+                                    
+                                    meta_info = {
+                                        'type': 'MOCKUP',
+                                        'folder_name': folder_name,
+                                        'original_filename': file_name
+                                    }
+                                    logger.info(f"Task {task_id}: Attaching mockup media {media.id} to product {product.id}...")
+                                    product.attach_media(media, meta=meta_info, created_by=task.user)
+                                except Exception as e:
+                                    logger.error(f"Task {task_id}: Error creating mockup media for {mockup_file}: {str(e)}", exc_info=True)
+                                    # Don't fail the whole process if mockup fails
+                            finally:
+                                # Clear product context
+                                Media.clear_product_context()
                         
                         logger.info(f"Task {task_id}: Media files processed, processing tags...")
                         

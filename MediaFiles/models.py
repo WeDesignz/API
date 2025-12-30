@@ -1,5 +1,55 @@
 from django.db import models
 from django.contrib.auth.models import User
+import logging
+import threading
+
+# Thread-local storage for passing context during Media creation
+_thread_local = threading.local()
+
+
+def get_media_upload_path(instance, filename):
+    """
+    Callable upload_to function for Media model.
+    
+    File organization:
+    - Design uploads (Product:Media): {user_id}/designs/{product_id}/{filename}
+    - Profile photos: {user_id}/profile/{filename}
+    - Business documents (PAN, MSME): {user_id}/documents/{filename}
+    - Custom order deliverables: {user_id}/orders/{order_id}/deliverables/{filename}
+    - Other uploads: {user_id}/media/{filename} (fallback)
+    
+    Context is passed via thread-local storage when creating Media objects.
+    """
+    # Get context from thread-local storage
+    product_id = getattr(_thread_local, 'product_id', None)
+    order_id = getattr(_thread_local, 'order_id', None)
+    file_type = getattr(_thread_local, 'file_type', None)  # 'profile', 'document', 'deliverable'
+    
+    # Check if created_by is set and has an id
+    if not (hasattr(instance, 'created_by') and instance.created_by and hasattr(instance.created_by, 'id')):
+        # Fallback: use media/ directory if no user context
+        return f'media/{filename}'
+    
+    user_id = instance.created_by.id
+    
+    # Custom order deliverables: {user_id}/orders/{order_id}/deliverables/
+    if order_id and file_type == 'deliverable':
+        return f'{user_id}/orders/{order_id}/deliverables/{filename}'
+    
+    # Design uploads: {user_id}/designs/{product_id}/
+    if product_id:
+        return f'{user_id}/designs/{product_id}/{filename}'
+    
+    # Profile photos: {user_id}/profile/
+    if file_type == 'profile':
+        return f'{user_id}/profile/{filename}'
+    
+    # Business documents: {user_id}/documents/
+    if file_type == 'document':
+        return f'{user_id}/documents/{filename}'
+    
+    # Default fallback: {user_id}/media/ (for other non-product uploads)
+    return f'{user_id}/media/{filename}'
 
 
 class Media(models.Model):
@@ -16,7 +66,7 @@ class Media(models.Model):
         ('other', 'Other'),
     ]
     
-    file = models.FileField(upload_to='media/')
+    file = models.FileField(upload_to=get_media_upload_path)
     media_type = models.CharField(max_length=10, choices=MEDIA_TYPE_CHOICES)
     created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='created_media')
     created_at = models.DateTimeField(auto_now_add=True)
@@ -32,6 +82,120 @@ class Media(models.Model):
     
     def __str__(self):
         return f"Media {self.pk} - {self.media_type}"
+    
+    @classmethod
+    def set_product_context(cls, product_id):
+        """
+        Set product_id in thread-local storage for the current thread.
+        This allows the upload_to callable to use the product_id when creating Media objects.
+        
+        Usage:
+            Media.set_product_context(product_id)
+            try:
+                media = Media.objects.create(...)
+            finally:
+                Media.clear_product_context()
+        """
+        _thread_local.product_id = product_id
+    
+    @classmethod
+    def clear_product_context(cls):
+        """
+        Clear product_id from thread-local storage.
+        Should be called in a finally block after Media creation.
+        """
+        if hasattr(_thread_local, 'product_id'):
+            delattr(_thread_local, 'product_id')
+    
+    @classmethod
+    def set_order_context(cls, order_id):
+        """
+        Set order_id in thread-local storage for custom order deliverables.
+        
+        Usage:
+            Media.set_order_context(order_id)
+            try:
+                media = Media.objects.create(...)
+            finally:
+                Media.clear_order_context()
+        """
+        _thread_local.order_id = order_id
+        _thread_local.file_type = 'deliverable'
+    
+    @classmethod
+    def clear_order_context(cls):
+        """
+        Clear order_id from thread-local storage.
+        Should be called in a finally block after Media creation.
+        """
+        if hasattr(_thread_local, 'order_id'):
+            delattr(_thread_local, 'order_id')
+        if hasattr(_thread_local, 'file_type'):
+            delattr(_thread_local, 'file_type')
+    
+    @classmethod
+    def set_profile_context(cls):
+        """
+        Set profile photo context in thread-local storage.
+        
+        Usage:
+            Media.set_profile_context()
+            try:
+                media = Media.objects.create(...)
+            finally:
+                Media.clear_profile_context()
+        """
+        _thread_local.file_type = 'profile'
+    
+    @classmethod
+    def clear_profile_context(cls):
+        """
+        Clear profile photo context from thread-local storage.
+        Should be called in a finally block after Media creation.
+        """
+        if hasattr(_thread_local, 'file_type'):
+            delattr(_thread_local, 'file_type')
+    
+    @classmethod
+    def set_document_context(cls):
+        """
+        Set business document context in thread-local storage.
+        
+        Usage:
+            Media.set_document_context()
+            try:
+                media = Media.objects.create(...)
+            finally:
+                Media.clear_document_context()
+        """
+        _thread_local.file_type = 'document'
+    
+    @classmethod
+    def clear_document_context(cls):
+        """
+        Clear business document context from thread-local storage.
+        Should be called in a finally block after Media creation.
+        """
+        if hasattr(_thread_local, 'file_type'):
+            delattr(_thread_local, 'file_type')
+    
+    def delete(self, *args, **kwargs):
+        """
+        Override delete to ensure the physical file is deleted from storage
+        when the Media instance is deleted.
+        """
+        # Delete the file from storage before deleting the model instance
+        if self.file:
+            try:
+                self.file.delete(save=False)
+            except Exception as e:
+                # Log the error but continue with model deletion
+                # This prevents file deletion errors from blocking model deletion
+                logger = logging.getLogger(__name__)
+                logger.warning(f"Failed to delete media file {self.file.name}: {str(e)}")
+        
+        # Call the parent delete method to delete the model instance
+        super().delete(*args, **kwargs)
 
 
 class Relation(models.Model):
