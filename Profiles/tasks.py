@@ -29,7 +29,12 @@ def process_design_upload_task(self, task_id, zip_file_path):
     """
     try:
         # Get the task record
-        task = DesignProcessingTask.objects.get(id=task_id)
+        try:
+            task = DesignProcessingTask.objects.get(id=task_id)
+        except DesignProcessingTask.DoesNotExist:
+            logger.error(f"DesignProcessingTask with id={task_id} does not exist. Task may have been deleted.")
+            # Task doesn't exist, can't proceed - raise error to mark Celery task as failed
+            raise ValueError(f"DesignProcessingTask with id={task_id} does not exist. Cannot process design upload.")
         task.status = 'processing'
         task.save(update_fields=['status', 'updated_at'])
         
@@ -612,8 +617,10 @@ def process_design_upload_task(self, task_id, zip_file_path):
             task.status = 'failed'
             task.error_message = str(e)
             task.save(update_fields=['status', 'error_message', 'updated_at'])
-        except Exception:
-            pass
+        except DesignProcessingTask.DoesNotExist:
+            logger.warning(f"Could not update DesignProcessingTask {task_id} status to 'failed' - task does not exist.")
+        except Exception as update_error:
+            logger.error(f"Error updating DesignProcessingTask {task_id} status: {str(update_error)}", exc_info=True)
         
         raise
 
