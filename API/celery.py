@@ -2,6 +2,7 @@ import os
 from celery import Celery
 from celery.schedules import crontab
 from django.conf import settings
+from decouple import config
 
 # Set the default Django settings module for the 'celery' program.
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'API.settings')
@@ -74,8 +75,9 @@ app.conf.result_serializer = 'json'
 
 # Task routing - Environment-based queue separation
 # Determine environment (production or development)
+# Use decouple.config() to read from .env file (same as Django settings)
 # Default to 'production' if not set
-ENVIRONMENT = os.environ.get('ENVIRONMENT', 'production').lower()
+ENVIRONMENT = config('ENVIRONMENT', default='production').lower()
 
 # Configure task routing based on environment
 if ENVIRONMENT == 'production':
@@ -85,6 +87,7 @@ if ENVIRONMENT == 'production':
         'Profiles.tasks.*': {'queue': 'production'},
         'Catalog.tasks.*': {'queue': 'production'},
         'common.tasks.*': {'queue': 'production'},
+        'MediaFiles.tasks.*': {'queue': 'production'},
     }
     print(f"[Celery] Environment: PRODUCTION - Tasks will be routed to 'production' queue")
 else:
@@ -94,6 +97,7 @@ else:
         'Profiles.tasks.*': {'queue': 'development'},
         'Catalog.tasks.*': {'queue': 'development'},
         'common.tasks.*': {'queue': 'development'},
+        'MediaFiles.tasks.*': {'queue': 'development'},
     }
     print(f"[Celery] Environment: DEVELOPMENT - Tasks will be routed to 'development' queue")
 

@@ -117,7 +117,7 @@ class Command(BaseCommand):
                 queue_name = 'production'
                 hostname = 'worker-prod@%h'
             else:
-                queue_name = 'devapi'
+                queue_name = 'development'
                 hostname = 'worker-dev@%h'
             
             self.stdout.write(self.style.SUCCESS(f"Environment: {environment.upper()}"))

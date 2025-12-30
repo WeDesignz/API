@@ -1606,12 +1606,15 @@ def upload_designs_bulk(request):
     import zipfile
     import io
     import os
+    import logging
     from openpyxl import load_workbook
     from django.db import transaction
     from django.core.files.storage import default_storage
     from django.utils import timezone
     from Profiles.models import DesignProcessingTask
     from Profiles.tasks import process_design_upload_task
+    
+    logger = logging.getLogger(__name__)
     
     # Check if zip file is provided
     if 'zip_file' not in request.FILES:
@@ -1928,8 +1931,6 @@ def upload_designs_bulk(request):
         except Exception as e:
             import traceback
             error_traceback = traceback.format_exc()
-            import logging
-            logger = logging.getLogger(__name__)
             logger.error(f"Error saving zip file: {str(e)}")
             logger.error(error_traceback)
             return Response({
@@ -1944,8 +1945,6 @@ def upload_designs_bulk(request):
     except Exception as e:
         import traceback
         error_traceback = traceback.format_exc()
-        import logging
-        logger = logging.getLogger(__name__)
         logger.error(f"Error in upload_designs_bulk: {str(e)}")
         logger.error(error_traceback)
         return Response({
