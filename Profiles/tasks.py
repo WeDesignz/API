@@ -133,8 +133,9 @@ def process_design_upload_task(self, task_id, zip_file_path):
             
             logger.info(f"Task {task_id}: Parsed {len(metadata_dict)} metadata entries from Excel")
             
-            # Find root folder - use the folder containing metadata.xlsx as the root
-            # This is more reliable than finding the first folder (which might be __MACOSX)
+            # Find root folder - handle both 2-part and 3-part paths
+            # 2-part: design_folder/file.ext (zip created from inside root folder)
+            # 3-part: root_folder/design_folder/file.ext (normal case)
             logger.info(f"Task {task_id}: Finding root folder...")
             root_folder = ''
             if '/' in metadata_file:
@@ -147,15 +148,19 @@ def process_design_upload_task(self, task_id, zip_file_path):
                 for file_name in all_files:
                     if '/' in file_name and not file_name.endswith('/'):
                         parts = file_name.split('/')
-                        if len(parts) >= 2:
+                        if len(parts) >= 3:
                             root_folder_name = parts[0].lower()
                             if root_folder_name not in SYSTEM_FOLDERS:
                                 root_folder = parts[0]
                                 break
+                        elif len(parts) == 2:
+                            # 2-part path means no root folder (zip created from inside root)
+                            root_folder = ''
+                            break
             
-            logger.info(f"Task {task_id}: Root folder: {root_folder}")
+            logger.info(f"Task {task_id}: Root folder: {root_folder if root_folder else '(none - 2-part paths detected)'}")
             
-            # Get valid design folders (same logic as validation)
+            # Get valid design folders - handle both 2-part and 3-part paths (matching validation logic)
             logger.info(f"Task {task_id}: Validating design folders...")
             SYSTEM_FOLDERS = ['__macosx', '.ds_store', 'rar', '.rar', 'thumbs.db']
             required_files = {'.eps', '.cdr', '.jpg', '.png'}
@@ -167,21 +172,51 @@ def process_design_upload_task(self, task_id, zip_file_path):
                 
                 if '/' in file_name:
                     parts = file_name.split('/')
-                    if len(parts) < 3:
+                    
+                    # Handle both cases:
+                    # 1. root_folder/design_folder/file.ext (3 parts) - e.g., "123/WD01/WD01.eps"
+                    # 2. design_folder/file.ext (2 parts) - e.g., "WD01/WD01.eps" (if zip created from inside root folder)
+                    
+                    if len(parts) < 2:
+                        # Skip files at root level (not in any folder)
                         continue
                     
-                    root_folder_name = parts[0].lower()
-                    folder_name = parts[1]
-                    file_name_only = parts[-1]
+                    # Determine folder name and file info based on path length
+                    if len(parts) == 2:
+                        # Case 2: design_folder/file.ext (zip created from inside root folder)
+                        folder_name = parts[0]
+                        file_name_only = parts[1]
+                    elif len(parts) == 3:
+                        # Case 1: root_folder/design_folder/file.ext (normal case)
+                        root_folder_name = parts[0].lower()
+                        folder_name = parts[1]
+                        file_name_only = parts[2]
+                        
+                        # Skip system folders
+                        if root_folder_name in SYSTEM_FOLDERS or folder_name.lower() in SYSTEM_FOLDERS:
+                            continue
+                    else:
+                        # More than 3 parts - skip for now
+                        continue
+                    
                     file_ext = os.path.splitext(file_name_only)[1].lower()
+                    file_name_lower = file_name_only.lower()
                     
-                    if root_folder_name in SYSTEM_FOLDERS or folder_name.lower() in SYSTEM_FOLDERS:
+                    # Check if it's an optional mockup file
+                    is_mockup = file_name_lower == 'mockup.jpg' or file_name_lower == 'mockup.png'
+                    
+                    # Skip system folders (check folder name)
+                    if folder_name.lower() in SYSTEM_FOLDERS:
                         continue
                     
-                    if len(parts) == 3 and file_ext in required_files:
-                        if folder_name not in valid_design_folders:
-                            valid_design_folders[folder_name] = set()
-                        valid_design_folders[folder_name].add(file_ext)
+                    # Process files in design folders
+                    if len(parts) == 2 or len(parts) == 3:
+                        if file_ext in required_files or is_mockup:
+                            if folder_name not in valid_design_folders:
+                                valid_design_folders[folder_name] = set()
+                            # Only add required files to the set (mockup is optional)
+                            if file_ext in required_files:
+                                valid_design_folders[folder_name].add(file_ext)
             
             # Filter folders with all required files
             valid_folders = {}
@@ -212,13 +247,23 @@ def process_design_upload_task(self, task_id, zip_file_path):
                         metadata = metadata_dict.get(folder_name, {})
                         logger.info(f"Task {task_id}: Got metadata for {folder_name}, extracting files...")
                         
-                        # Extract files from zip
-                        folder_path = f"{root_folder}/{folder_name}/"
+                        # Extract files from zip - handle both 2-part and 3-part paths
+                        if root_folder:
+                            folder_path = f"{root_folder}/{folder_name}/"
+                        else:
+                            folder_path = f"{folder_name}/"  # Handle 2-part paths
+                        
                         logger.info(f"Task {task_id}: Looking for files in path: {folder_path}")
                         design_files = {}
                         mockup_file = None
                         for file_name in all_files:
-                            if file_name.startswith(folder_path) and not file_name.endswith('/'):
+                            # Handle both 2-part and 3-part paths
+                            if root_folder:
+                                expected_path = f"{root_folder}/{folder_name}/"
+                            else:
+                                expected_path = f"{folder_name}/"
+                            
+                            if file_name.startswith(expected_path) and not file_name.endswith('/'):
                                 file_name_only = os.path.basename(file_name)
                                 file_name_lower = file_name_only.lower()
                                 file_ext = os.path.splitext(file_name)[1].lower()
