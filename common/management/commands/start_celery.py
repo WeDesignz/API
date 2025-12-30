@@ -111,13 +111,25 @@ class Command(BaseCommand):
         """Start Celery worker"""
         self.stdout.write(self.style.SUCCESS("Starting Celery worker..."))
         try:
+            # Determine environment and queue
+            environment = os.environ.get('ENVIRONMENT', 'production').lower()
+            if environment == 'production':
+                queue_name = 'production'
+                hostname = 'worker-prod@%h'
+            else:
+                queue_name = 'devapi'
+                hostname = 'worker-dev@%h'
+            
+            self.stdout.write(self.style.SUCCESS(f"Environment: {environment.upper()}"))
+            self.stdout.write(self.style.SUCCESS(f"Queue: {queue_name}"))
+            
             cmd = [
                 'celery', '-A', 'API', 'worker',
                 '--loglevel', loglevel,
                 '--concurrency', str(concurrency),
                 '--pool', 'prefork',
-                '--queues', 'default,email,backup',
-                '--hostname', 'wedesignz-worker@%h'
+                '--queues', queue_name,
+                '--hostname', hostname
             ]
             
             self.stdout.write(f"Running command: {' '.join(cmd)}")

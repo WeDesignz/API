@@ -72,16 +72,30 @@ app.conf.task_serializer = 'json'
 app.conf.accept_content = ['json']
 app.conf.result_serializer = 'json'
 
-# Task routing - Removed to use only default queue
-# All tasks will now go to the default queue (named 'celery')
-# If you need to separate queues in the future, uncomment and modify the routing below:
-# app.conf.task_routes = {
-#     'common.tasks.*': {'queue': 'celery'},
-#     'common.tasks.send_bulk_emails': {'queue': 'email'},
-#     'common.tasks.send_promotional_emails': {'queue': 'email'},
-#     'Catalog.tasks.*': {'queue': 'celery'},
-#     'Profiles.tasks.*': {'queue': 'celery'},
-# }
+# Task routing - Environment-based queue separation
+# Determine environment (production or development)
+# Default to 'production' if not set
+ENVIRONMENT = os.environ.get('ENVIRONMENT', 'production').lower()
+
+# Configure task routing based on environment
+if ENVIRONMENT == 'production':
+    # Production environment - use 'production' queue
+    app.conf.task_default_queue = 'production'
+    app.conf.task_routes = {
+        'Profiles.tasks.*': {'queue': 'production'},
+        'Catalog.tasks.*': {'queue': 'production'},
+        'common.tasks.*': {'queue': 'production'},
+    }
+    print(f"[Celery] Environment: PRODUCTION - Tasks will be routed to 'production' queue")
+else:
+    # Development/DevAPI environment - use 'devapi' queue
+    app.conf.task_default_queue = 'devapi'
+    app.conf.task_routes = {
+        'Profiles.tasks.*': {'queue': 'devapi'},
+        'Catalog.tasks.*': {'queue': 'devapi'},
+        'common.tasks.*': {'queue': 'devapi'},
+    }
+    print(f"[Celery] Environment: DEVELOPMENT - Tasks will be routed to 'devapi' queue")
 
 # Task execution settings
 app.conf.task_always_eager = False
