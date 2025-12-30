@@ -7,6 +7,33 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# Check if AVIF support is available
+def check_avif_support():
+    """Check if Pillow has AVIF support"""
+    try:
+        # Try to save a test image to see if AVIF works
+        # This is the most reliable way to check
+        test_img = Image.new('RGB', (1, 1), color='red')
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix='.avif', delete=True) as tmp:
+            test_img.save(tmp.name, format='AVIF')
+            return True
+    except (KeyError, ValueError, OSError, Exception):
+        # AVIF format is not supported
+        return False
+
+# Cache the AVIF support check
+_avif_supported = None
+
+def is_avif_supported():
+    """Check if AVIF is supported, with caching"""
+    global _avif_supported
+    if _avif_supported is None:
+        _avif_supported = check_avif_support()
+        if not _avif_supported:
+            logger.warning("AVIF format is not supported. Please install pillow-avif-plugin or libavif libraries.")
+    return _avif_supported
+
 def convert_to_avif(input_path, output_dir, base_name, is_mockup=False):
     """
     Convert image to AVIF format with aggressive compression for web display.
@@ -20,6 +47,11 @@ def convert_to_avif(input_path, output_dir, base_name, is_mockup=False):
     Returns:
         Path to the created AVIF file, or None if conversion failed
     """
+    # Check if AVIF is supported
+    if not is_avif_supported():
+        logger.error("AVIF format is not supported. Please install pillow-avif-plugin: pip install pillow-avif-plugin")
+        return None
+    
     try:
         # Open and convert to RGB
         img = Image.open(input_path).convert("RGB")
