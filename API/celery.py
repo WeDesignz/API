@@ -88,14 +88,14 @@ if ENVIRONMENT == 'production':
     }
     print(f"[Celery] Environment: PRODUCTION - Tasks will be routed to 'production' queue")
 else:
-    # Development/DevAPI environment - use 'devapi' queue
-    app.conf.task_default_queue = 'devapi'
+    # Development/DevAPI environment - use 'development' queue
+    app.conf.task_default_queue = 'development'
     app.conf.task_routes = {
-        'Profiles.tasks.*': {'queue': 'devapi'},
-        'Catalog.tasks.*': {'queue': 'devapi'},
-        'common.tasks.*': {'queue': 'devapi'},
+        'Profiles.tasks.*': {'queue': 'development'},
+        'Catalog.tasks.*': {'queue': 'development'},
+        'common.tasks.*': {'queue': 'development'},
     }
-    print(f"[Celery] Environment: DEVELOPMENT - Tasks will be routed to 'devapi' queue")
+    print(f"[Celery] Environment: DEVELOPMENT - Tasks will be routed to 'development' queue")
 
 # Task execution settings
 app.conf.task_always_eager = False
