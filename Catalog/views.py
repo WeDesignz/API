@@ -1896,6 +1896,13 @@ def upload_designs_bulk(request):
             zip_file.seek(0)
             saved_path = default_storage.save(zip_file_path, zip_file)
             
+            # Verify the file was saved correctly
+            logger.info(f"Saved zip file - requested path: {zip_file_path}, saved path: {saved_path}")
+            if not default_storage.exists(saved_path):
+                logger.error(f"WARNING: File was saved but cannot be verified at path: {saved_path}")
+            else:
+                logger.info(f"Verified: File exists at saved path: {saved_path}")
+            
             # Create DesignProcessingTask record
             with transaction.atomic():
                 processing_task = DesignProcessingTask.objects.create(

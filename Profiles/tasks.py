@@ -60,13 +60,48 @@ def process_design_upload_task(self, task_id, zip_file_path):
         else:
             logger.info(f"Task {task_id}: User is studio owner or individual designer, product owner is themselves")
         
+        # Use the path from the database record as the source of truth
+        # The parameter might be outdated, but the database record is always current
+        actual_zip_file_path = task.zip_file_path
+        logger.info(f"Task {task_id}: Using zip file path from database: {actual_zip_file_path}")
+        logger.info(f"Task {task_id}: Parameter zip_file_path was: {zip_file_path}")
+        
+        # If database path differs from parameter, log a warning
+        if actual_zip_file_path != zip_file_path:
+            logger.warning(f"Task {task_id}: Path mismatch - database has '{actual_zip_file_path}', parameter was '{zip_file_path}'. Using database path.")
+        
         # Read zip file from storage
-        logger.info(f"Task {task_id}: Checking zip file at path: {zip_file_path}")
-        if not default_storage.exists(zip_file_path):
-            raise FileNotFoundError(f"Zip file not found at path: {zip_file_path}")
+        logger.info(f"Task {task_id}: Checking zip file at path: {actual_zip_file_path}")
+        
+        # Check if file exists in storage
+        if not default_storage.exists(actual_zip_file_path):
+            # Try to construct absolute path as fallback for debugging
+            absolute_path = None
+            try:
+                if hasattr(settings, 'MEDIA_ROOT') and settings.MEDIA_ROOT:
+                    absolute_path = os.path.join(settings.MEDIA_ROOT, actual_zip_file_path)
+                    logger.info(f"Task {task_id}: Constructed absolute path: {absolute_path}")
+                    if os.path.exists(absolute_path):
+                        logger.warning(f"Task {task_id}: File exists at absolute path but not in storage backend. This may indicate a storage configuration issue.")
+            except Exception as path_error:
+                logger.warning(f"Task {task_id}: Could not construct absolute path: {str(path_error)}")
+            
+            # Log available storage information for debugging
+            logger.error(f"Task {task_id}: Zip file not found in storage. Path: {actual_zip_file_path}")
+            logger.error(f"Task {task_id}: MEDIA_ROOT: {getattr(settings, 'MEDIA_ROOT', 'Not set')}")
+            logger.error(f"Task {task_id}: Storage backend: {type(default_storage).__name__}")
+            
+            if absolute_path:
+                logger.error(f"Task {task_id}: Absolute path check: {absolute_path} exists={os.path.exists(absolute_path) if absolute_path else False}")
+            
+            raise FileNotFoundError(
+                f"Zip file not found at path: {actual_zip_file_path}. "
+                f"MEDIA_ROOT: {getattr(settings, 'MEDIA_ROOT', 'Not set')}. "
+                f"Storage backend: {type(default_storage).__name__}"
+            )
         
         logger.info(f"Task {task_id}: Reading zip file...")
-        zip_file = default_storage.open(zip_file_path, 'rb')
+        zip_file = default_storage.open(actual_zip_file_path, 'rb')
         zip_content = zip_file.read()
         zip_file.close()
         logger.info(f"Task {task_id}: Zip file read successfully, size: {len(zip_content)} bytes")
