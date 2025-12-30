@@ -1606,12 +1606,15 @@ def upload_designs_bulk(request):
     import zipfile
     import io
     import os
+    import logging
     from openpyxl import load_workbook
     from django.db import transaction
     from django.core.files.storage import default_storage
     from django.utils import timezone
     from Profiles.models import DesignProcessingTask
     from Profiles.tasks import process_design_upload_task
+    
+    logger = logging.getLogger(__name__)
     
     # Check if zip file is provided
     if 'zip_file' not in request.FILES:
@@ -1896,6 +1899,13 @@ def upload_designs_bulk(request):
             zip_file.seek(0)
             saved_path = default_storage.save(zip_file_path, zip_file)
             
+            # Verify the file was saved correctly
+            logger.info(f"Saved zip file - requested path: {zip_file_path}, saved path: {saved_path}")
+            if not default_storage.exists(saved_path):
+                logger.error(f"WARNING: File was saved but cannot be verified at path: {saved_path}")
+            else:
+                logger.info(f"Verified: File exists at saved path: {saved_path}")
+            
             # Create DesignProcessingTask record
             with transaction.atomic():
                 processing_task = DesignProcessingTask.objects.create(
@@ -1921,8 +1931,6 @@ def upload_designs_bulk(request):
         except Exception as e:
             import traceback
             error_traceback = traceback.format_exc()
-            import logging
-            logger = logging.getLogger(__name__)
             logger.error(f"Error saving zip file: {str(e)}")
             logger.error(error_traceback)
             return Response({
@@ -1937,8 +1945,6 @@ def upload_designs_bulk(request):
     except Exception as e:
         import traceback
         error_traceback = traceback.format_exc()
-        import logging
-        logger = logging.getLogger(__name__)
         logger.error(f"Error in upload_designs_bulk: {str(e)}")
         logger.error(error_traceback)
         return Response({

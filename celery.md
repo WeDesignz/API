@@ -55,7 +55,7 @@ CELERY_FLOWER_URL = config('CELERY_FLOWER_URL', default='http://localhost:5555')
 
 - `ENVIRONMENT`: Environment type - `production` or `development` (default: `production`)
   - **Production**: Tasks are routed to `production` queue
-  - **Development**: Tasks are routed to `devapi` queue
+  - **Development**: Tasks are routed to `development` queue
   - This ensures production and development tasks are processed separately
 - `CELERY_BROKER_URL`: Redis broker URL (default: `redis://localhost:6379/0`)
 - `CELERY_RESULT_BACKEND`: Result backend (default: `django-db`)
@@ -72,8 +72,8 @@ The system automatically routes tasks to different queues based on the `ENVIRONM
   - Default if `ENVIRONMENT` is not set
 
 - **Development/DevAPI** (`ENVIRONMENT=development`):
-  - All tasks go to `devapi` queue
-  - Workers listen to `devapi` queue
+  - All tasks go to `development` queue
+  - Workers listen to `development` queue
 
 **Important**: Always set the `ENVIRONMENT` variable to ensure tasks are routed correctly:
 ```bash
@@ -154,7 +154,7 @@ celery -A API worker --loglevel=info --concurrency=4 --pool=prefork --queues=pro
 **Development/DevAPI:**
 ```bash
 export ENVIRONMENT=development
-celery -A API worker --loglevel=info --concurrency=1 --pool=prefork --queues=devapi -n worker-dev@%h
+celery -A API worker --loglevel=info --concurrency=1 --pool=prefork --queues=development -n worker-dev@%h
 ```
 
 **Note**: The queue name is automatically determined by the `ENVIRONMENT` variable. Workers must listen to the correct queue matching their environment.
@@ -216,6 +216,22 @@ Tasks are defined in:
     ```python
     from Profiles.tasks import process_design_upload_task
     process_design_upload_task.delay(task_id, zip_file_path)
+    ```
+
+#### MediaFiles Tasks (`MediaFiles/tasks.py`)
+
+- **`rename_design_files_task`**
+  - **Queue**: `default` (follows environment routing)
+  - **Description**: Renames design files to use product_number format
+  - **Parameters**:
+    - `user_id` (int, optional): Process only files for a specific user ID
+    - `product_id` (int, optional): Process only files for a specific product ID
+    - `dry_run` (bool): Show what would be renamed without actually renaming files
+    - `verbose` (bool): Show detailed information for each file
+  - **Usage**:
+    ```python
+    from MediaFiles.tasks import rename_design_files_task
+    rename_design_files_task.delay(user_id=4, product_id=60, dry_run=False, verbose=True)
     ```
 
 #### Common Tasks (`common/tasks.py`)
