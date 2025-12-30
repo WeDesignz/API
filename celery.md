@@ -53,10 +53,36 @@ CELERY_FLOWER_URL = config('CELERY_FLOWER_URL', default='http://localhost:5555')
 
 ### Environment Variables
 
+- `ENVIRONMENT`: Environment type - `production` or `development` (default: `production`)
+  - **Production**: Tasks are routed to `production` queue
+  - **Development**: Tasks are routed to `devapi` queue
+  - This ensures production and development tasks are processed separately
 - `CELERY_BROKER_URL`: Redis broker URL (default: `redis://localhost:6379/0`)
 - `CELERY_RESULT_BACKEND`: Result backend (default: `django-db`)
 - `CELERY_TASK_ALWAYS_EAGER`: Run tasks synchronously for testing (default: `False`)
 - `CELERY_FLOWER_URL`: Flower monitoring URL (default: `http://localhost:5555`)
+
+### Queue Separation (Production vs Development)
+
+The system automatically routes tasks to different queues based on the `ENVIRONMENT` variable:
+
+- **Production** (`ENVIRONMENT=production`):
+  - All tasks go to `production` queue
+  - Workers listen to `production` queue
+  - Default if `ENVIRONMENT` is not set
+
+- **Development/DevAPI** (`ENVIRONMENT=development`):
+  - All tasks go to `devapi` queue
+  - Workers listen to `devapi` queue
+
+**Important**: Always set the `ENVIRONMENT` variable to ensure tasks are routed correctly:
+```bash
+# Production
+export ENVIRONMENT=production
+
+# Development
+export ENVIRONMENT=development
+```
 
 ### Celery App (`API/celery.py`)
 
@@ -118,9 +144,20 @@ python manage.py start_celery --all --loglevel=debug --concurrency=8
 ### Manual Commands
 
 #### Start Celery Worker
+
+**Production:**
 ```bash
-celery -A API worker --loglevel=info --concurrency=4 --pool=prefork --queues=default,email,backup
+export ENVIRONMENT=production
+celery -A API worker --loglevel=info --concurrency=4 --pool=prefork --queues=production -n worker-prod@%h
 ```
+
+**Development/DevAPI:**
+```bash
+export ENVIRONMENT=development
+celery -A API worker --loglevel=info --concurrency=1 --pool=prefork --queues=devapi -n worker-dev@%h
+```
+
+**Note**: The queue name is automatically determined by the `ENVIRONMENT` variable. Workers must listen to the correct queue matching their environment.
 
 #### Start Celery Beat (Scheduler)
 ```bash
