@@ -777,13 +777,15 @@ WeDesignz Team
             msg.attach_alternative(html_content, "text/html")
             
             # Attach PDF invoice if it exists
-            if invoice.pdf_file_path and os.path.exists(invoice.pdf_file_path):
-                with open(invoice.pdf_file_path, 'rb') as pdf:
-                    msg.attach(
-                        f'invoice_{invoice.invoice_number}.pdf',
-                        pdf.read(),
-                        'application/pdf'
-                    )
+            if invoice.pdf_file_path:
+                file_path = os.path.join(settings.MEDIA_ROOT, invoice.pdf_file_path)
+                if os.path.exists(file_path):
+                    with open(file_path, 'rb') as pdf:
+                        msg.attach(
+                            f'invoice_{invoice.invoice_number}.pdf',
+                            pdf.read(),
+                            'application/pdf'
+                        )
             
             msg.send()
             
@@ -870,13 +872,15 @@ WeDesignz Team
             msg.attach_alternative(html_content, "text/html")
             
             # Attach PDF receipt if it exists
-            if invoice.pdf_file_path and os.path.exists(invoice.pdf_file_path):
-                with open(invoice.pdf_file_path, 'rb') as pdf:
-                    msg.attach(
-                        f'receipt_{invoice.invoice_number}.pdf',
-                        pdf.read(),
-                        'application/pdf'
-                    )
+            if invoice.pdf_file_path:
+                file_path = os.path.join(settings.MEDIA_ROOT, invoice.pdf_file_path)
+                if os.path.exists(file_path):
+                    with open(file_path, 'rb') as pdf:
+                        msg.attach(
+                            f'receipt_{invoice.invoice_number}.pdf',
+                            pdf.read(),
+                            'application/pdf'
+                        )
             
             msg.send()
             

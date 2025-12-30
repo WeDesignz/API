@@ -1547,11 +1547,15 @@ def upload_profile_photo(request):
                 relation.delete()
         
         # Create new profile photo
-        profile_photo = Media.objects.create(
-            file=file,
-            media_type='image',
-            created_by=request.user
-        )
+        Media.set_profile_context()
+        try:
+            profile_photo = Media.objects.create(
+                file=file,
+                media_type='image',
+                created_by=request.user
+            )
+        finally:
+            Media.clear_profile_context()
         attach_relation('DesignerProfile:Media', designer_profile, profile_photo, 
                       meta={'type': 'profile_photo'}, created_by=request.user)
         

@@ -414,11 +414,15 @@ def studio_business_details(request, studio_id):
                     media_type = 'image'
                 else:
                     media_type = 'other'
-                pan_card_media = Media.objects.create(
-                    file=pan_card_file,
-                    media_type=media_type,
-                    created_by=request.user
-                )
+                Media.set_document_context()
+                try:
+                    pan_card_media = Media.objects.create(
+                        file=pan_card_file,
+                        media_type=media_type,
+                        created_by=request.user
+                    )
+                finally:
+                    Media.clear_document_context()
                 pan_card_url = pan_card_media.file.url if hasattr(pan_card_media.file, 'url') else None
                 if pan_card_url:
                     # Build absolute URL if relative
@@ -439,11 +443,15 @@ def studio_business_details(request, studio_id):
                     media_type = 'image'
                 else:
                     media_type = 'other'
-                msme_cert_media = Media.objects.create(
-                    file=msme_cert_file,
-                    media_type=media_type,
-                    created_by=request.user
-                )
+                Media.set_document_context()
+                try:
+                    msme_cert_media = Media.objects.create(
+                        file=msme_cert_file,
+                        media_type=media_type,
+                        created_by=request.user
+                    )
+                finally:
+                    Media.clear_document_context()
                 msme_cert_url = msme_cert_media.file.url if hasattr(msme_cert_media.file, 'url') else None
                 if msme_cert_url:
                     # Build absolute URL if relative
@@ -1212,11 +1220,15 @@ def designer_onboarding_step1(request):
                         relation.delete()  # Delete the relation
                 
                 # Create new profile photo
-                profile_photo = Media.objects.create(
-                    file=request.FILES['profile_photo'],
-                    media_type='image',
-                    created_by=user
-                )
+                Media.set_profile_context()
+                try:
+                    profile_photo = Media.objects.create(
+                        file=request.FILES['profile_photo'],
+                        media_type='image',
+                        created_by=user
+                    )
+                finally:
+                    Media.clear_profile_context()
                 attach_relation('DesignerProfile:Media', designer_profile, profile_photo, 
                               meta={'type': 'profile_photo'}, created_by=user)
             
@@ -1492,11 +1504,15 @@ def designer_onboarding_step2(request):
                     pass
                 
                 # Create new MSME certificate media
-                msme_cert = Media.objects.create(
-                    file=request.FILES['msme_certificate_annexure'],
-                    media_type='document',
-                    created_by=request.user
-                )
+                Media.set_document_context()
+                try:
+                    msme_cert = Media.objects.create(
+                        file=request.FILES['msme_certificate_annexure'],
+                        media_type='document',
+                        created_by=request.user
+                    )
+                finally:
+                    Media.clear_document_context()
                 msme_cert_url = msme_cert.file.url if hasattr(msme_cert.file, 'url') else None
                 business_details.msme_certificate_annexure = msme_cert_url
                 business_details.save()
@@ -1574,11 +1590,15 @@ def designer_onboarding_step3(request):
             # Handle PAN card document file upload
             if 'pan_card' in request.FILES:
                 # Create new PAN card media
-                pan_card = Media.objects.create(
-                    file=request.FILES['pan_card'],
-                    media_type='document',
-                    created_by=request.user
-                )
+                Media.set_document_context()
+                try:
+                    pan_card = Media.objects.create(
+                        file=request.FILES['pan_card'],
+                        media_type='document',
+                        created_by=request.user
+                    )
+                finally:
+                    Media.clear_document_context()
                 pan_card_url = pan_card.file.url if hasattr(pan_card.file, 'url') else None
             
             if is_individual:
@@ -2068,10 +2088,10 @@ def handle_design_upload(request):
             # Ensure user directory exists
             import os
             from django.conf import settings
-            user_upload_dir = os.path.join(settings.MEDIA_ROOT, 'design_uploads', str(request.user.id))
+            user_upload_dir = os.path.join(settings.MEDIA_ROOT, str(request.user.id), 'uploads')
             os.makedirs(user_upload_dir, exist_ok=True)
             
-            zip_file_path = f'design_uploads/{request.user.id}/{timestamp}_{zip_file.name}'
+            zip_file_path = f'{request.user.id}/uploads/{timestamp}_{zip_file.name}'
             
             # Reset file pointer before saving
             zip_file.seek(0)

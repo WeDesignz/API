@@ -727,11 +727,15 @@ def admin_upload_profile_photo(request):
                 relation.delete()
         
         # Create new profile photo
-        profile_photo = Media.objects.create(
-            file=file,
-            media_type='image',
-            created_by=request.user
-        )
+        Media.set_profile_context()
+        try:
+            profile_photo = Media.objects.create(
+                file=file,
+                media_type='image',
+                created_by=request.user
+            )
+        finally:
+            Media.clear_profile_context()
         attach_relation('AdminUserProfile:Media', admin_profile, profile_photo, 
                       meta={'type': 'profile_photo'}, created_by=request.user)
         
@@ -5975,16 +5979,25 @@ def custom_order_upload_files(request, order_id):
     
     try:
         # Upload files to Media model
+        # Files should be stored in the customer's folder (order.created_by), not admin's folder
+        customer_user = order.created_by
         uploaded_media = []
-        for file in files:
-            from MediaFiles.models import Media
-            media_obj = Media.objects.create(
-                file=file,
-                media_type='image',  # Default to image, can be enhanced
-                created_by=request.user
-            )
-            order.attach_media(media_obj, meta={'type': 'delivery_file'}, created_by=request.user)
-            uploaded_media.append(media_obj.id)
+        
+        # Set order context for file path generation
+        Media.set_order_context(order.id)
+        try:
+            for file in files:
+                from MediaFiles.models import Media
+                # Create Media object with customer as created_by so it goes to customer's folder
+                media_obj = Media.objects.create(
+                    file=file,
+                    media_type='image',  # Default to image, can be enhanced
+                    created_by=customer_user  # Use customer user, not admin
+                )
+                order.attach_media(media_obj, meta={'type': 'delivery_file'}, created_by=request.user)
+                uploaded_media.append(media_obj.id)
+        finally:
+            Media.clear_order_context()
         
         # Mark order as having delivery files
         order.delivery_files_uploaded = True

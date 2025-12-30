@@ -1868,14 +1868,21 @@ def download_invoice(request, invoice_id):
             'error': 'Invoice not found'
         }, status=status.HTTP_404_NOT_FOUND)
     
-    if not invoice.pdf_file_path or not os.path.exists(invoice.pdf_file_path):
+    # Build full file path from relative path stored in database
+    if not invoice.pdf_file_path:
+        return Response({
+            'error': 'Invoice PDF not found'
+        }, status=status.HTTP_404_NOT_FOUND)
+    
+    file_path = os.path.join(settings.MEDIA_ROOT, invoice.pdf_file_path)
+    if not os.path.exists(file_path):
         return Response({
             'error': 'Invoice PDF not found'
         }, status=status.HTTP_404_NOT_FOUND)
     
     from django.http import FileResponse
     return FileResponse(
-        open(invoice.pdf_file_path, 'rb'),
+        open(file_path, 'rb'),
         content_type='application/pdf',
         filename=f"{invoice.invoice_number}.pdf"
     )
