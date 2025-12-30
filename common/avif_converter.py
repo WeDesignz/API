@@ -5,12 +5,33 @@ from django.core.files.storage import default_storage
 from django.core.files.base import ContentFile
 import logging
 
+# Try to import pillow-avif-plugin to register AVIF support
+try:
+    import pillow_avif
+    # Register AVIF plugin
+    pillow_avif.register_avif_opener()
+except ImportError:
+    pass  # Plugin not installed or not available
+except Exception as e:
+    # Plugin might be installed but not working
+    pass
+
 logger = logging.getLogger(__name__)
 
 # Check if AVIF support is available
 def check_avif_support():
     """Check if Pillow has AVIF support"""
     try:
+        # First, try to import and register the plugin
+        try:
+            import pillow_avif
+            pillow_avif.register_avif_opener()
+        except ImportError:
+            # Plugin not installed
+            logger.debug("pillow-avif-plugin not found")
+        except Exception as e:
+            logger.debug(f"Error registering pillow-avif-plugin: {e}")
+        
         # Try to save a test image to see if AVIF works
         # This is the most reliable way to check
         test_img = Image.new('RGB', (1, 1), color='red')
@@ -18,8 +39,13 @@ def check_avif_support():
         with tempfile.NamedTemporaryFile(suffix='.avif', delete=True) as tmp:
             test_img.save(tmp.name, format='AVIF')
             return True
-    except (KeyError, ValueError, OSError, Exception):
+    except (KeyError, ValueError, OSError) as e:
         # AVIF format is not supported
+        logger.debug(f"AVIF test failed: {e}")
+        return False
+    except Exception as e:
+        # Other error - likely missing system libraries
+        logger.debug(f"AVIF check error: {e}")
         return False
 
 # Cache the AVIF support check

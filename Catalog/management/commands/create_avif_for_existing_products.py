@@ -85,14 +85,38 @@ class Command(BaseCommand):
 
         # Check AVIF support upfront
         from common.avif_converter import is_avif_supported
+        import sys
+        
+        # Check if pillow-avif-plugin is installed
+        try:
+            import pillow_avif
+            plugin_installed = True
+        except ImportError:
+            plugin_installed = False
+        
         if not is_avif_supported():
             self.stdout.write(self.style.ERROR('\n❌ AVIF format is not supported!\n'))
-            self.stdout.write(self.style.WARNING('To enable AVIF support, please install the required package:\n'))
-            self.stdout.write('   pip install pillow-avif-plugin\n')
-            self.stdout.write('\nNote: You may also need to install system libraries:\n')
-            self.stdout.write('   Ubuntu/Debian: sudo apt-get install libavif-dev libavif-bin\n')
-            self.stdout.write('   CentOS/RHEL: sudo yum install libavif-devel\n')
-            self.stdout.write('\nAfter installation, restart your application and run this command again.\n')
+            
+            if not plugin_installed:
+                self.stdout.write(self.style.WARNING('1. Install the Python package:\n'))
+                self.stdout.write('   pip install pillow-avif-plugin\n')
+            else:
+                self.stdout.write(self.style.SUCCESS('✓ pillow-avif-plugin is installed\n'))
+                self.stdout.write(self.style.WARNING('However, AVIF support is still not working.\n'))
+                self.stdout.write(self.style.WARNING('This usually means system libraries are missing.\n'))
+            
+            self.stdout.write(self.style.WARNING('\n2. Install system libraries (required):\n'))
+            self.stdout.write('   Ubuntu/Debian:\n')
+            self.stdout.write('     sudo apt-get update\n')
+            self.stdout.write('     sudo apt-get install -y libavif-dev libavif-bin\n')
+            self.stdout.write('\n   CentOS/RHEL:\n')
+            self.stdout.write('     sudo yum install -y libavif-devel\n')
+            self.stdout.write('\n   After installing system libraries, you may need to:\n')
+            self.stdout.write('     - Restart your Python process/application\n')
+            self.stdout.write('     - Or reinstall pillow-avif-plugin: pip install --force-reinstall pillow-avif-plugin\n')
+            self.stdout.write('\n3. Verify installation:\n')
+            self.stdout.write('   python -c "from PIL import Image; img = Image.new(\'RGB\', (1,1)); img.save(\'/tmp/test.avif\', format=\'AVIF\')"\n')
+            self.stdout.write('\nIf the test succeeds, run this command again.\n')
             return
 
         if dry_run:
