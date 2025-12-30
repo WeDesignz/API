@@ -2,6 +2,7 @@ from celery import shared_task
 from django.db import transaction
 from django.utils import timezone
 from common.relations import attach_relation
+from common.avif_converter import create_avif_from_media_file
 import logging
 import os
 
@@ -127,6 +128,20 @@ def process_single_design_upload(
                 product.attach_media(media_obj, meta=upload_metadata, created_by=product.created_by)
                 processed_files += 1
                 logger.info(f'Processed file {file_name} -> {new_filename} for product {product_id}')
+                
+                # Create AVIF version for JPG and PNG files
+                if file_name_lower.endswith(('.jpg', '.jpeg', '.png')):
+                    try:
+                        media_file_path = media_obj.file.name
+                        avif_path = create_avif_from_media_file(
+                            media_file_path,
+                            product_number,
+                            is_mockup=is_mockup
+                        )
+                        if avif_path:
+                            logger.info(f'Created AVIF version for {file_name}: {avif_path}')
+                    except Exception as avif_error:
+                        logger.warning(f'Failed to create AVIF for {file_name}: {avif_error}')
                 
             except Exception as e:
                 logger.error(f'Failed to process file {file_data.get("name", "unknown")}: {str(e)}', exc_info=True)
