@@ -7,12 +7,16 @@ This command migrates:
 3. Design files from media/ or {user_id}/{product_id}/ to {user_id}/designs/{product_id}/
 4. Bulk uploads from design_uploads/{user_id}/ to {user_id}/uploads/
 5. Temp uploads from temp_uploads/{user_id}/ to {user_id}/temp/
+6. Profile photos from media/ to {user_id}/profile/
+7. Business documents from media/ to {user_id}/documents/
+8. Custom order deliverables from media/ to {user_id}/orders/{order_id}/deliverables/
 
 Usage:
     python manage.py migrate_user_files
     python manage.py migrate_user_files --dry-run
     python manage.py migrate_user_files --type invoices
     python manage.py migrate_user_files --skip-existing
+    python manage.py migrate_user_files --cleanup  # Remove empty old folders after migration
 """
 
 from django.core.management.base import BaseCommand
@@ -61,6 +65,11 @@ class Command(BaseCommand):
             action='store_true',
             help='Show detailed information for each file',
         )
+        parser.add_argument(
+            '--cleanup',
+            action='store_true',
+            help='Remove empty old folders after migration (default: False)',
+        )
 
     def handle(self, *args, **options):
         dry_run = options['dry_run']
@@ -68,6 +77,7 @@ class Command(BaseCommand):
         batch_size = options['batch_size']
         skip_existing = options['skip_existing']
         verbose = options['verbose']
+        cleanup = options['cleanup']
 
         self.stdout.write(self.style.SUCCESS('\n' + '=' * 80))
         self.stdout.write(self.style.SUCCESS('User Files Migration Script'))
@@ -128,6 +138,17 @@ class Command(BaseCommand):
             self.stdout.write(self.style.SUCCESS('\n--- Migrating Custom Order Deliverables ---\n'))
             stats = self.migrate_deliverables(dry_run, batch_size, skip_existing, verbose)
             total_stats['deliverables'] = stats
+
+        # Cleanup empty old folders if requested
+        if cleanup and not dry_run:
+            self.stdout.write(self.style.SUCCESS('\n--- Cleaning Up Empty Folders ---\n'))
+            cleanup_stats = self.cleanup_empty_folders(verbose)
+            if cleanup_stats['removed'] > 0:
+                self.stdout.write(self.style.SUCCESS(
+                    f'Removed {cleanup_stats["removed"]} empty folder(s)'
+                ))
+            else:
+                self.stdout.write('No empty folders to remove.')
 
         # Print overall summary
         self.print_summary(total_stats, dry_run)
@@ -879,6 +900,165 @@ class Command(BaseCommand):
             return parts[1] == 'designs'
         except ValueError:
             return False
+
+    def cleanup_empty_folders(self, verbose):
+        """Remove empty old folders after migration"""
+        stats = {'checked': 0, 'removed': 0, 'errors': 0}
+        media_root = settings.MEDIA_ROOT
+        
+        if not os.path.exists(media_root):
+            return stats
+        
+        # List of old folder patterns to check and remove if empty
+        old_folders_to_check = [
+            'design_uploads',
+            'temp_uploads',
+            'invoices',
+            'pdfs',
+        ]
+        
+        # Check and remove old top-level folders
+        for folder_name in old_folders_to_check:
+            folder_path = os.path.join(media_root, folder_name)
+            if os.path.exists(folder_path) and os.path.isdir(folder_path):
+                stats['checked'] += 1
+                try:
+                    # Check if folder is empty (recursively)
+                    if self._is_folder_empty(folder_path):
+                        os.rmdir(folder_path)
+                        stats['removed'] += 1
+                        if verbose:
+                            self.stdout.write(self.style.SUCCESS(f'  ✓ Removed empty folder: {folder_name}/'))
+                    else:
+                        # Try to remove empty subdirectories
+                        removed_subdirs = self._remove_empty_subdirs(folder_path, verbose)
+                        stats['removed'] += removed_subdirs
+                        # If folder is now empty, remove it
+                        if self._is_folder_empty(folder_path):
+                            os.rmdir(folder_path)
+                            stats['removed'] += 1
+                            if verbose:
+                                self.stdout.write(self.style.SUCCESS(f'  ✓ Removed empty folder: {folder_name}/'))
+                except Exception as e:
+                    stats['errors'] += 1
+                    if verbose:
+                        self.stdout.write(self.style.ERROR(f'  ✗ Error removing {folder_name}/: {str(e)}'))
+                    logger.error(f'Error removing folder {folder_path}: {str(e)}', exc_info=True)
+        
+        # Check and remove old user/product folders (old structure: {user_id}/{product_id}/)
+        # These should be empty after migration to {user_id}/designs/{product_id}/
+        try:
+            for user_folder in os.listdir(media_root):
+                user_folder_path = os.path.join(media_root, user_folder)
+                if not os.path.isdir(user_folder_path):
+                    continue
+                
+                # Check if it's a numeric user folder (old structure)
+                try:
+                    user_id = int(user_folder)
+                except ValueError:
+                    continue
+                
+                # Check if this folder has old product subfolders (not in new structure)
+                for item in os.listdir(user_folder_path):
+                    item_path = os.path.join(user_folder_path, item)
+                    if not os.path.isdir(item_path):
+                        continue
+                    
+                    # Check if it's a numeric product_id folder (old structure)
+                    # New structure would have 'designs', 'invoices', etc. as subfolders
+                    try:
+                        product_id = int(item)
+                        # This is an old product folder structure
+                        product_folder_path = item_path
+                        if self._is_folder_empty(product_folder_path):
+                            os.rmdir(product_folder_path)
+                            stats['removed'] += 1
+                            if verbose:
+                                self.stdout.write(self.style.SUCCESS(
+                                    f'  ✓ Removed old product folder: {user_folder}/{item}/'
+                                ))
+                    except ValueError:
+                        # Not a numeric folder, skip
+                        continue
+                
+                # If user folder is now empty (no subfolders), we could remove it
+                # But be careful - it might have new structure folders
+                # Only remove if it's completely empty
+                if self._is_folder_empty(user_folder_path):
+                    # Check if it's not part of new structure (should have subfolders like designs/, invoices/, etc.)
+                    has_new_structure = any(
+                        os.path.isdir(os.path.join(user_folder_path, subfolder))
+                        for subfolder in ['designs', 'invoices', 'pdfs', 'uploads', 'temp', 'profile', 'documents', 'orders']
+                    )
+                    if not has_new_structure:
+                        os.rmdir(user_folder_path)
+                        stats['removed'] += 1
+                        if verbose:
+                            self.stdout.write(self.style.SUCCESS(
+                                f'  ✓ Removed empty user folder: {user_folder}/'
+                            ))
+        except Exception as e:
+            stats['errors'] += 1
+            logger.error(f'Error cleaning up old user/product folders: {str(e)}', exc_info=True)
+        
+        # Check media/ folder - only remove if it's empty or only has non-user files
+        media_folder_path = os.path.join(media_root, 'media')
+        if os.path.exists(media_folder_path) and os.path.isdir(media_folder_path):
+            stats['checked'] += 1
+            try:
+                # Check if media/ folder is empty
+                if self._is_folder_empty(media_folder_path):
+                    os.rmdir(media_folder_path)
+                    stats['removed'] += 1
+                    if verbose:
+                        self.stdout.write(self.style.SUCCESS('  ✓ Removed empty folder: media/'))
+                else:
+                    # Try to remove empty subdirectories in media/
+                    removed_subdirs = self._remove_empty_subdirs(media_folder_path, verbose)
+                    stats['removed'] += removed_subdirs
+            except Exception as e:
+                stats['errors'] += 1
+                if verbose:
+                    self.stdout.write(self.style.ERROR(f'  ✗ Error removing media/: {str(e)}'))
+                logger.error(f'Error removing media folder: {str(e)}', exc_info=True)
+        
+        return stats
+    
+    def _is_folder_empty(self, folder_path):
+        """Check if a folder is empty (no files or subdirectories)"""
+        try:
+            return len(os.listdir(folder_path)) == 0
+        except (OSError, PermissionError):
+            return False
+    
+    def _remove_empty_subdirs(self, folder_path, verbose):
+        """Recursively remove empty subdirectories"""
+        removed_count = 0
+        
+        try:
+            for root, dirs, files in os.walk(folder_path, topdown=False):
+                # Remove empty directories (walking bottom-up)
+                for dir_name in dirs:
+                    dir_path = os.path.join(root, dir_name)
+                    try:
+                        if self._is_folder_empty(dir_path):
+                            os.rmdir(dir_path)
+                            removed_count += 1
+                            if verbose:
+                                rel_path = os.path.relpath(dir_path, settings.MEDIA_ROOT)
+                                self.stdout.write(self.style.SUCCESS(
+                                    f'  ✓ Removed empty subdirectory: {rel_path}/'
+                                ))
+                    except (OSError, PermissionError) as e:
+                        if verbose:
+                            self.stdout.write(self.style.WARNING(
+                                f'  ⊘ Could not remove {dir_path}: {str(e)}'
+                            ))
+        except Exception as e:
+            logger.error(f'Error removing empty subdirectories in {folder_path}: {str(e)}', exc_info=True)
+        
+        return removed_count
 
     def print_summary(self, total_stats, dry_run):
         """Print migration summary"""
