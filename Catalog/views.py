@@ -10,6 +10,7 @@ from datetime import timedelta
 from django.core.paginator import Paginator
 from django.core.files.storage import default_storage
 import random
+import os
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
 from .models import Product, Category, CollectionBundle, Tags, ProductCounter, PDFDownload
@@ -2216,12 +2217,39 @@ def design_detail(request, design_id):
                     # Handle file uploads if present
                     if has_file_updates:
                         design_files = request.FILES.getlist('design_files')
+                        
+                        # Ensure product_number is available
+                        if not design.product_number:
+                            design.refresh_from_db()
+                            if not design.product_number:
+                                return Response({
+                                    'error': 'Product has no product_number. Please contact support.'
+                                }, status=status.HTTP_400_BAD_REQUEST)
+                        
+                        product_number = design.product_number
+                        
                         # Set product context for file path generation
                         Media.set_product_context(design.id)
                         try:
                             for file in design_files:
+                                # Detect if this is a mockup file
+                                file_name_lower = file.name.lower()
+                                is_mockup = 'mockup' in file_name_lower
+                                
+                                # Generate new filename using product_number
+                                file_ext = os.path.splitext(file.name)[1].lower()
+                                if is_mockup:
+                                    new_filename = f'{product_number}_MOCKUP{file_ext}'
+                                else:
+                                    new_filename = f'{product_number}{file_ext}'
+                                
+                                # Create a new file-like object with the renamed filename
+                                from django.core.files.base import ContentFile
+                                file_content = file.read()
+                                renamed_file = ContentFile(file_content, name=new_filename)
+                                
                                 media_obj = Media.objects.create(
-                                    file=file,
+                                    file=renamed_file,
                                     media_type='image' if file.content_type and file.content_type.startswith('image/') else 'video',
                                     created_by=request.user
                                 )
@@ -2231,8 +2259,12 @@ def design_detail(request, design_id):
                                     'timestamp': timezone.now().isoformat(),
                                     'original_filename': file.name,
                                     'file_size': file.size,
-                                    'content_type': file.content_type if file.content_type else 'application/octet-stream'
+                                    'content_type': file.content_type if file.content_type else 'application/octet-stream',
+                                    'is_mockup': is_mockup
                                 }
+                                
+                                if is_mockup:
+                                    upload_metadata['type'] = 'mockup'
                                 
                                 design.attach_media(media_obj, meta=upload_metadata, created_by=request.user)
                         finally:
