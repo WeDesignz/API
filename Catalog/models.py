@@ -58,7 +58,7 @@ class Product(models.Model):
     # Subscription plans only provide benefits (discounts, free downloads, mock PDFs, custom design hours, etc.)
     # They do NOT restrict which designs users can access or purchase.
     product_plan_type = models.CharField(max_length=20, choices=PRODUCT_PLAN_TYPE_CHOICES)
-    product_number = models.CharField(max_length=50, blank=True, null=True)  # General design number (WDG00000001)
+    product_number = models.CharField(max_length=50, blank=True, null=True, unique=True)  # General design number (WDG00000001)
     studio_design_number = models.CharField(max_length=50, blank=True, null=True)  # Studio-wise design number (LR0000001)
     color = models.CharField(max_length=50, blank=True, null=True)
     price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)

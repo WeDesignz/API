@@ -199,6 +199,7 @@ def validate_studio_name(name: str) -> bool:
 class DesignNumberGenerator:
     """
     Design number generation system for both general and studio-wise numbering.
+    Uses database-level atomic operations to ensure uniqueness and prevent race conditions.
     """
     
     def __init__(self):
@@ -210,28 +211,98 @@ class DesignNumberGenerator:
     def generate_general_design_number(self) -> str:
         """
         Generate general design number: WDG00000001, WDG00000002, etc.
+        Uses database to ensure uniqueness and prevent race conditions.
         """
-        counter = cache.get(self.general_counter_cache_key, 0)
-        new_counter = counter + 1
-        cache.set(self.general_counter_cache_key, new_counter, self.cache_timeout)
+        from Catalog.models import Product
         
-        return f"{self.general_prefix}{new_counter:08d}"
+        max_attempts = 100
+        
+        for attempt in range(max_attempts):
+            # Get the highest existing product number from database
+            with transaction.atomic():
+                # Use select_for_update to lock rows and prevent race conditions
+                highest_product = Product.objects.filter(
+                    product_number__isnull=False,
+                    product_number__startswith=self.general_prefix
+                ).select_for_update().order_by('-product_number').first()
+                
+                if highest_product and highest_product.product_number:
+                    # Extract the number part (e.g., "WDG00000037" -> 37)
+                    try:
+                        number_part = int(highest_product.product_number.replace(self.general_prefix, ""))
+                        next_number = number_part + 1
+                    except (ValueError, AttributeError):
+                        # If parsing fails, start from 1
+                        next_number = 1
+                else:
+                    # No products exist yet, start from 1
+                    next_number = 1
+                
+                # Generate the new product number
+                new_product_number = f"{self.general_prefix}{next_number:08d}"
+                
+                # Verify it doesn't exist (double-check for safety)
+                if not Product.objects.filter(product_number=new_product_number).exists():
+                    # Update cache for performance (non-critical)
+                    cache.set(self.general_counter_cache_key, next_number, self.cache_timeout)
+                    return new_product_number
+                
+                # If collision occurs, increment and try again
+                next_number += 1
+        
+        # Fallback: if all attempts fail, use timestamp-based approach
+        import time
+        timestamp_suffix = str(int(time.time()))[-6:]  # Last 6 digits of timestamp
+        return f"{self.general_prefix}{timestamp_suffix}"
     
     def generate_studio_design_number(self, studio_auto_name: str) -> str:
         """
         Generate studio-wise design number: LR0000001, LR0000002, etc.
         Uses first 2 characters of studio auto name as prefix.
+        Uses database to ensure uniqueness.
         """
+        from Catalog.models import Product
+        
         # Extract prefix from studio name (first 2 characters, uppercase)
         prefix = studio_auto_name[:2].upper()
         
-        # Get studio-specific counter
-        cache_key = f"{self.studio_counter_cache_key_prefix}{prefix}"
-        counter = cache.get(cache_key, 0)
-        new_counter = counter + 1
-        cache.set(cache_key, new_counter, self.cache_timeout)
+        max_attempts = 100
         
-        return f"{prefix}{new_counter:07d}"
+        for attempt in range(max_attempts):
+            # Get the highest existing studio design number for this prefix
+            with transaction.atomic():
+                highest_product = Product.objects.filter(
+                    studio_design_number__isnull=False,
+                    studio_design_number__startswith=prefix
+                ).select_for_update().order_by('-studio_design_number').first()
+                
+                if highest_product and highest_product.studio_design_number:
+                    # Extract the number part (e.g., "LR0000001" -> 1)
+                    try:
+                        number_part = int(highest_product.studio_design_number.replace(prefix, ""))
+                        next_number = number_part + 1
+                    except (ValueError, AttributeError):
+                        next_number = 1
+                else:
+                    next_number = 1
+                
+                # Generate the new studio design number
+                new_studio_number = f"{prefix}{next_number:07d}"
+                
+                # Verify it doesn't exist
+                if not Product.objects.filter(studio_design_number=new_studio_number).exists():
+                    # Update cache for performance
+                    cache_key = f"{self.studio_counter_cache_key_prefix}{prefix}"
+                    cache.set(cache_key, next_number, self.cache_timeout)
+                    return new_studio_number
+                
+                # If collision occurs, increment and try again
+                next_number += 1
+        
+        # Fallback: use timestamp
+        import time
+        timestamp_suffix = str(int(time.time()))[-5:]  # Last 5 digits
+        return f"{prefix}{timestamp_suffix}"
     
     def get_next_design_numbers(self, studio_auto_name: str) -> dict:
         """
