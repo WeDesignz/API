@@ -14,6 +14,7 @@ from .models import DesignProcessingTask, DesignerProfile, Studio, StudioMember
 from Catalog.models import Product, Category, Tags
 from Plans.models import Plan
 from MediaFiles.models import Media
+from common.avif_converter import create_avif_from_media_file
 
 logger = logging.getLogger(__name__)
 
@@ -510,6 +511,21 @@ def process_design_upload_task(self, task_id, zip_file_path):
                                     }
                                     logger.info(f"Task {task_id}: Attaching media {media.id} to product {product.id}...")
                                     product.attach_media(media, meta=meta_info, created_by=task.user)
+                                    
+                                    # Create AVIF version for JPG and PNG files
+                                    if file_ext in ['.jpg', '.jpeg', '.png']:
+                                        try:
+                                            media_file_path = media.file.name
+                                            is_mockup = False
+                                            avif_path = create_avif_from_media_file(
+                                                media_file_path,
+                                                product_number,
+                                                is_mockup=is_mockup
+                                            )
+                                            if avif_path:
+                                                logger.info(f"Task {task_id}: Created AVIF version: {avif_path}")
+                                        except Exception as avif_error:
+                                            logger.warning(f"Task {task_id}: Failed to create AVIF for {file_path}: {avif_error}")
                                 except Exception as e:
                                     logger.error(f"Task {task_id}: Error creating media for {file_path}: {str(e)}", exc_info=True)
                         finally:
@@ -542,10 +558,24 @@ def process_design_upload_task(self, task_id, zip_file_path):
                                     meta_info = {
                                         'type': 'MOCKUP',
                                         'folder_name': folder_name,
-                                        'original_filename': file_name
+                                        'original_filename': file_name,
+                                        'is_mockup': True
                                     }
                                     logger.info(f"Task {task_id}: Attaching mockup media {media.id} to product {product.id}...")
                                     product.attach_media(media, meta=meta_info, created_by=task.user)
+                                    
+                                    # Create AVIF version for mockup
+                                    try:
+                                        media_file_path = media.file.name
+                                        avif_path = create_avif_from_media_file(
+                                            media_file_path,
+                                            product_number,
+                                            is_mockup=True
+                                        )
+                                        if avif_path:
+                                            logger.info(f"Task {task_id}: Created MOCKUP AVIF version: {avif_path}")
+                                    except Exception as avif_error:
+                                        logger.warning(f"Task {task_id}: Failed to create AVIF for mockup: {avif_error}")
                                 except Exception as e:
                                     logger.error(f"Task {task_id}: Error creating mockup media for {mockup_file}: {str(e)}", exc_info=True)
                                     # Don't fail the whole process if mockup fails
