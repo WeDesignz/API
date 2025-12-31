@@ -59,7 +59,7 @@ A comprehensive Django REST API for the WeDesignz platform - a design marketplac
 - **Message Broker**: Redis
 - **Payment**: Razorpay
 - **Documentation**: drf-yasg (Swagger/OpenAPI)
-- **Admin**: Django Admin with Jazzmin theme
+- **Admin**: Django Admin with Unfold theme
 
 ## 📋 Prerequisites
 

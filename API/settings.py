@@ -63,7 +63,7 @@ if CSRF_TRUSTED_ORIGINS_STR:
 # Application definition
 
 INSTALLED_APPS = [
-    'jazzmin',  # Jazzmin admin theme
+    'unfold',  # Unfold admin theme
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -235,6 +235,15 @@ PINTEREST_ENABLED = config('PINTEREST_ENABLED', default='False', cast=bool)
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
+# Unfold Admin Theme Configuration
+# https://github.com/unfoldadmin/django-unfold
+# Minimal configuration for Unfold 0.74.1
+UNFOLD = {
+    "SITE_TITLE": "WeDesignz Admin",
+    "SITE_HEADER": "WeDesignz Administration",
+    "SITE_URL": "/",
+}
+
 # REST Framework Configuration
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
@@ -280,241 +289,6 @@ SIMPLE_JWT = {
     'SLIDING_TOKEN_REFRESH_LIFETIME': timedelta(days=1),
 }
 
-# Jazzmin Configuration
-JAZZMIN_SETTINGS = {
-    # title of the window (Will default to current_admin_site.site_title if absent or None)
-    "site_title": "WeDesignz Admin",
-
-    # Title on the login screen (19 chars max) (defaults to current_admin_site.site_header if absent or None)
-    "site_header": "WeDesignz",
-
-    # Title on the brand (19 chars max) (defaults to current_admin_site.site_header if absent or None)
-    "site_brand": "WeDesignz",
-
-    # Logo to use for your site, must be present in static files, used for brand on top left (sidebar after login)
-    "site_logo": "Logos/ONLY LOGO.png",
-
-    # Logo to use for your site, must be present in static files, used for login form logo (if site_logo is not set)
-    "login_logo": "Logos/WD LOGO2048BLACK.png",
-
-    # Logo to use for login form in dark themes (if login_logo is not set)
-    "login_logo_dark": "Logos/WD LOGO2048BLACK.png",
-
-    # CSS classes that are applied to the logo above
-    "site_logo_classes": "",
-
-    # Relative path to a favicon for your site, will default to site_logo if absent (ideally 32x32 px)
-    "site_icon": "favicon/favicon-96x96.png",
-
-    # Welcome text on the login screen
-    "welcome_sign": "Welcome to WeDesignz Admin Panel",
-
-    # Copyright on the footer
-    "copyright": "WeDesignz",
-
-    # List of model admins to search from the search bar, search bar omitted if empty
-    # Temporarily disabled to debug white screen issue
-    "search_model": [],
-
-    # Field name on user model that contains avatar ImageField/URLField/Charfield or a callable that receives the user
-    "user_avatar": None,
-
-    ############
-    # Top Menu #
-    ############
-
-    # Links to put along the top menu
-    "topmenu_links": [
-        # Url that gets reversed (Permissions can be added)
-        {"name": "Home",  "url": "admin:index", "permissions": ["auth.view_user"]},
-        # external url that opens in a new window (Permissions can be added)
-        {"name": "Support", "url": "https://github.com/WeDesignz/API", "new_window": True},
-        # model admin to link to (Permissions checked against model)
-        {"model": "auth.User"},
-    ],
-
-    #############
-    # User Menu #
-    #############
-
-    # Additional links to include in the user menu on the top right ("app" url type is not supported)
-    "usermenu_links": [
-        {"name": "Support", "url": "https://github.com/WeDesignz/API", "new_window": True},
-        {"model": "auth.user"}
-    ],
-
-    #############
-    # Side Menu #
-    #############
-
-    # Whether to display the side menu
-    "show_sidebar": True,
-
-    # Whether to aut expand the menu
-    "navigation_expanded": True,
-
-    # Hide these apps when generating side menu e.g (auth)
-    "hide_apps": [],
-
-    # Hide these models when generating side menu (e.g auth.user)
-    "hide_models": [],
-
-    # List of apps (and/or models) to base side menu ordering off of (does not need to contain all apps/models)
-    "order_with_respect_to": ["auth", "Accounts", "Catalog", "Orders", "Profiles", "Wallet", "Plans", "Coupons", "CustomRequests", "Feedback", "Razorpay", "MediaFiles"],
-
-    # Custom links to append to app groups, keyed on app name
-    "custom_links": {
-        "Accounts": [{
-            "name": "User Management",
-            "url": "admin:auth_user_changelist",
-            "icon": "fas fa-users",
-            "permissions": ["auth.view_user"]
-        }],
-        "Catalog": [{
-            "name": "Product Analytics",
-            "url": "admin:catalog_product_changelist",
-            "icon": "fas fa-chart-bar",
-            "permissions": ["catalog.view_product"]
-        }],
-        "Orders": [{
-            "name": "Order Analytics",
-            "url": "admin:orders_order_changelist",
-            "icon": "fas fa-shopping-cart",
-            "permissions": ["orders.view_order"]
-        }],
-    },
-
-    # Custom icons for side menu apps/models See https://fontawesome.com/icons?d=gallery&m=free
-    # for the full list of 5.13.0 free icon classes
-    "icons": {
-        # Authentication & User Management
-        "auth": "fas fa-users-cog",
-        "auth.user": "fas fa-user",
-        "auth.Group": "fas fa-users",
-        
-        # Accounts App
-        "accounts": "fas fa-user-shield",
-        "accounts.Email": "fas fa-envelope",
-        "accounts.MobileNumber": "fas fa-phone",
-        "accounts.OTP": "fas fa-key",
-        "accounts.Role": "fas fa-user-tag",
-        "accounts.Permission": "fas fa-lock",
-        "accounts.PermissionHasRole": "fas fa-link",
-        
-        # Authentication App
-        "authentication": "fas fa-fingerprint",
-        "authentication.Email": "fas fa-envelope-open",
-        "authentication.MobileNumber": "fas fa-mobile-alt",
-        "authentication.OTP": "fas fa-shield-alt",
-        "authentication.User": "fas fa-user-check",
-        
-        # Catalog App
-        "catalog": "fas fa-store",
-        "catalog.Category": "fas fa-tags",
-        "catalog.Product": "fas fa-box",
-        "catalog.ProductCounter": "fas fa-chart-line",
-        "catalog.CollectionBundle": "fas fa-layer-group",
-        "catalog.Tags": "fas fa-tag",
-        
-        # Coupons App
-        "coupons": "fas fa-percentage",
-        "coupons.Coupon": "fas fa-ticket-alt",
-        "coupons.CouponUsage": "fas fa-receipt",
-        
-        # Custom Requests App
-        "custom_requests": "fas fa-clipboard-check",
-        "custom_requests.CustomOrderRequest": "fas fa-clipboard-list",
-        
-        # Feedback App
-        "feedback": "fas fa-comments",
-        "feedback.FeedbackQuestion": "fas fa-question-circle",
-        "feedback.FeedbackReview": "fas fa-star",
-        "feedback.ReportIssue": "fas fa-exclamation-triangle",
-        
-        # Media Files App
-        "mediafiles": "fas fa-images",
-        "mediafiles.Media": "fas fa-image",
-        "mediafiles.Relation": "fas fa-link",
-        
-        # Orders App
-        "orders": "fas fa-shopping-bag",
-        "orders.Cart": "fas fa-shopping-cart",
-        "orders.Order": "fas fa-shopping-bag",
-        "orders.OrderTransaction": "fas fa-receipt",
-        
-        # Plans App
-        "plans": "fas fa-crown",
-        "plans.Plan": "fas fa-crown",
-        "plans.Subscription": "fas fa-calendar-check",
-        
-        # Profiles App
-        "profiles": "fas fa-user-circle",
-        "profiles.Addresses": "fas fa-map-marker-alt",
-        "profiles.DesignerProfile": "fas fa-palette",
-        "profiles.Studio": "fas fa-building",
-        "profiles.StudioBusinessDetails": "fas fa-briefcase",
-        "profiles.StudioMember": "fas fa-users",
-        "profiles.Ratings": "fas fa-star-half-alt",
-        
-        # Razorpay App
-        "razorpay": "fas fa-credit-card",
-        "razorpay.RazorpayPayment": "fas fa-credit-card",
-        "razorpay.RazorpayWebhookEvent": "fas fa-plug",
-        
-        # Wallet App
-        "wallet": "fas fa-wallet",
-        "wallet.Wallet": "fas fa-wallet",
-        "wallet.WalletTransaction": "fas fa-exchange-alt",
-        "wallet.WalletWithdrawalRequest": "fas fa-money-bill-wave",
-        
-        # Celery & Background Tasks
-        "django_celery_beat": "fas fa-clock",
-        "django_celery_beat.PeriodicTask": "fas fa-tasks",
-        "django_celery_beat.IntervalSchedule": "fas fa-stopwatch",
-        "django_celery_beat.CrontabSchedule": "fas fa-calendar-alt",
-        "django_celery_beat.SolarSchedule": "fas fa-sun",
-        "django_celery_beat.ClockedSchedule": "fas fa-bell",
-        
-        # Celery Results
-        "django_celery_results": "fas fa-chart-pie",
-        "django_celery_results.TaskResult": "fas fa-check-circle",
-    },
-    # Icons that are used when one is not manually specified
-    "default_icon_parents": "fas fa-chevron-circle-right",
-    "default_icon_children": "fas fa-circle",
-
-    #################
-    # Related Modal #
-    #################
-    # Use modals instead of popups
-    "related_modal_active": False,
-
-    #############
-    # UI Tweaks #
-    #############
-    # Relative paths to custom CSS/JS scripts (must be present in static files)
-    "custom_css": "custom/admin-fix.css",
-    "custom_js": None,
-    # Whether to link font from fonts.googleapis.com (use custom_css to supply font otherwise)
-    "use_google_fonts_cdn": True,
-    # Whether to show the UI customizer on the sidebar
-    "show_ui_builder": False,
-
-    ###############
-    # Change view #
-    ###############
-    # Render out the change view as a single form, or in tabs, current options are
-    # - single
-    # - horizontal_tabs (default)
-    # - vertical_tabs
-    # - collapsible
-    # - carousel
-    "changeform_format": "horizontal_tabs",
-    # override change forms on a per modeladmin basis
-    "changeform_format_overrides": {"auth.user": "collapsible", "auth.group": "vertical_tabs"},
-    # Add a language dropdown into the admin
-    "language_chooser": False,
-}
 
 # YASG (Swagger) Configuration
 SWAGGER_SETTINGS = {
@@ -765,11 +539,6 @@ LOGGING = {
             'propagate': False,
         },
         # Third-party loggers
-        'jazzmin': {
-            'handlers': ['console'],
-            'level': 'WARNING',  # Hide jazzmin URL reverse warnings (unnecessary)
-            'propagate': False,
-        },
         # Custom app loggers - filter out verbose internal processing logs
         'common': {
             'handlers': ['console'],
@@ -858,7 +627,6 @@ if os.path.exists(LOGS_DIR) and os.access(LOGS_DIR, os.W_OK):
     # Add file handler to all loggers (file will have INFO, console only WARNING+)
     logger_names = [
         'django', 'django.server', 'django.utils.autoreload',
-        'jazzmin',
         'common', 'common.views', 'common.tasks', 'common.instagram_service',
         'CoreAdmin', 'CoreAdmin.views', 'CoreAdmin.models',
         'Catalog', 'Catalog.views', 'Catalog.models',
