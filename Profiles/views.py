@@ -1910,8 +1910,14 @@ def handle_design_upload(request):
                                         continue
                                 else:
                                     # More than 3 parts - wrong structure
+                                    # First check if root folder is a system folder (e.g., __MACOSX)
+                                    root_folder_name = parts[0].lower()
+                                    if root_folder_name in SYSTEM_FOLDERS:
+                                        continue  # Skip __MACOSX and other system folders
+                                    
                                     if len(parts) >= 2:
                                         folder_name = parts[1]  # Still use second part as folder name for error reporting
+                                        file_name_only = parts[-1]  # Use last part as file name
                                     else:
                                         continue
                                 
