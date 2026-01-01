@@ -1130,7 +1130,7 @@ class DesignListSerializer(serializers.ModelSerializer):
             return 0
     
     def get_media_files(self, obj):
-        """Get media files for thumbnail/preview with mockup detection"""
+        """Get media files for thumbnail/preview with mockup detection and AVIF prioritization"""
         try:
             media = get_related(obj, 'Product:Media', Media)
             # Handle empty QuerySet
@@ -1172,6 +1172,23 @@ class DesignListSerializer(serializers.ModelSerializer):
                             # File might not exist or be accessible
                             file_url = None
                     
+                    if not file_url:
+                        continue
+                    
+                    # Get relation metadata once (used for both is_mockup and is_avif)
+                    relation_meta = None
+                    try:
+                        from MediaFiles.models import Relation
+                        relation = Relation.objects.filter(
+                            relation_type='Product:Media',
+                            id_1=obj.pk,
+                            id_2=m.pk
+                        ).first()
+                        if relation and relation.meta:
+                            relation_meta = relation.meta
+                    except Exception:
+                        pass
+                    
                     # Check if this is a mockup image
                     is_mockup = False
                     if file_name:
@@ -1180,20 +1197,15 @@ class DesignListSerializer(serializers.ModelSerializer):
                         is_mockup = base_name == 'mockup'
                     
                     # Also check metadata if available
-                    if not is_mockup:
-                        try:
-                            from MediaFiles.models import Relation
-                            relation = Relation.objects.filter(
-                                relation_type='Product:Media',
-                                id_1=obj.pk,
-                                id_2=m.pk
-                            ).first()
-                            if relation and relation.meta:
-                                meta_lower = str(relation.meta).lower()
-                                if 'mockup' in meta_lower:
-                                    is_mockup = True
-                        except Exception:
-                            pass
+                    if not is_mockup and relation_meta:
+                        if isinstance(relation_meta, dict):
+                            is_mockup = relation_meta.get('is_mockup', False)
+                        elif isinstance(relation_meta, str):
+                            meta_lower = str(relation_meta).lower()
+                            if 'mockup' in meta_lower and 'is_mockup' not in meta_lower:
+                                is_mockup = True
+                            if 'type' in meta_lower and 'mockup' in meta_lower:
+                                is_mockup = True
                     
                     # Check if it's JPG or PNG
                     is_jpg_png = False
@@ -1201,12 +1213,27 @@ class DesignListSerializer(serializers.ModelSerializer):
                         file_name_lower = file_name.lower()
                         is_jpg_png = file_name_lower.endswith(('.jpg', '.jpeg', '.png'))
                     
+                    # Check if it's AVIF
+                    is_avif = False
+                    if file_name:
+                        file_name_lower = file_name.lower()
+                        is_avif = file_name_lower.endswith('.avif')
+                    
+                    # Check metadata for AVIF (reuse relation_meta from above)
+                    if not is_avif and relation_meta:
+                        if isinstance(relation_meta, dict):
+                            is_avif = relation_meta.get('is_avif', False)
+                        elif isinstance(relation_meta, str):
+                            is_avif = 'is_avif' in str(relation_meta).lower()
+                    
                     result.append({
                         'id': getattr(m, 'id', None),
                         'file': file_url,
+                        'url': file_url,
                         'media_type': getattr(m, 'media_type', 'image'),
                         'is_mockup': is_mockup,
                         'is_jpg_png': is_jpg_png,
+                        'is_avif': is_avif,
                         'file_name': file_name,
                         'created_at': m.created_at.isoformat() if hasattr(m, 'created_at') and m.created_at else None
                     })
@@ -1216,6 +1243,16 @@ class DesignListSerializer(serializers.ModelSerializer):
                     logger = logging.getLogger(__name__)
                     logger.warning(f'Error accessing media file {getattr(m, "id", "unknown")}: {e}')
                     continue
+            
+            # Sort media: AVIF mockup first, then AVIF JPG/PNG, then mockup, then jpg/png, then others
+            result.sort(key=lambda x: (
+                0 if (x.get('is_avif') and x.get('is_mockup')) else
+                1 if (x.get('is_avif') and x.get('is_jpg_png')) else
+                2 if x.get('is_mockup') else
+                3 if x.get('is_jpg_png') else 4,
+                x.get('created_at', '')
+            ))
+            
             return result
         except Exception as e:
             import logging
