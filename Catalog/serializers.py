@@ -354,6 +354,20 @@ class ProductSerializer(serializers.ModelSerializer):
                     if not file_url:
                         continue
                     
+                    # Get relation metadata once (used for both is_mockup and is_avif)
+                    relation_meta = None
+                    try:
+                        from MediaFiles.models import Relation
+                        relation = Relation.objects.filter(
+                            relation_type='Product:Media',
+                            id_1=obj.pk,
+                            id_2=m.pk
+                        ).first()
+                        if relation and relation.meta:
+                            relation_meta = relation.meta
+                    except Exception:
+                        pass
+                    
                     # Check if this is a mockup image
                     is_mockup = False
                     if file_name:
@@ -361,21 +375,20 @@ class ProductSerializer(serializers.ModelSerializer):
                         base_name = os.path.splitext(os.path.basename(file_name_lower))[0]
                         is_mockup = base_name == 'mockup'
                     
-                    # Also check metadata if available
-                    if not is_mockup:
-                        try:
-                            from MediaFiles.models import Relation
-                            relation = Relation.objects.filter(
-                                relation_type='Product:Media',
-                                id_1=obj.pk,
-                                id_2=m.pk
-                            ).first()
-                            if relation and relation.meta:
-                                meta_lower = str(relation.meta).lower()
-                                if 'mockup' in meta_lower:
-                                    is_mockup = True
-                        except Exception:
-                            pass
+                    # Also check metadata if available (FIX: Check dict value, not string search)
+                    if not is_mockup and relation_meta:
+                        if isinstance(relation_meta, dict):
+                            is_mockup = relation_meta.get('is_mockup', False)
+                        elif isinstance(relation_meta, str):
+                            # Only check string metadata if it's actually a string (legacy support)
+                            meta_lower = str(relation_meta).lower()
+                            # More careful check - look for explicit mockup indicators
+                            # but avoid matching 'is_mockup' key name
+                            if 'mockup' in meta_lower and 'is_mockup' not in meta_lower:
+                                is_mockup = True
+                            # Also check for type: 'mockup' pattern
+                            if 'type' in meta_lower and 'mockup' in meta_lower:
+                                is_mockup = True
                     
                     # Check if it's JPG or PNG
                     is_jpg_png = False
@@ -389,22 +402,12 @@ class ProductSerializer(serializers.ModelSerializer):
                         file_name_lower = file_name.lower()
                         is_avif = file_name_lower.endswith('.avif')
                     
-                    # Check metadata for AVIF
-                    if not is_avif:
-                        try:
-                            from MediaFiles.models import Relation
-                            relation = Relation.objects.filter(
-                                relation_type='Product:Media',
-                                id_1=obj.pk,
-                                id_2=m.pk
-                            ).first()
-                            if relation and relation.meta:
-                                if isinstance(relation.meta, dict):
-                                    is_avif = relation.meta.get('is_avif', False)
-                                elif isinstance(relation.meta, str):
-                                    is_avif = 'is_avif' in str(relation.meta).lower()
-                        except Exception:
-                            pass
+                    # Check metadata for AVIF (reuse relation_meta from above)
+                    if not is_avif and relation_meta:
+                        if isinstance(relation_meta, dict):
+                            is_avif = relation_meta.get('is_avif', False)
+                        elif isinstance(relation_meta, str):
+                            is_avif = 'is_avif' in str(relation_meta).lower()
                     
                     result.append({
                         'id': getattr(m, 'id', None),
