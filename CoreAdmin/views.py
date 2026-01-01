@@ -3196,6 +3196,10 @@ def designs_list(request):
     status_filter = request.GET.get('status')
     if status_filter:
         designs = designs.filter(status=status_filter)
+        # When filtering by 'active', also filter by visibility_status='show'
+        # to match the criteria used by hero section and other public endpoints
+        if status_filter == 'active':
+            designs = designs.filter(visibility_status='show')
     
     designer_id = request.GET.get('designer_id')
     if designer_id:
