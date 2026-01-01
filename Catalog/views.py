@@ -337,7 +337,7 @@ def hero_section_designs(request):
                 
                 logger.info(f'Product {product.id} has {len(media_list)} media files')
                 
-                # First, try to find mockup image, then any image (same as dome gallery)
+                # Prefer design images (JPG/PNG, non-mockup), then fallback to mockup
                 for m in media_list:
                     if not m.file:
                         continue
@@ -357,16 +357,6 @@ def hero_section_designs(request):
                     # Skip if not an image file
                     if not is_image_file:
                         continue
-                    
-                    # Store first valid image media as fallback (before checking for mockup)
-                    if not fallback_media:
-                        try:
-                            # Test if we can get URL
-                            test_url = m.file.url
-                            fallback_media = m
-                            logger.debug(f'Product {product.id}: Storing image media {m.pk} as fallback')
-                        except:
-                            pass
                     
                     # Check filename for mockup
                     is_mockup_by_name = False
@@ -395,14 +385,43 @@ def hero_section_designs(request):
                     except Exception:
                         pass
                     
-                    # If this is a mockup, use it and break
-                    if is_mockup_by_name or is_mockup_by_meta:
-                        mockup_media = m
-                        logger.info(f'Product {product.id}: Found mockup media {m.pk}')
-                        break
+                    is_mockup = is_mockup_by_name or is_mockup_by_meta
+                    
+                    # Check if it's JPG or PNG (design image)
+                    is_jpg_png = False
+                    if file_name:
+                        file_name_lower = file_name.lower()
+                        is_jpg_png = file_name_lower.endswith(('.jpg', '.jpeg', '.png'))
+                    
+                    # Prefer design images (JPG/PNG, non-mockup)
+                    if is_jpg_png and not is_mockup:
+                        try:
+                            test_url = m.file.url
+                            selected_media = m
+                            logger.info(f'Product {product.id}: Found design image {m.pk}')
+                            break
+                        except:
+                            pass
+                    # Store mockup as fallback
+                    elif is_mockup and not mockup_media:
+                        try:
+                            test_url = m.file.url
+                            mockup_media = m
+                            logger.debug(f'Product {product.id}: Storing mockup media {m.pk} as fallback')
+                        except:
+                            pass
+                    # Store first valid image as last fallback
+                    elif not fallback_media:
+                        try:
+                            test_url = m.file.url
+                            fallback_media = m
+                            logger.debug(f'Product {product.id}: Storing image media {m.pk} as last fallback')
+                        except:
+                            pass
                 
-                # Use mockup if found, otherwise use fallback (same as dome gallery)
-                selected_media = mockup_media or fallback_media
+                # Use design image if found, otherwise mockup, otherwise fallback
+                if 'selected_media' not in locals():
+                    selected_media = mockup_media or fallback_media
                 
                 if selected_media and selected_media.file:
                     try:
@@ -512,7 +531,7 @@ def dome_gallery_images(request):
             if media:
                 media_list = list(media)
                 
-                # First, try to find mockup image, then any image
+                # Prefer design images (JPG/PNG, non-mockup), then fallback to mockup
                 for m in media_list:
                     if not m.file:
                         continue
@@ -559,22 +578,40 @@ def dome_gallery_images(request):
                     except Exception:
                         pass
                     
-                    # If this is a mockup, use it
-                    if is_mockup_by_name or is_mockup_by_meta:
-                        mockup_media = m
-                        break
+                    is_mockup = is_mockup_by_name or is_mockup_by_meta
                     
-                    # Store first valid image media as fallback
-                    if not fallback_media:
+                    # Check if it's JPG or PNG (design image)
+                    is_jpg_png = False
+                    if file_name:
+                        file_name_lower = file_name.lower()
+                        is_jpg_png = file_name_lower.endswith(('.jpg', '.jpeg', '.png'))
+                    
+                    # Prefer design images (JPG/PNG, non-mockup)
+                    if is_jpg_png and not is_mockup:
                         try:
-                            # Test if we can get URL
+                            test_url = m.file.url
+                            selected_media = m
+                            break
+                        except:
+                            pass
+                    # Store mockup as fallback
+                    elif is_mockup and not mockup_media:
+                        try:
+                            test_url = m.file.url
+                            mockup_media = m
+                        except:
+                            pass
+                    # Store first valid image as last fallback
+                    elif not fallback_media:
+                        try:
                             test_url = m.file.url
                             fallback_media = m
                         except:
                             pass
                 
-                # Use mockup if found, otherwise use fallback
-                selected_media = mockup_media or fallback_media
+                # Use design image if found, otherwise mockup, otherwise fallback
+                if 'selected_media' not in locals():
+                    selected_media = mockup_media or fallback_media
                 
                 if selected_media and selected_media.file:
                     try:
@@ -690,7 +727,7 @@ def featured_designs(request):
                     logger.error(f'Error converting media to list for product {product.id}: {e}')
                     media_list = []
                 
-                # First, try to find mockup image, then any image (same as dome gallery)
+                # Prefer design images (JPG/PNG, non-mockup), then fallback to mockup
                 for m in media_list:
                     if not m.file:
                         continue
@@ -737,22 +774,40 @@ def featured_designs(request):
                     except Exception:
                         pass
                     
-                    # If this is a mockup, use it
-                    if is_mockup_by_name or is_mockup_by_meta:
-                        mockup_media = m
-                        break
+                    is_mockup = is_mockup_by_name or is_mockup_by_meta
                     
-                    # Store first valid image media as fallback
-                    if not fallback_media:
+                    # Check if it's JPG or PNG (design image)
+                    is_jpg_png = False
+                    if file_name:
+                        file_name_lower = file_name.lower()
+                        is_jpg_png = file_name_lower.endswith(('.jpg', '.jpeg', '.png'))
+                    
+                    # Prefer design images (JPG/PNG, non-mockup)
+                    if is_jpg_png and not is_mockup:
                         try:
-                            # Test if we can get URL
+                            test_url = m.file.url
+                            selected_media = m
+                            break
+                        except:
+                            pass
+                    # Store mockup as fallback
+                    elif is_mockup and not mockup_media:
+                        try:
+                            test_url = m.file.url
+                            mockup_media = m
+                        except:
+                            pass
+                    # Store first valid image as last fallback
+                    elif not fallback_media:
+                        try:
                             test_url = m.file.url
                             fallback_media = m
                         except:
                             pass
                 
-                # Use mockup if found, otherwise use fallback (same as dome gallery)
-                selected_media = mockup_media or fallback_media
+                # Use design image if found, otherwise mockup, otherwise fallback
+                if 'selected_media' not in locals():
+                    selected_media = mockup_media or fallback_media
                 
                 if selected_media and selected_media.file:
                     try:
