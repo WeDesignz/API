@@ -156,21 +156,39 @@ def convert_to_avif(input_path, output_dir, base_name, is_mockup=False):
         return None
 
 
-def create_avif_from_media_file(media_file_path, product_number, is_mockup=False):
+def create_avif_from_media_file(media_file_path, product_number, is_mockup=False, product=None, created_by=None):
     """
-    Create AVIF version of a media file.
+    Create AVIF version of a media file and optionally link it to the product.
     
     Args:
         media_file_path: Path to the media file in storage
         product_number: Product number for naming (e.g., WDG00000001)
         is_mockup: Whether this is a MOCKUP file
+        product: Product instance to link the AVIF file to (optional)
+        created_by: User who created the AVIF file (optional)
     
     Returns:
-        Path to the created AVIF file in storage, or None if conversion failed
+        Tuple of (path to the created AVIF file in storage, Media object), or (None, None) if conversion failed
+        If product is not provided, returns (avif_path, None) for backward compatibility
     """
     try:
-        # Get the directory where the original file is located
-        file_dir = os.path.dirname(media_file_path)
+        # Determine the correct directory for AVIF file
+        # If product is provided, ALWAYS use the product's design folder, not the original file's directory
+        # This ensures AVIF files are always in the correct location even if original file is in wrong location
+        if product and hasattr(product, 'created_by') and product.created_by:
+            file_dir = f"{product.created_by.id}/designs/{product.id}"
+        else:
+            # Fallback: use the directory where the original file is located
+            file_dir = os.path.dirname(media_file_path)
+        
+        # #region agent log
+        import json
+        log_path = '/home/janmay/Desktop/WeDesignz Source Code/.cursor/debug.log'
+        try:
+            with open(log_path, 'a') as f:
+                f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"D","location":"common/avif_converter.py:create_avif_from_media_file","message":"AVIF conversion starting","data":{"media_file_path":media_file_path,"file_dir":file_dir,"product_id":product.id if product else None,"product_number":product_number,"using_product_dir":product is not None},"timestamp":int(__import__('time').time()*1000)})+'\n')
+        except: pass
+        # #endregion
         
         # Get base name without extension
         base_name = product_number
@@ -178,7 +196,7 @@ def create_avif_from_media_file(media_file_path, product_number, is_mockup=False
         # Open file from storage
         if not default_storage.exists(media_file_path):
             logger.warning(f"Media file not found for AVIF conversion: {media_file_path}")
-            return None
+            return None, None
         
         # Read file to temporary location for PIL processing
         import tempfile
@@ -190,7 +208,114 @@ def create_avif_from_media_file(media_file_path, product_number, is_mockup=False
         try:
             # Convert to AVIF
             avif_path = convert_to_avif(temp_input_path, file_dir, base_name, is_mockup=is_mockup)
-            return avif_path
+            
+            # #region agent log
+            try:
+                with open(log_path, 'a') as f:
+                    f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"D","location":"common/avif_converter.py:create_avif_from_media_file","message":"AVIF file created","data":{"avif_path":avif_path,"file_dir":file_dir,"expected_dir":f"{product.created_by.id}/designs/{product.id}/" if product else None},"timestamp":int(__import__('time').time()*1000)})+'\n')
+            except: pass
+            # #endregion
+            
+            if not avif_path:
+                return None, None
+            
+            # Create Media object and link to product if provided
+            media_obj = None
+            if product and default_storage.exists(avif_path):
+                try:
+                    from MediaFiles.models import Media
+                    from django.core.files import File
+                    
+                    # Get created_by from product if not provided
+                    creator = created_by or (product.created_by if hasattr(product, 'created_by') else None)
+                    
+                    if not creator:
+                        logger.warning(f"Cannot create Media object for AVIF: no created_by user available")
+                    else:
+                        # The AVIF file is already saved at avif_path (in the product's design folder: {user_id}/designs/{product_id}/)
+                        # We need to create a Media object that references this existing file without Django trying to save it again
+                        # Set product context so if Django processes the file, it uses the correct path
+                        Media.set_product_context(product.id)
+                        try:
+                            # Get the filename from the avif_path
+                            avif_filename = os.path.basename(avif_path)
+                            
+                            # Create Media object with a temporary dummy file to satisfy the required field
+                            # We'll update the file path directly in the database to point to the existing AVIF file
+                            from django.core.files.base import ContentFile
+                            from io import BytesIO
+                            import uuid
+                            
+                            # Create a minimal dummy file with a unique temporary name
+                            # This ensures it won't overwrite the AVIF file we already saved
+                            temp_filename = f'.temp_avif_{uuid.uuid4().hex[:8]}.tmp'
+                            dummy_content = BytesIO(b'')
+                            dummy_file = ContentFile(dummy_content.read(), name=temp_filename)
+                            
+                            # Create Media instance and set temp product_id as additional fallback
+                            # Django will save the dummy file using upload_to
+                            # It will be saved to {user_id}/designs/{product_id}/.temp_avif_xxxxx.tmp
+                            media_obj = Media(
+                                file=dummy_file,
+                                media_type='image',
+                                created_by=creator
+                            )
+                            # Set instance-level product_id as fallback
+                            media_obj.set_temp_product_id(product.id)
+                            # Save the instance
+                            media_obj.save()
+                            
+                            # Store the dummy file path to delete it later
+                            dummy_file_path = media_obj.file.name
+                            
+                            # Now update the file field to point to the already-saved AVIF file
+                            # Use update() to directly update the database without triggering file save
+                            Media.objects.filter(pk=media_obj.pk).update(file=avif_path)
+                            # Refresh from database
+                            media_obj.refresh_from_db()
+                            
+                            # Delete the dummy file if it was created
+                            if dummy_file_path and default_storage.exists(dummy_file_path):
+                                try:
+                                    default_storage.delete(dummy_file_path)
+                                    logger.debug(f'Deleted temporary dummy file: {dummy_file_path}')
+                                except Exception as e:
+                                    logger.warning(f'Could not delete temporary dummy file {dummy_file_path}: {e}')
+                            
+                            # Verify the AVIF file exists at the correct location
+                            if not default_storage.exists(avif_path):
+                                logger.error(f'AVIF file not found at expected path: {avif_path}')
+                            else:
+                                logger.debug(f'AVIF file confirmed at correct location: {avif_path}')
+                            
+                            # Validate AVIF file location - ensure it's in the correct product design folder
+                            expected_path_prefix = f'{creator.id}/designs/{product.id}/'
+                            if not avif_path.startswith(expected_path_prefix):
+                                error_msg = f'AVIF file saved to wrong location! Expected: {expected_path_prefix}*, Got: {avif_path}'
+                                logger.error(error_msg)
+                                # #region agent log
+                                try:
+                                    with open(log_path, 'a') as f:
+                                        f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"D","location":"common/avif_converter.py:create_avif_from_media_file","message":"VALIDATION ERROR: AVIF file in wrong location","data":{"avif_path":avif_path,"expected_prefix":expected_path_prefix,"product_id":product.id},"timestamp":int(__import__('time').time()*1000)})+'\n')
+                                except: pass
+                                # #endregion
+                            
+                            # Link AVIF file to product
+                            avif_metadata = {
+                                'is_avif': True,
+                                'is_mockup': is_mockup,
+                                'original_media_path': media_file_path,
+                                'source': 'avif_conversion'
+                            }
+                            product.attach_media(media_obj, meta=avif_metadata, created_by=creator)
+                            logger.info(f'Created and linked AVIF Media object {media_obj.id} for product {product.id} at {media_obj.file.name}')
+                        finally:
+                            Media.clear_product_context()
+                except Exception as e:
+                    logger.error(f"Error creating Media object for AVIF file: {e}", exc_info=True)
+                    # Don't fail the whole operation if linking fails
+            
+            return avif_path, media_obj
         finally:
             # Clean up temp file
             if os.path.exists(temp_input_path):
@@ -198,5 +323,5 @@ def create_avif_from_media_file(media_file_path, product_number, is_mockup=False
                 
     except Exception as e:
         logger.error(f"Error creating AVIF from media file {media_file_path}: {e}", exc_info=True)
-        return None
+        return None, None
 

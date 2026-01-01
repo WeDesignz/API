@@ -383,6 +383,29 @@ class ProductSerializer(serializers.ModelSerializer):
                         file_name_lower = file_name.lower()
                         is_jpg_png = file_name_lower.endswith(('.jpg', '.jpeg', '.png'))
                     
+                    # Check if it's AVIF
+                    is_avif = False
+                    if file_name:
+                        file_name_lower = file_name.lower()
+                        is_avif = file_name_lower.endswith('.avif')
+                    
+                    # Check metadata for AVIF
+                    if not is_avif:
+                        try:
+                            from MediaFiles.models import Relation
+                            relation = Relation.objects.filter(
+                                relation_type='Product:Media',
+                                id_1=obj.pk,
+                                id_2=m.pk
+                            ).first()
+                            if relation and relation.meta:
+                                if isinstance(relation.meta, dict):
+                                    is_avif = relation.meta.get('is_avif', False)
+                                elif isinstance(relation.meta, str):
+                                    is_avif = 'is_avif' in str(relation.meta).lower()
+                        except Exception:
+                            pass
+                    
                     result.append({
                         'id': getattr(m, 'id', None),
                         'file': file_url,
@@ -390,6 +413,7 @@ class ProductSerializer(serializers.ModelSerializer):
                         'media_type': getattr(m, 'media_type', 'image'),
                         'is_mockup': is_mockup,
                         'is_jpg_png': is_jpg_png,
+                        'is_avif': is_avif,
                         'file_name': file_name,
                         'created_at': m.created_at.isoformat() if hasattr(m, 'created_at') and m.created_at else None
                     })
@@ -399,9 +423,12 @@ class ProductSerializer(serializers.ModelSerializer):
                     logger.warning(f'Error accessing media file {getattr(m, "id", "unknown")}: {e}')
                     continue
             
-            # Sort media: mockup first, then jpg/png, then others
+            # Sort media: AVIF mockup first, then AVIF JPG/PNG, then mockup, then jpg/png, then others
             result.sort(key=lambda x: (
-                0 if x.get('is_mockup') else (1 if x.get('is_jpg_png') else 2),
+                0 if (x.get('is_avif') and x.get('is_mockup')) else
+                1 if (x.get('is_avif') and x.get('is_jpg_png')) else
+                2 if x.get('is_mockup') else
+                3 if x.get('is_jpg_png') else 4,
                 x.get('created_at', '')
             ))
             

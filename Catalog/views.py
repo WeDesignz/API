@@ -2235,6 +2235,14 @@ def design_detail(request, design_id):
                         product_number = design.product_number
                         
                         # Set product context for file path generation
+                        # #region agent log
+                        import json
+                        log_path = '/home/janmay/Desktop/WeDesignz Source Code/.cursor/debug.log'
+                        try:
+                            with open(log_path, 'a') as f:
+                                f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"B","location":"Catalog/views.py:design_detail","message":"Setting product context before Media.create (design_detail view)","data":{"product_id":design.id,"user_id":request.user.id},"timestamp":int(__import__('time').time()*1000)})+'\n')
+                        except: pass
+                        # #endregion
                         Media.set_product_context(design.id)
                         try:
                             for file in design_files:
@@ -2254,11 +2262,34 @@ def design_detail(request, design_id):
                                 file_content = file.read()
                                 renamed_file = ContentFile(file_content, name=new_filename)
                                 
-                                media_obj = Media.objects.create(
+                                # Create Media instance and set temp product_id as additional fallback
+                                media_obj = Media(
                                     file=renamed_file,
                                     media_type='image' if file.content_type and file.content_type.startswith('image/') else 'video',
                                     created_by=request.user
                                 )
+                                # Set instance-level product_id as fallback
+                                media_obj.set_temp_product_id(design.id)
+                                # Save the instance
+                                media_obj.save()
+                                # #region agent log
+                                try:
+                                    with open(log_path, 'a') as f:
+                                        f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"B","location":"Catalog/views.py:design_detail","message":"Media object created (design_detail view)","data":{"media_id":media_obj.id,"saved_path":media_obj.file.name,"product_id":design.id,"filename":new_filename},"timestamp":int(__import__('time').time()*1000)})+'\n')
+                                except: pass
+                                # #endregion
+                                
+                                # Validate file location - ensure it's in the correct product design folder
+                                expected_path_prefix = f'{request.user.id}/designs/{design.id}/'
+                                if not media_obj.file.name.startswith(expected_path_prefix):
+                                    error_msg = f'Media file saved to wrong location! Expected: {expected_path_prefix}*, Got: {media_obj.file.name}'
+                                    logger.error(error_msg)
+                                    # #region agent log
+                                    try:
+                                        with open(log_path, 'a') as f:
+                                            f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"B","location":"Catalog/views.py:design_detail","message":"VALIDATION ERROR: File in wrong location","data":{"media_id":media_obj.id,"saved_path":media_obj.file.name,"expected_prefix":expected_path_prefix,"product_id":design.id},"timestamp":int(__import__('time').time()*1000)})+'\n')
+                                    except: pass
+                                    # #endregion
                                 
                                 # Attach upload metadata
                                 upload_metadata = {

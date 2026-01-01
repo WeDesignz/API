@@ -1,5 +1,5 @@
 {% extends "admin/change_list.html" %}
-{% load i18n admin_urls static admin_list jazzmin %}
+{% load i18n admin_urls static admin_list %}
 
 {% block pagination %}
     {{ block.super }}
@@ -24,6 +24,78 @@
             // Navigate to new URL (GET request, not POST)
             window.location.href = url.toString();
         }
+    </script>
+{% endblock %}
+
+{% block extrahead %}
+    {{ block.super }}
+    <script>
+        // Fix for missing "Go" button in Unfold 0.74.1
+        (function() {
+            function addActionButton() {
+                var actionSelect = document.querySelector('select[name="action"]');
+                if (!actionSelect) return;
+                
+                var actionContainer = actionSelect.closest('.group.primary');
+                if (!actionContainer) return;
+                
+                // Check if button already exists (either Alpine.js button or our fallback)
+                var existingButton = actionContainer.querySelector('button[name="index"]');
+                
+                // If no button exists, create one
+                if (!existingButton) {
+                    var goButton = document.createElement('button');
+                    goButton.type = 'submit';
+                    goButton.name = 'index';
+                    goButton.value = '0';
+                    goButton.className = 'bg-primary-900 cursor-pointer flex font-medium items-center justify-center px-3 py-1 rounded-default text-sm text-white whitespace-nowrap';
+                    goButton.textContent = 'Go';
+                    goButton.id = 'action-go-button';
+                    goButton.style.cssText = 'margin-left: 10px;';
+                    
+                    // Insert after the action select's parent
+                    actionSelect.parentNode.appendChild(goButton);
+                }
+                
+                // Show/hide button based on action selection
+                function updateButtonVisibility() {
+                    var button = actionContainer.querySelector('button[name="index"]');
+                    if (button && actionSelect.value && actionSelect.value !== '') {
+                        button.style.display = 'flex';
+                    } else if (button && button.id === 'action-go-button') {
+                        button.style.display = actionSelect.value && actionSelect.value !== '' ? 'flex' : 'none';
+                    }
+                }
+                
+                // Update on change
+                actionSelect.addEventListener('change', updateButtonVisibility);
+                
+                // Initial check
+                updateButtonVisibility();
+                
+                // Also check periodically in case Alpine.js interferes
+                setInterval(function() {
+                    if (actionSelect.value && actionSelect.value !== '') {
+                        var btn = actionContainer.querySelector('button[name="index"]');
+                        if (btn) {
+                            btn.style.display = 'flex';
+                            btn.style.visibility = 'visible';
+                        }
+                    }
+                }, 100);
+            }
+            
+            // Run immediately and after DOM loads
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', addActionButton);
+            } else {
+                addActionButton();
+            }
+            
+            // Also run after a delay to catch Alpine.js
+            setTimeout(addActionButton, 500);
+            setTimeout(addActionButton, 1000);
+        })();
     </script>
 {% endblock %}
 

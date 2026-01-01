@@ -89,19 +89,56 @@ def process_single_design_upload(
                     new_filename = f'{product_number}{file_ext}'
                 
                 # Set product context for file path generation
+                # #region agent log
+                import json
+                log_path = '/home/janmay/Desktop/WeDesignz Source Code/.cursor/debug.log'
+                try:
+                    with open(log_path, 'a') as f:
+                        f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"B","location":"Catalog/tasks.py:process_single_design_upload","message":"Setting product context before Media.create","data":{"product_id":product.id,"filename":new_filename,"file_name":file_name},"timestamp":int(__import__('time').time()*1000)})+'\n')
+                except: pass
+                # #endregion
                 Media.set_product_context(product.id)
                 try:
                     # Open file from storage and create Media object with new filename
                     with default_storage.open(file_path, 'rb') as storage_file:
                         django_file = File(storage_file, name=new_filename)
-                        media_obj = Media.objects.create(
+                        # Create Media instance and set temp product_id as additional fallback
+                        media_obj = Media(
                             file=django_file,
                             media_type=media_type,
                             created_by=product.created_by
                         )
+                        # Set instance-level product_id as fallback
+                        media_obj.set_temp_product_id(product.id)
+                        # Save the instance
+                        media_obj.save()
+                        # #region agent log
+                        try:
+                            with open(log_path, 'a') as f:
+                                f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"B","location":"Catalog/tasks.py:process_single_design_upload","message":"Media object created","data":{"media_id":media_obj.id,"saved_path":media_obj.file.name,"product_id":product.id},"timestamp":int(__import__('time').time()*1000)})+'\n')
+                        except: pass
+                        # #endregion
+                        
+                        # Validate file location - ensure it's in the correct product design folder
+                        expected_path_prefix = f'{product.created_by.id}/designs/{product.id}/'
+                        if not media_obj.file.name.startswith(expected_path_prefix):
+                            error_msg = f'Media file saved to wrong location! Expected: {expected_path_prefix}*, Got: {media_obj.file.name}'
+                            logger.error(error_msg)
+                            # #region agent log
+                            try:
+                                with open(log_path, 'a') as f:
+                                    f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"B","location":"Catalog/tasks.py:process_single_design_upload","message":"VALIDATION ERROR: File in wrong location","data":{"media_id":media_obj.id,"saved_path":media_obj.file.name,"expected_prefix":expected_path_prefix,"product_id":product.id},"timestamp":int(__import__('time').time()*1000)})+'\n')
+                            except: pass
+                            # #endregion
                 finally:
                     # Clear product context
                     Media.clear_product_context()
+                    # #region agent log
+                    try:
+                        with open(log_path, 'a') as f:
+                            f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"B","location":"Catalog/tasks.py:process_single_design_upload","message":"Product context cleared","data":{"product_id":product.id},"timestamp":int(__import__('time').time()*1000)})+'\n')
+                    except: pass
+                    # #endregion
                 
                 # Delete temporary file after processing
                 try:
@@ -133,13 +170,17 @@ def process_single_design_upload(
                 if file_name_lower.endswith(('.jpg', '.jpeg', '.png')):
                     try:
                         media_file_path = media_obj.file.name
-                        avif_path = create_avif_from_media_file(
+                        avif_path, avif_media_obj = create_avif_from_media_file(
                             media_file_path,
                             product_number,
-                            is_mockup=is_mockup
+                            is_mockup=is_mockup,
+                            product=product,
+                            created_by=product.created_by
                         )
                         if avif_path:
                             logger.info(f'Created AVIF version for {file_name}: {avif_path}')
+                            if avif_media_obj:
+                                logger.info(f'Linked AVIF Media object {avif_media_obj.id} to product {product_id}')
                     except Exception as avif_error:
                         logger.warning(f'Failed to create AVIF for {file_name}: {avif_error}')
                 

@@ -248,15 +248,20 @@ class Command(BaseCommand):
                             if not dry_run:
                                 try:
                                     media_file_path = media.file.name
-                                    avif_path = create_avif_from_media_file(
+                                    avif_path, avif_media_obj = create_avif_from_media_file(
                                         media_file_path,
                                         product_number,
-                                        is_mockup=is_mockup
+                                        is_mockup=is_mockup,
+                                        product=product,
+                                        created_by=product.created_by if hasattr(product, 'created_by') else None
                                     )
                                     
                                     if avif_path:
                                         if verbose:
                                             self.stdout.write(self.style.SUCCESS(f'  ✓ Created AVIF: {os.path.basename(avif_path)}'))
+                                        if avif_media_obj:
+                                            if verbose:
+                                                self.stdout.write(self.style.SUCCESS(f'  ✓ Linked AVIF to product via Media object {avif_media_obj.id}'))
                                         stats['created_avif'] += 1
                                         product_avif_created += 1
                                     else:

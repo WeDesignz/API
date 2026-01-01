@@ -483,6 +483,14 @@ def process_design_upload_task(self, task_id, zip_file_path):
                         product_number = product.product_number
                         
                         # Set product context for file path generation
+                        # #region agent log
+                        import json
+                        log_path = '/home/janmay/Desktop/WeDesignz Source Code/.cursor/debug.log'
+                        try:
+                            with open(log_path, 'a') as f:
+                                f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"B","location":"Profiles/tasks.py:process_design_upload_task","message":"Setting product context before Media.create (bulk upload)","data":{"product_id":product.id,"task_id":task_id},"timestamp":int(__import__('time').time()*1000)})+'\n')
+                        except: pass
+                        # #endregion
                         Media.set_product_context(product.id)
                         try:
                             for file_ext, file_path in design_files.items():
@@ -498,11 +506,34 @@ def process_design_upload_task(self, task_id, zip_file_path):
                                     
                                     media_file = ContentFile(file_data, name=new_filename)
                                     logger.info(f"Task {task_id}: Creating Media object for {file_name} -> {new_filename}...")
-                                    media = Media.objects.create(
+                                    # Create Media instance and set temp product_id as additional fallback
+                                    media = Media(
                                         file=media_file,
                                         media_type=media_type,
                                         created_by=product_owner
                                     )
+                                    # Set instance-level product_id as fallback
+                                    media.set_temp_product_id(product.id)
+                                    # Save the instance
+                                    media.save()
+                                    # #region agent log
+                                    try:
+                                        with open(log_path, 'a') as f:
+                                            f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"B","location":"Profiles/tasks.py:process_design_upload_task","message":"Media object created (bulk upload)","data":{"media_id":media.id,"saved_path":media.file.name,"product_id":product.id,"filename":new_filename},"timestamp":int(__import__('time').time()*1000)})+'\n')
+                                    except: pass
+                                    # #endregion
+                                    
+                                    # Validate file location - ensure it's in the correct product design folder
+                                    expected_path_prefix = f'{product_owner.id}/designs/{product.id}/'
+                                    if not media.file.name.startswith(expected_path_prefix):
+                                        error_msg = f'Media file saved to wrong location! Expected: {expected_path_prefix}*, Got: {media.file.name}'
+                                        logger.error(f"Task {task_id}: {error_msg}")
+                                        # #region agent log
+                                        try:
+                                            with open(log_path, 'a') as f:
+                                                f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"B","location":"Profiles/tasks.py:process_design_upload_task","message":"VALIDATION ERROR: File in wrong location","data":{"media_id":media.id,"saved_path":media.file.name,"expected_prefix":expected_path_prefix,"product_id":product.id,"task_id":task_id},"timestamp":int(__import__('time').time()*1000)})+'\n')
+                                        except: pass
+                                        # #endregion
                                     
                                     meta_info = {
                                         'type': file_ext[1:].upper(),
@@ -517,13 +548,17 @@ def process_design_upload_task(self, task_id, zip_file_path):
                                         try:
                                             media_file_path = media.file.name
                                             is_mockup = False
-                                            avif_path = create_avif_from_media_file(
+                                            avif_path, avif_media_obj = create_avif_from_media_file(
                                                 media_file_path,
                                                 product_number,
-                                                is_mockup=is_mockup
+                                                is_mockup=is_mockup,
+                                                product=product,
+                                                created_by=product_owner
                                             )
                                             if avif_path:
                                                 logger.info(f"Task {task_id}: Created AVIF version: {avif_path}")
+                                                if avif_media_obj:
+                                                    logger.info(f"Task {task_id}: Linked AVIF Media object {avif_media_obj.id} to product {product.id}")
                                         except Exception as avif_error:
                                             logger.warning(f"Task {task_id}: Failed to create AVIF for {file_path}: {avif_error}")
                                 except Exception as e:
@@ -549,11 +584,16 @@ def process_design_upload_task(self, task_id, zip_file_path):
                                     
                                     media_file = ContentFile(file_data, name=new_filename)
                                     logger.info(f"Task {task_id}: Creating Media object for mockup {file_name} -> {new_filename}...")
-                                    media = Media.objects.create(
+                                    # Create Media instance and set temp product_id as additional fallback
+                                    media = Media(
                                         file=media_file,
                                         media_type=media_type,
                                         created_by=product_owner
                                     )
+                                    # Set instance-level product_id as fallback
+                                    media.set_temp_product_id(product.id)
+                                    # Save the instance
+                                    media.save()
                                     
                                     meta_info = {
                                         'type': 'MOCKUP',
@@ -567,13 +607,17 @@ def process_design_upload_task(self, task_id, zip_file_path):
                                     # Create AVIF version for mockup
                                     try:
                                         media_file_path = media.file.name
-                                        avif_path = create_avif_from_media_file(
+                                        avif_path, avif_media_obj = create_avif_from_media_file(
                                             media_file_path,
                                             product_number,
-                                            is_mockup=True
+                                            is_mockup=True,
+                                            product=product,
+                                            created_by=product_owner
                                         )
                                         if avif_path:
                                             logger.info(f"Task {task_id}: Created MOCKUP AVIF version: {avif_path}")
+                                            if avif_media_obj:
+                                                logger.info(f"Task {task_id}: Linked MOCKUP AVIF Media object {avif_media_obj.id} to product {product.id}")
                                     except Exception as avif_error:
                                         logger.warning(f"Task {task_id}: Failed to create AVIF for mockup: {avif_error}")
                                 except Exception as e:
