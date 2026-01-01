@@ -13,6 +13,8 @@ from django.conf import settings
 from datetime import timedelta
 import random
 import string
+import json
+import os
 from Authentication.models import Email, MobileNumber, OTP
 from MediaFiles.models import Media
 from Catalog.models import Product, Category, Tags
@@ -1880,6 +1882,11 @@ def handle_design_upload(request):
                         for file_name in all_files:
                             # Skip metadata.xlsx and directories
                             if file_name == metadata_file or file_name.endswith('/'):
+                                continue
+                            
+                            # Skip Mac resource fork files (files starting with ._)
+                            file_name_only_check = file_name.split('/')[-1]
+                            if file_name_only_check.startswith('._'):
                                 continue
                             
                             # Extract folder structure

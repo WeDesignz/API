@@ -1720,6 +1720,11 @@ def upload_designs_bulk(request):
                             if file_name == metadata_file or file_name.endswith('/'):
                                 continue
                             
+                            # Skip Mac resource fork files (files starting with ._)
+                            file_name_only_check = file_name.split('/')[-1]
+                            if file_name_only_check.startswith('._'):
+                                continue
+                            
                             if '/' in file_name:
                                 parts = file_name.split('/')
                                 
