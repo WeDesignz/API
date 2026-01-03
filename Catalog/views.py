@@ -948,10 +948,13 @@ def search_and_filter(request):
         visibility_status='show'
     )
     
-    # Search by title and description
+    # Search by title, description, product_number, and studio_design_number
     if query:
         products = products.filter(
-            Q(title__icontains=query) | Q(description__icontains=query)
+            Q(title__icontains=query) | 
+            Q(description__icontains=query) |
+            Q(product_number__icontains=query) |
+            Q(studio_design_number__icontains=query)
         )
     
     # Filter by category (include subcategories)
@@ -3549,7 +3552,10 @@ def search_products_for_pdf(request):
     # Apply filters
     if query:
         products = products.filter(
-            Q(title__icontains=query) | Q(description__icontains=query)
+            Q(title__icontains=query) | 
+            Q(description__icontains=query) |
+            Q(product_number__icontains=query) |
+            Q(studio_design_number__icontains=query)
         )
     
     if category_id:

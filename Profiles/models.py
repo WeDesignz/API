@@ -86,6 +86,7 @@ class DesignerProfile(models.Model):
         ('pending', 'Pending'),
         ('verified', 'Verified'),
         ('suspended', 'Suspended'),
+        ('rejected', 'Rejected'),
     ]
     
     bio = models.TextField(blank=True, null=True)
