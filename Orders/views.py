@@ -1302,6 +1302,11 @@ def download_product_zip(request, product_id):
                         # Get file path
                         file_path = media.file.name
                         
+                        # Skip AVIF files - they are only for web display, not for download
+                        file_name_lower = file_path.lower()
+                        if file_name_lower.endswith('.avif'):
+                            continue
+                        
                         # Read file from storage
                         if default_storage.exists(file_path):
                             with default_storage.open(file_path, 'rb') as storage_file:
