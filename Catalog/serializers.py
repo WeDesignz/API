@@ -24,7 +24,7 @@ class CategorySerializer(serializers.ModelSerializer):
     class Meta:
         model = Category
         fields = [
-            'id', 'name', 'parent', 'parent_id', 'subcategories', 'products_count',
+            'id', 'name', 'icon_name', 'parent', 'parent_id', 'subcategories', 'products_count',
             'created_by', 'created_at', 'updated_by', 'updated_at',
             'created_by_id', 'updated_by_id'
         ]
@@ -135,7 +135,7 @@ class CategoryListSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Category
-        fields = ['id', 'name', 'parent', 'subcategories_count', 'products_count', 'created_at']
+        fields = ['id', 'name', 'icon_name', 'parent', 'subcategories_count', 'products_count', 'created_at']
     
     def get_subcategories_count(self, obj):
         """
@@ -1799,7 +1799,7 @@ class CategorySerializer(serializers.ModelSerializer):
     class Meta:
         model = Category
         fields = [
-            'id', 'name', 'parent', 'parent_id', 'parent_name', 'subcategories', 'created_by', 'created_at',
+            'id', 'name', 'icon_name', 'parent', 'parent_id', 'parent_name', 'subcategories', 'created_by', 'created_at',
             'updated_by', 'updated_at', 'subcategories_count', 'products_count'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at', 'created_by', 'updated_by']

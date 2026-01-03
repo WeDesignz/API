@@ -10,6 +10,7 @@ from Plans.models import Plan
 
 class Category(models.Model):
     name = models.CharField(max_length=100)
+    icon_name = models.CharField(max_length=50, blank=True, null=True, help_text="Lucide icon name (e.g., 'Shirt', 'Trophy', 'Users')")
     parent = models.ForeignKey('self', on_delete=models.CASCADE, null=True, blank=True, related_name='subcategories')
     created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='created_categories')
     created_at = models.DateTimeField(auto_now_add=True)
