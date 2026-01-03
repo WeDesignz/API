@@ -123,6 +123,27 @@ class CategorySerializer(serializers.ModelSerializer):
             })
         
         return super().create(validated_data)
+    
+    def update(self, instance, validated_data):
+        """
+        Update a category instance.
+        Set updated_by from context if available.
+        """
+        # Remove updated_by_id if present (we'll use updated_by from context)
+        validated_data.pop('updated_by_id', None)
+        
+        # Get updated_by from context if available
+        updated_by = self.context.get('updated_by')
+        if not updated_by:
+            # If no updated_by in context, try to get from request if available
+            request = self.context.get('request')
+            if request and hasattr(request, 'user'):
+                updated_by = request.user
+        
+        if updated_by:
+            validated_data['updated_by'] = updated_by
+        
+        return super().update(instance, validated_data)
 
 
 class CategoryListSerializer(serializers.ModelSerializer):

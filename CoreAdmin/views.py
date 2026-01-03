@@ -3829,6 +3829,104 @@ def create_category(request):
 
 
 @swagger_auto_schema(
+    method='put',
+    operation_summary="Update Category",
+    operation_description="Update a category's name and/or icon (SuperAdmin access only).",
+    request_body=CategorySerializer,
+    responses={
+        200: openapi.Response(description="Category updated successfully"),
+        400: openapi.Response(description="Invalid data"),
+        404: openapi.Response(description="Category not found"),
+        403: openapi.Response(description="Access denied - SuperAdmin privileges required")
+    },
+    tags=['CoreAdmin Design Management']
+)
+@api_view(['PUT', 'PATCH'])
+@permission_classes([IsAuthenticated])
+def update_category(request, category_id):
+    """
+    Update a category's name and/or icon.
+    """
+    try:
+        admin_profile = AdminUserProfile.objects.get(user=request.user)
+        if admin_profile.admin_group != 'superadmin' and not request.user.is_superuser:
+            return Response({
+                'error': 'SuperAdmin privileges required'
+            }, status=status.HTTP_403_FORBIDDEN)
+    except AdminUserProfile.DoesNotExist:
+        return Response({
+            'error': 'Admin profile required'
+        }, status=status.HTTP_403_FORBIDDEN)
+    
+    from Catalog.models import Category
+    
+    try:
+        category = Category.objects.get(id=category_id)
+    except Category.DoesNotExist:
+        return Response({
+            'error': 'Category not found'
+        }, status=status.HTTP_404_NOT_FOUND)
+    
+    # Prepare data for update - only allow name and icon_name to be updated
+    data = request.data.copy()
+    # Only allow updating name and icon_name
+    # If name is provided, use it; otherwise keep existing
+    # If icon_name is provided (including empty string), use it; otherwise keep existing
+    update_data = {}
+    if 'name' in data:
+        update_data['name'] = data.get('name')
+    if 'icon_name' in data:
+        update_data['icon_name'] = data.get('icon_name') or None
+    
+    # Remove fields that shouldn't be updated
+    data.pop('parent_id', None)
+    data.pop('parent', None)
+    data.pop('created_by', None)
+    data.pop('created_by_id', None)
+    
+    # Pass updated_by via context
+    serializer = CategorySerializer(
+        category,
+        data=update_data,
+        partial=True,
+        context={
+            'updated_by': request.user,
+            'request': request
+        }
+    )
+    
+    if serializer.is_valid():
+        category = serializer.save()
+        
+        # Log activity
+        try:
+            AdminActivityLog.log_activity(
+                user=request.user,
+                activity_type='CATEGORY_UPDATED',
+                description=f'Updated category: {category.name}',
+                request=request,
+                metadata={
+                    'category_id': category.id,
+                    'category_name': category.name,
+                    'icon_name': category.icon_name
+                }
+            )
+        except Exception:
+            # If activity logging fails, continue anyway
+            pass
+        
+        return Response({
+            'message': 'Category updated successfully',
+            'data': CategorySerializer(category).data
+        }, status=status.HTTP_200_OK)
+    else:
+        return Response({
+            'error': 'Invalid data',
+            'details': serializer.errors
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+
+@swagger_auto_schema(
     method='delete',
     operation_summary="Delete Category",
     operation_description="Delete a category or subcategory (SuperAdmin access only).",
