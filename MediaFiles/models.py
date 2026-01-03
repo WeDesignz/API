@@ -71,8 +71,8 @@ def get_media_upload_path(instance, filename):
     
     # Check if created_by is set and has an id
     if not (hasattr(instance, 'created_by') and instance.created_by and hasattr(instance.created_by, 'id')):
-        # Fallback: use media/ directory if no user context
-        result = f'media/{filename}'
+        # Fallback: use root directory if no user context (Django will prepend MEDIA_URL)
+        result = filename
         # #region agent log
         try:
             with open(log_path, 'a') as f:

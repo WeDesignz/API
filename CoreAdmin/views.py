@@ -997,7 +997,7 @@ def admin_change_password(request):
         openapi.Parameter(
             'status',
             openapi.IN_QUERY,
-            description='Filter by designer status (pending, verified, suspended)',
+            description='Filter by designer status (pending, verified, suspended, rejected)',
             type=openapi.TYPE_STRING
         ),
         openapi.Parameter(
@@ -1177,7 +1177,7 @@ def designer_detail(request, designer_id):
             'status': openapi.Schema(
                 type=openapi.TYPE_STRING,
                 description='Designer status',
-                enum=['pending', 'verified', 'suspended'],
+                enum=['pending', 'verified', 'suspended', 'rejected'],
                 example='verified'
             ),
             'is_active': openapi.Schema(
@@ -1223,7 +1223,7 @@ def designer_update_status(request, designer_id):
     
     # Update designer profile status
     new_status = request.data.get('status')
-    if new_status in ['pending', 'verified', 'suspended']:
+    if new_status in ['pending', 'verified', 'suspended', 'rejected']:
         profile.status = new_status
         profile.updated_by = request.user
         profile.save()
@@ -1682,7 +1682,7 @@ def designer_analytics(request):
             'status': openapi.Schema(
                 type=openapi.TYPE_STRING,
                 description='New status for all designers',
-                enum=['pending', 'verified', 'suspended'],
+                enum=['pending', 'verified', 'suspended', 'rejected'],
                 example='verified'
             ),
             'is_active': openapi.Schema(
@@ -1727,7 +1727,7 @@ def bulk_update_designer_status(request):
             'error': 'Designer IDs are required'
         }, status=status.HTTP_400_BAD_REQUEST)
     
-    if new_status not in ['pending', 'verified', 'suspended']:
+    if new_status not in ['pending', 'verified', 'suspended', 'rejected']:
         return Response({
             'error': 'Invalid status'
         }, status=status.HTTP_400_BAD_REQUEST)
@@ -1789,7 +1789,7 @@ def bulk_update_designer_status(request):
         openapi.Parameter(
             'status',
             openapi.IN_QUERY,
-            description='Filter by designer status (pending, verified, suspended)',
+            description='Filter by designer status (pending, verified, suspended, rejected)',
             type=openapi.TYPE_STRING
         ),
         openapi.Parameter(
@@ -2262,11 +2262,33 @@ def verify_designer_onboarding(request, designer_id):
         message = "Designer approved successfully"
         
     elif verification_type == 'reject':
-        # Note: DesignerProfile doesn't have 'rejected' status, so we keep as 'pending'
-        # If you want to track rejections, you could add a 'rejected' status or use a separate field
-        profile.status = 'pending'  # Keep as pending since rejected status doesn't exist
+        # Set status to 'rejected' to properly track rejection
+        profile.status = 'rejected'
         profile.updated_by = request.user
         profile.save()
+        
+        # Deactivate user account
+        designer.is_active = False
+        designer.save()
+        
+        # Hide all designs from this designer (set visibility_status to 'hide')
+        from Catalog.models import Product
+        import logging
+        
+        logger = logging.getLogger(__name__)
+        
+        with transaction.atomic():
+            # Get all designs from this designer (excluding deleted ones)
+            designer_products = Product.objects.filter(
+                created_by=designer
+            ).exclude(status='deleted')
+            
+            # Hide all designs by setting visibility_status to 'hide'
+            updated_count = designer_products.update(visibility_status='hide')
+            
+            # Log the action
+            if updated_count > 0:
+                logger.info(f'[verify_designer_onboarding] Hid {updated_count} designs from rejected designer {designer_id}')
         
         message = f"Designer rejected: {rejection_reason}"
     else:

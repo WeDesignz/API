@@ -303,45 +303,24 @@ class AdminProfileSerializer(serializers.ModelSerializer):
                         if profile_photo.file:
                             try:
                                 from django.conf import settings
-                                # Get file path - this is relative to MEDIA_ROOT
-                                file_path = profile_photo.file.name
-                                # Construct URL: MEDIA_URL + file_path
-                                # Since upload_to='media/', file_path is 'media/filename.jpg'
-                                # MEDIA_URL is '/media/', so URL becomes '/media/media/filename.jpg'
-                                relative_url = f"{settings.MEDIA_URL}{file_path}"
-                                # Ensure it starts with /
-                                if not relative_url.startswith('/'):
-                                    relative_url = '/' + relative_url
-                                # Build absolute URL using SITE_URL from settings to ensure it points to Django backend
+                                # Use Django's file.url property which correctly handles MEDIA_URL
+                                url = profile_photo.file.url
+                                # Build absolute URL using SITE_URL from settings if available
                                 site_url = getattr(settings, 'SITE_URL', None)
-                                if site_url:
-                                    # Remove trailing slash from SITE_URL if present
+                                if site_url and url.startswith('/'):
                                     site_url = site_url.rstrip('/')
-                                    profile_photo_url = f"{site_url}{relative_url}"
+                                    profile_photo_url = f"{site_url}{url}"
                                 elif request:
-                                    # Fallback to request.build_absolute_uri if SITE_URL not set
-                                    profile_photo_url = request.build_absolute_uri(relative_url)
-                                else:
-                                    profile_photo_url = relative_url
-                            except (ValueError, AttributeError, Exception):
-                                # Fallback: try using file.url if available
-                                try:
-                                    url = profile_photo.file.url
-                                    site_url = getattr(settings, 'SITE_URL', None)
-                                    if site_url and url.startswith('/'):
-                                        site_url = site_url.rstrip('/')
-                                        profile_photo_url = f"{site_url}{url}"
-                                    elif request:
-                                        if url.startswith('/'):
-                                            profile_photo_url = request.build_absolute_uri(url)
-                                        elif url.startswith('http'):
-                                            profile_photo_url = url
-                                        else:
-                                            profile_photo_url = request.build_absolute_uri('/' + url)
-                                    else:
+                                    if url.startswith('/'):
+                                        profile_photo_url = request.build_absolute_uri(url)
+                                    elif url.startswith('http'):
                                         profile_photo_url = url
-                                except:
-                                    profile_photo_url = None
+                                    else:
+                                        profile_photo_url = request.build_absolute_uri('/' + url)
+                                else:
+                                    profile_photo_url = url
+                            except (ValueError, AttributeError, Exception):
+                                profile_photo_url = None
                             break
                     except Media.DoesNotExist:
                         continue
