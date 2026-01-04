@@ -2003,6 +2003,7 @@ def post_design_to_pinterest(self, pinterest_post_id, base_url=None):
         
         # Post pins - create separate pins for mockup and design
         pins_data = {}
+        errors = []  # Track errors for each pin attempt
         
         # Post mockup.avif
         if mockup_avif:
@@ -2018,18 +2019,38 @@ def post_design_to_pinterest(self, pinterest_post_id, base_url=None):
                 if link:
                     pin_params['link'] = link
                 
+                logger.info(f"Attempting to post mockup pin for product {product.id}: {mockup_url}")
                 result = pinterest_service.create_pin(**pin_params)
                 
-                if result:
+                if result and 'id' in result:
                     pins_data['mockup'] = {
                         'id': result.get('id'),
                         'url': result.get('url', '')
                     }
-                    logger.info(f"Posted mockup pin for product {product.id}: {result.get('id')}")
+                    logger.info(f"✅ Posted mockup pin for product {product.id}: {result.get('id')}")
+                elif result and 'error' in result:
+                    # Detailed error from create_pin
+                    error_info = result.get('error', 'Unknown error')
+                    error_type = result.get('type', 'unknown')
+                    status_code = result.get('status_code')
+                    
+                    error_msg = f"Mockup pin failed: {error_info}"
+                    if status_code:
+                        error_msg += f" (HTTP {status_code})"
+                    
+                    errors.append(error_msg)
+                    logger.error(f"❌ Failed to post mockup pin for product {product.id}: {error_msg}")
                 else:
-                    logger.warning(f"Failed to post mockup pin for product {product.id}")
+                    # Fallback: check integration for error
+                    integration.refresh_from_db()
+                    error_detail = integration.last_error if integration.last_error else "Unknown error (no error details available)"
+                    error_msg = f"Mockup pin failed: {error_detail}"
+                    errors.append(error_msg)
+                    logger.error(f"❌ Failed to post mockup pin for product {product.id}: {error_msg}")
             except Exception as e:
-                logger.error(f"Error posting mockup pin: {str(e)}", exc_info=True)
+                error_msg = f"Exception posting mockup pin: {str(e)}"
+                errors.append(error_msg)
+                logger.error(f"❌ Exception posting mockup pin for product {product.id}: {error_msg}", exc_info=True)
         
         # Post design_JPG.avif
         if design_jpg_avif:
@@ -2045,38 +2066,118 @@ def post_design_to_pinterest(self, pinterest_post_id, base_url=None):
                 if link:
                     pin_params['link'] = link
                 
+                logger.info(f"Attempting to post design pin for product {product.id}: {design_url}")
                 result = pinterest_service.create_pin(**pin_params)
                 
-                if result:
+                if result and 'id' in result:
                     pins_data['design'] = {
                         'id': result.get('id'),
                         'url': result.get('url', '')
                     }
-                    logger.info(f"Posted design pin for product {product.id}: {result.get('id')}")
+                    logger.info(f"✅ Posted design pin for product {product.id}: {result.get('id')}")
+                elif result and 'error' in result:
+                    # Detailed error from create_pin
+                    error_info = result.get('error', 'Unknown error')
+                    error_type = result.get('type', 'unknown')
+                    status_code = result.get('status_code')
+                    
+                    error_msg = f"Design pin failed: {error_info}"
+                    if status_code:
+                        error_msg += f" (HTTP {status_code})"
+                    
+                    errors.append(error_msg)
+                    logger.error(f"❌ Failed to post design pin for product {product.id}: {error_msg}")
                 else:
-                    logger.warning(f"Failed to post design pin for product {product.id}")
+                    # Fallback: check integration for error
+                    integration.refresh_from_db()
+                    error_detail = integration.last_error if integration.last_error else "Unknown error (no error details available)"
+                    error_msg = f"Design pin failed: {error_detail}"
+                    errors.append(error_msg)
+                    logger.error(f"❌ Failed to post design pin for product {product.id}: {error_msg}")
             except Exception as e:
-                logger.error(f"Error posting design pin: {str(e)}", exc_info=True)
+                error_msg = f"Exception posting design pin: {str(e)}"
+                errors.append(error_msg)
+                logger.error(f"❌ Exception posting design pin for product {product.id}: {error_msg}", exc_info=True)
         
         # Mark success if at least one pin was posted
         if pins_data:
             pinterest_post.mark_success(pins_data=pins_data)
-            logger.info(f"Successfully posted {len(pins_data)} pin(s) for product {product.id}")
+            logger.info(f"✅ Successfully posted {len(pins_data)} pin(s) for product {product.id}")
+            
+            # If there were partial failures, log them but don't fail the task
+            if errors:
+                logger.warning(f"⚠️ Partial success for product {product.id}: {len(pins_data)} succeeded, {len(errors)} failed. Errors: {'; '.join(errors)}")
         else:
-            error_msg = "Failed to post any pins"
-            pinterest_post.mark_failed(error_msg)
-            logger.error(f"Failed to post any pins for product {product.id}")
-            # Retry the task
-            raise Exception("Pinterest API call failed")
+            # All pins failed - build comprehensive error message
+            error_msg_parts = ["Failed to post any pins"]
+            
+            if errors:
+                error_msg_parts.append("Errors:")
+                for i, err in enumerate(errors, 1):
+                    error_msg_parts.append(f"{i}. {err}")
+            else:
+                # Fallback: check integration for last error
+                integration.refresh_from_db()
+                if integration.last_error:
+                    error_msg_parts.append(f"Last Pinterest API error: {integration.last_error}")
+                else:
+                    error_msg_parts.append("No specific error details available. Check Pinterest integration status.")
+            
+            # Add context information
+            error_msg_parts.append(f"Product ID: {product.id}")
+            error_msg_parts.append(f"Board ID: {integration.board_id}")
+            error_msg_parts.append(f"Media domain: {media_domain}")
+            
+            full_error_msg = " | ".join(error_msg_parts)
+            
+            pinterest_post.mark_failed(full_error_msg)
+            logger.error(f"❌ Failed to post any pins for product {product.id}: {full_error_msg}")
+            
+            # Retry the task with detailed error
+            raise Exception(f"Pinterest API call failed: {full_error_msg}")
             
     except Exception as e:
-        logger.error(f"Error posting to Pinterest: {str(e)}", exc_info=True)
-        # Update PinterestPost record with error
+        error_message = str(e)
+        logger.error(f"❌ Error posting to Pinterest: {error_message}", exc_info=True)
+        
+        # Update PinterestPost record with detailed error
         try:
             pinterest_post = PinterestPost.objects.get(id=pinterest_post_id)
-            pinterest_post.mark_failed(str(e))
-        except:
-            pass
+            
+            # Try to get more context from integration
+            try:
+                integration = PinterestIntegration.get_instance()
+                integration.refresh_from_db()
+                
+                # Enhance error message with integration status if available
+                if integration.last_error and integration.last_error not in error_message:
+                    error_message = f"{error_message} | Integration error: {integration.last_error}"
+                
+                # Add token validity check
+                if not integration.is_token_valid():
+                    error_message = f"{error_message} | Token is expired or invalid (expires at: {integration.token_expires_at})"
+                
+                # Add integration status
+                error_message = f"{error_message} | Integration enabled: {integration.is_enabled}, Board ID: {integration.board_id}"
+            except Exception as integration_error:
+                logger.warning(f"Could not fetch integration details: {str(integration_error)}")
+            
+            pinterest_post.mark_failed(error_message)
+            logger.info(f"📝 Updated PinterestPost {pinterest_post_id} with error: {error_message[:200]}...")
+        except Exception as update_error:
+            logger.error(f"Failed to update PinterestPost with error: {str(update_error)}", exc_info=True)
+        
+        # Check if we should retry
+        retry_count = self.request.retries
+        max_retries = self.max_retries
+        
+        if retry_count >= max_retries:
+            logger.error(f"❌ Max retries ({max_retries}) reached for PinterestPost {pinterest_post_id}. Giving up.")
+        else:
+            # Exponential backoff: 60s, 120s, 240s
+            countdown = 60 * (2 ** retry_count)
+            logger.info(f"🔄 Retrying Pinterest post (attempt {retry_count + 1}/{max_retries + 1}) in {countdown}s...")
+        
         # Retry with exponential backoff
         raise self.retry(exc=e, countdown=60 * (2 ** self.request.retries))
 

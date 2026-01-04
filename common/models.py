@@ -134,6 +134,13 @@ class PinterestPost(models.Model):
     def mark_failed(self, error_message):
         """Mark the post as failed."""
         self.status = 'failed'
+        
+        # Truncate error message if too long (database field limits)
+        # TextField can hold ~65KB, but let's keep it reasonable for readability
+        max_length = 5000
+        if len(error_message) > max_length:
+            error_message = error_message[:max_length] + f"... (truncated, full length: {len(error_message)})"
+        
         self.error_message = error_message
         self.last_retry_at = timezone.now()
         self.retry_count += 1
@@ -144,6 +151,24 @@ class PinterestPost(models.Model):
         self.status = 'retrying'
         self.last_retry_at = timezone.now()
         self.save(update_fields=['status', 'last_retry_at'])
+    
+    def get_error_summary(self):
+        """Get a formatted error summary for display."""
+        if not self.error_message:
+            return "No error details available"
+        
+        # Extract key information from error message
+        lines = self.error_message.split(' | ')
+        summary_parts = []
+        
+        for line in lines:
+            if any(keyword in line.lower() for keyword in ['failed', 'error', '401', '403', '404', '429', '500', 'timeout', 'connection']):
+                summary_parts.append(line)
+        
+        if summary_parts:
+            return " | ".join(summary_parts[:3])  # Show first 3 relevant lines
+        else:
+            return self.error_message[:200] + ("..." if len(self.error_message) > 200 else "")
 
 
 class InstagramIntegration(models.Model):
