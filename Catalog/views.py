@@ -294,7 +294,7 @@ def hero_section_designs(request):
             status='active',
             visibility_status='show'
         ).select_related('category', 'created_by').only(
-            'id', 'title', 'price', 'created_by', 'category'
+            'id', 'title', 'price', 'created_by', 'category', 'product_number'
         )
         
         # Maintain order from config
@@ -446,6 +446,7 @@ def hero_section_designs(request):
                 'id': product.id,
                 'title': product.title,
                 'creator': creator_name,
+                'product_number': product.product_number or None,
                 'price': f"₹{float(product.price)}" if product.price else "Free",
                 'image': image_url or None  # Return None instead of non-existent placeholder
             })
@@ -695,7 +696,7 @@ def featured_designs(request):
             status='active',
             visibility_status='show'
         ).select_related('category', 'created_by').only(
-            'id', 'title', 'price', 'created_by', 'category'
+            'id', 'title', 'price', 'created_by', 'category', 'product_number'
         )
         
         # Maintain order from config
@@ -826,6 +827,7 @@ def featured_designs(request):
                 'id': product.id,
                 'title': product.title,
                 'creator': creator_name,
+                'product_number': product.product_number or None,
                 'price': f"₹{float(product.price)}" if product.price else "Free",
                 'image': image_url or None,
                 'category': product.category.name if product.category else 'Uncategorized'
