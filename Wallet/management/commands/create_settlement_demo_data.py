@@ -390,3 +390,5 @@ class Command(BaseCommand):
         self.stdout.write('All demo designers have password: demo123')
         self.stdout.write('\n')
 
+
+
