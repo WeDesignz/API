@@ -1876,10 +1876,12 @@ def post_to_instagram(self, instagram_post_id):
 def post_design_to_pinterest(self, pinterest_post_id, base_url=None):
     """
     Post a design to Pinterest after approval.
+    Posts both mockup.avif and design_JPG.avif as separate pins.
     This runs asynchronously so it doesn't block the approval process.
     Updates PinterestPost record with result.
     """
     import logging
+    import os
     logger = logging.getLogger(__name__)
     
     try:
@@ -1928,9 +1930,10 @@ def post_design_to_pinterest(self, pinterest_post_id, base_url=None):
             pinterest_post.mark_failed("No image media found for product")
             return
         
-        # Prioritize: JPG > PNG > other images (skip mockup)
-        image_media = None
-
+        # Find mockup.avif and design_JPG.avif
+        mockup_avif = None
+        design_jpg_avif = None
+        
         for media in media_files:
             if not media.file:
                 continue
@@ -1938,44 +1941,24 @@ def post_design_to_pinterest(self, pinterest_post_id, base_url=None):
             file_name = media.file.name.lower()
             base_name = os.path.splitext(os.path.basename(file_name))[0]
             
-            # Skip mockup files
-            if base_name == 'mockup':
-                continue
-            
-            # Prefer JPG first
-            if file_name.endswith(('.jpg', '.jpeg')):
-                image_media = media
-                break
-
-        # If no JPG, try PNG
-        if not image_media:
-            for media in media_files:
-                if not media.file:
-                    continue
-                file_name = media.file.name.lower()
-                base_name = os.path.splitext(os.path.basename(file_name))[0]
-                if base_name == 'mockup':
-                    continue
-                if file_name.endswith('.png'):
-                    image_media = media
-                    break
-
-        # Fallback to any non-mockup image
-        if not image_media:
-            for media in media_files:
-                if not media.file:
-                    continue
-                file_name = media.file.name.lower()
-                base_name = os.path.splitext(os.path.basename(file_name))[0]
-                if base_name != 'mockup':
-                    image_media = media
-                    break
-
-        # Last resort: use first image
-        if not image_media:
-            image_media = media_files.first()
+            # Check for AVIF files
+            if file_name.endswith('.avif'):
+                # Check for mockup.avif (could be mockup.avif or {product_number}_MOCKUP.avif)
+                if 'mockup' in base_name.lower() or base_name.endswith('_mockup'):
+                    mockup_avif = media
+                    logger.debug(f"Found mockup AVIF: {file_name}")
+                # Check for design_JPG.avif (could be design_JPG.avif or {product_number}_JPG.avif)
+                elif '_jpg' in base_name.lower() or base_name.endswith('_jpg'):
+                    design_jpg_avif = media
+                    logger.debug(f"Found design JPG AVIF: {file_name}")
         
-        # Build absolute image URL
+        # Need at least one image to post
+        if not mockup_avif and not design_jpg_avif:
+            logger.warning(f"No AVIF images found for product {product.id} (need mockup.avif or design_JPG.avif)")
+            pinterest_post.mark_failed("No AVIF images (mockup.avif or design_JPG.avif) found")
+            return
+        
+        # Build base URL for media files
         # Pinterest requires HTTPS and publicly accessible URLs (no localhost)
         # Always use MEDIA_DOMAIN from settings (where media files are actually hosted)
         media_domain = getattr(settings, 'MEDIA_DOMAIN', 'devapi.wedesignz.com')
@@ -1983,25 +1966,21 @@ def post_design_to_pinterest(self, pinterest_post_id, base_url=None):
             media_domain = f"https://{media_domain}"
         
         # Validate media domain - must be HTTPS and not localhost
-        if media_domain.startswith('https://') and 'localhost' not in media_domain.lower() and '127.0.0.1' not in media_domain:
-            image_url = f"{media_domain}{image_media.file.url}"
-            logger.info(f"Using Pinterest image URL: {image_url}")
-        else:
-            # Invalid domain (localhost), cannot post to Pinterest
-            error_msg = f"Invalid media domain for Pinterest image URL: {media_domain}. Pinterest requires publicly accessible HTTPS URLs."
+        if not (media_domain.startswith('https://') and 'localhost' not in media_domain.lower() and '127.0.0.1' not in media_domain):
+            error_msg = f"Invalid media domain for Pinterest: {media_domain}. Pinterest requires publicly accessible HTTPS URLs."
             logger.error(error_msg)
             pinterest_post.mark_failed(error_msg)
             return
         
         # Prepare pin details
-        title = product.title[:100] if product.title else "Design"  # Pinterest limit
+        base_title = product.title[:100] if product.title else "Design"  # Pinterest limit
         description = product.description[:800] if product.description else ""
         
         # Add design number if available
         if product.product_number:
             description = f"Design #{product.product_number}\n\n{description}"
         
-        # Optional: Add link to design page
+        # Prepare link to design page
         # Pinterest requires HTTPS and publicly accessible URLs (no localhost)
         # Always use production domain for Pinterest links (Pinterest doesn't accept localhost)
         link = None
@@ -2022,26 +2001,71 @@ def post_design_to_pinterest(self, pinterest_post_id, base_url=None):
         # Mark as retrying
         pinterest_post.mark_retrying()
         
-        # Create pin - only pass link if it's valid
-        pin_params = {
-            'image_url': image_url,
-            'title': title,
-            'description': description,
-        }
-        if link:
-            pin_params['link'] = link
+        # Post pins - create separate pins for mockup and design
+        pins_data = {}
         
-        result = pinterest_service.create_pin(**pin_params)
+        # Post mockup.avif
+        if mockup_avif:
+            try:
+                mockup_url = f"{media_domain}{mockup_avif.file.url}"
+                mockup_title = f"{base_title} - Mockup"
+                
+                pin_params = {
+                    'image_url': mockup_url,
+                    'title': mockup_title[:100],  # Pinterest limit
+                    'description': description,
+                }
+                if link:
+                    pin_params['link'] = link
+                
+                result = pinterest_service.create_pin(**pin_params)
+                
+                if result:
+                    pins_data['mockup'] = {
+                        'id': result.get('id'),
+                        'url': result.get('url', '')
+                    }
+                    logger.info(f"Posted mockup pin for product {product.id}: {result.get('id')}")
+                else:
+                    logger.warning(f"Failed to post mockup pin for product {product.id}")
+            except Exception as e:
+                logger.error(f"Error posting mockup pin: {str(e)}", exc_info=True)
         
-        if result:
-            pin_id = result.get('id')
-            pin_url = result.get('url', '')
-            pinterest_post.mark_success(pin_id=pin_id, pin_url=pin_url)
-            logger.info(f"Successfully posted product {product.id} to Pinterest: {pin_id}")
+        # Post design_JPG.avif
+        if design_jpg_avif:
+            try:
+                design_url = f"{media_domain}{design_jpg_avif.file.url}"
+                design_title = f"{base_title} - Design"
+                
+                pin_params = {
+                    'image_url': design_url,
+                    'title': design_title[:100],  # Pinterest limit
+                    'description': description,
+                }
+                if link:
+                    pin_params['link'] = link
+                
+                result = pinterest_service.create_pin(**pin_params)
+                
+                if result:
+                    pins_data['design'] = {
+                        'id': result.get('id'),
+                        'url': result.get('url', '')
+                    }
+                    logger.info(f"Posted design pin for product {product.id}: {result.get('id')}")
+                else:
+                    logger.warning(f"Failed to post design pin for product {product.id}")
+            except Exception as e:
+                logger.error(f"Error posting design pin: {str(e)}", exc_info=True)
+        
+        # Mark success if at least one pin was posted
+        if pins_data:
+            pinterest_post.mark_success(pins_data=pins_data)
+            logger.info(f"Successfully posted {len(pins_data)} pin(s) for product {product.id}")
         else:
-            error_msg = "Failed to create pin - check Pinterest service logs"
+            error_msg = "Failed to post any pins"
             pinterest_post.mark_failed(error_msg)
-            logger.error(f"Failed to post product {product.id} to Pinterest")
+            logger.error(f"Failed to post any pins for product {product.id}")
             # Retry the task
             raise Exception("Pinterest API call failed")
             

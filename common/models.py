@@ -85,8 +85,9 @@ class PinterestPost(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     
     # Pinterest pin information
-    pin_id = models.CharField(max_length=255, null=True, blank=True, help_text="Pinterest pin ID if successfully posted")
-    pin_url = models.URLField(null=True, blank=True, help_text="URL to the Pinterest pin")
+    pin_id = models.CharField(max_length=255, null=True, blank=True, help_text="Pinterest pin ID if successfully posted (legacy - use pins_data)")
+    pin_url = models.URLField(null=True, blank=True, help_text="URL to the Pinterest pin (legacy - use pins_data)")
+    pins_data = models.JSONField(default=dict, blank=True, help_text="Dictionary of pin data: {'mockup': {'id': '...', 'url': '...'}, 'design': {'id': '...', 'url': '...'}}")
     
     # Error tracking
     error_message = models.TextField(null=True, blank=True, help_text="Error message if posting failed")
@@ -108,15 +109,27 @@ class PinterestPost(models.Model):
     def __str__(self):
         return f"Pinterest Post - {self.product.title} ({self.get_status_display()})"
     
-    def mark_success(self, pin_id=None, pin_url=None):
+    def mark_success(self, pin_id=None, pin_url=None, pins_data=None):
         """Mark the post as successful."""
         self.status = 'success'
         self.posted_at = timezone.now()
-        if pin_id:
+        
+        if pins_data:
+            # New format: store multiple pins
+            self.pins_data = pins_data
+            # For backward compatibility, set first pin as primary
+            if pins_data and isinstance(pins_data, dict):
+                first_pin = next(iter(pins_data.values()), {})
+                if isinstance(first_pin, dict):
+                    self.pin_id = first_pin.get('id')
+                    self.pin_url = first_pin.get('url')
+        elif pin_id:
+            # Legacy format: single pin
             self.pin_id = pin_id
-        if pin_url:
-            self.pin_url = pin_url
-        self.save(update_fields=['status', 'posted_at', 'pin_id', 'pin_url'])
+            if pin_url:
+                self.pin_url = pin_url
+        
+        self.save(update_fields=['status', 'posted_at', 'pin_id', 'pin_url', 'pins_data'])
     
     def mark_failed(self, error_message):
         """Mark the post as failed."""
