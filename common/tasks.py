@@ -2005,10 +2005,24 @@ def post_design_to_pinterest(self, pinterest_post_id, base_url=None):
         pins_data = {}
         errors = []  # Track errors for each pin attempt
         
-        # Post mockup.avif
+        # Post mockup.avif (convert to JPEG for Pinterest compatibility)
         if mockup_avif:
             try:
+                # Pinterest doesn't support AVIF, so convert to JPEG
                 mockup_url = f"{media_domain}{mockup_avif.file.url}"
+                
+                # If it's an AVIF file, convert to JPEG
+                if mockup_avif.file.name.lower().endswith('.avif'):
+                    from .avif_converter import convert_avif_to_jpeg
+                    logger.info(f"Converting AVIF mockup to JPEG for Pinterest: {mockup_avif.file.name}")
+                    jpeg_path, jpeg_url = convert_avif_to_jpeg(mockup_avif.file.name, quality=85)
+                    
+                    if jpeg_url:
+                        mockup_url = jpeg_url
+                        logger.info(f"Using converted JPEG for mockup: {jpeg_url}")
+                    else:
+                        logger.warning(f"AVIF to JPEG conversion failed, trying original URL (may fail): {mockup_url}")
+                
                 mockup_title = f"{base_title} - Mockup"
                 
                 pin_params = {
@@ -2052,10 +2066,24 @@ def post_design_to_pinterest(self, pinterest_post_id, base_url=None):
                 errors.append(error_msg)
                 logger.error(f"❌ Exception posting mockup pin for product {product.id}: {error_msg}", exc_info=True)
         
-        # Post design_JPG.avif
+        # Post design_JPG.avif (convert to JPEG for Pinterest compatibility)
         if design_jpg_avif:
             try:
+                # Pinterest doesn't support AVIF, so convert to JPEG
                 design_url = f"{media_domain}{design_jpg_avif.file.url}"
+                
+                # If it's an AVIF file, convert to JPEG
+                if design_jpg_avif.file.name.lower().endswith('.avif'):
+                    from .avif_converter import convert_avif_to_jpeg
+                    logger.info(f"Converting AVIF design to JPEG for Pinterest: {design_jpg_avif.file.name}")
+                    jpeg_path, jpeg_url = convert_avif_to_jpeg(design_jpg_avif.file.name, quality=85)
+                    
+                    if jpeg_url:
+                        design_url = jpeg_url
+                        logger.info(f"Using converted JPEG for design: {jpeg_url}")
+                    else:
+                        logger.warning(f"AVIF to JPEG conversion failed, trying original URL (may fail): {design_url}")
+                
                 design_title = f"{base_title} - Design"
                 
                 pin_params = {

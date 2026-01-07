@@ -156,6 +156,93 @@ def convert_to_avif(input_path, output_dir, base_name, is_mockup=False):
         return None
 
 
+def convert_avif_to_jpeg(avif_file_path, quality=85):
+    """
+    Convert AVIF image to JPEG format for platforms that don't support AVIF (e.g., Pinterest).
+    
+    Args:
+        avif_file_path: Path to the AVIF file in storage
+        quality: JPEG quality (1-100, default: 85)
+    
+    Returns:
+        Tuple of (jpeg_file_path_in_storage, jpeg_url), or (None, None) if conversion failed
+    """
+    try:
+        # Check if AVIF support is available
+        if not is_avif_supported():
+            logger.error("Cannot convert AVIF to JPEG: AVIF support not available")
+            return None, None
+        
+        # Check if file exists
+        if not default_storage.exists(avif_file_path):
+            logger.error(f"AVIF file not found: {avif_file_path}")
+            return None, None
+        
+        # Read AVIF file from storage to temporary location
+        import tempfile
+        temp_avif_path = None
+        temp_jpeg_path = None
+        
+        with default_storage.open(avif_file_path, 'rb') as storage_file:
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.avif') as temp_avif:
+                temp_avif.write(storage_file.read())
+                temp_avif_path = temp_avif.name
+        
+        try:
+            # Open and convert AVIF to RGB
+            img = Image.open(temp_avif_path).convert("RGB")
+            
+            # Save as JPEG to temporary location
+            base_name = os.path.splitext(os.path.basename(avif_file_path))[0]
+            # Convert AVIF filename to JPEG: WDG00000001_MOCKUP.avif -> WDG00000001_MOCKUP.jpg
+            # Keep the base name but change extension to .jpg
+            jpeg_filename = base_name + '.jpg'
+            
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as temp_jpeg:
+                temp_jpeg_path = temp_jpeg.name
+                img.save(temp_jpeg_path, format='JPEG', quality=quality, optimize=True)
+            
+            # Read JPEG content
+            with open(temp_jpeg_path, 'rb') as jpeg_file:
+                jpeg_content = jpeg_file.read()
+            
+            # Determine where to save JPEG (same directory as AVIF)
+            jpeg_dir = os.path.dirname(avif_file_path)
+            jpeg_storage_path = os.path.join(jpeg_dir, jpeg_filename).replace('\\', '/')
+            
+            # Save JPEG to storage
+            jpeg_file_obj = ContentFile(jpeg_content, name=jpeg_filename)
+            saved_jpeg_path = default_storage.save(jpeg_storage_path, jpeg_file_obj)
+            
+            # Get the URL for the JPEG file
+            from django.conf import settings
+            media_domain = getattr(settings, 'MEDIA_DOMAIN', 'devapi.wedesignz.com')
+            if not media_domain.startswith('http'):
+                media_domain = f"https://{media_domain}"
+            media_url = getattr(settings, 'MEDIA_URL', '/media/')
+            if not media_url.endswith('/'):
+                media_url += '/'
+            
+            jpeg_url = f"{media_domain}{media_url}{saved_jpeg_path}"
+            
+            logger.info(f"Converted AVIF to JPEG: {avif_file_path} -> {saved_jpeg_path} ({len(jpeg_content)/1024:.1f}KB)")
+            
+            return saved_jpeg_path, jpeg_url
+            
+        finally:
+            # Clean up temporary files
+            for temp_path in [temp_avif_path, temp_jpeg_path]:
+                if temp_path and os.path.exists(temp_path):
+                    try:
+                        os.unlink(temp_path)
+                    except:
+                        pass
+                        
+    except Exception as e:
+        logger.error(f"Error converting AVIF to JPEG: {e}", exc_info=True)
+        return None, None
+
+
 def create_avif_from_media_file(media_file_path, product_number, is_mockup=False, product=None, created_by=None):
     """
     Create AVIF version of a media file and optionally link it to the product.
