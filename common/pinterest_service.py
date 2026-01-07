@@ -430,6 +430,200 @@ class PinterestService:
             logger.error(f"Failed to delete Pinterest board: {error_msg}")
             return False
     
+    def get_pins(self, board_id=None, page_size=25):
+        """
+        Get all pins from a Pinterest board.
+        
+        Args:
+            board_id: Board ID (defaults to configured board_id)
+            page_size: Number of pins per page (max 250)
+        
+        Returns:
+            list: List of pin dictionaries with id, title, etc., or None if error
+        """
+        if board_id is None:
+            board_id = self.integration.board_id
+        
+        if not board_id:
+            raise ImproperlyConfigured("Pinterest board ID not configured")
+        
+        url = f"{self.API_BASE_URL}/boards/{board_id}/pins"
+        
+        headers = {
+            "Authorization": f"Bearer {self.integration.access_token}",
+        }
+        
+        all_pins = []
+        bookmark = None
+        
+        try:
+            while True:
+                params = {
+                    "page_size": min(page_size, 250),  # Pinterest max is 250
+                }
+                if bookmark:
+                    params["bookmark"] = bookmark
+                
+                response = requests.get(url, headers=headers, params=params, timeout=30)
+                response.raise_for_status()
+                
+                data = response.json()
+                pins = data.get('items', [])
+                all_pins.extend(pins)
+                
+                # Check if there are more pages
+                bookmark = data.get('bookmark')
+                if not bookmark or len(pins) == 0:
+                    break
+            
+            logger.info(f"Retrieved {len(all_pins)} pins from board {board_id}")
+            return all_pins
+            
+        except requests.exceptions.RequestException as e:
+            error_msg = str(e)
+            if hasattr(e, 'response') and e.response is not None:
+                try:
+                    error_data = e.response.json()
+                    error_msg = error_data.get('message', error_data.get('error_description', str(e)))
+                    logger.error(f"Pinterest API Error: {error_data}")
+                except:
+                    logger.error(f"Response: {e.response.text}")
+            
+            self.integration.update_error(error_msg)
+            logger.error(f"Failed to get Pinterest pins: {error_msg}")
+            return None
+    
+    def delete_pin(self, pin_id):
+        """
+        Delete a pin from Pinterest.
+        
+        Args:
+            pin_id: Pinterest pin ID to delete
+        
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        url = f"{self.API_BASE_URL}/pins/{pin_id}"
+        
+        headers = {
+            "Authorization": f"Bearer {self.integration.access_token}",
+        }
+        
+        try:
+            response = requests.delete(url, headers=headers, timeout=30)
+            response.raise_for_status()
+            
+            logger.info(f"Pinterest pin deleted successfully: {pin_id}")
+            return True
+            
+        except requests.exceptions.RequestException as e:
+            error_msg = str(e)
+            if hasattr(e, 'response') and e.response is not None:
+                try:
+                    error_data = e.response.json()
+                    error_msg = error_data.get('message', error_data.get('error_description', str(e)))
+                    logger.error(f"Pinterest API Error: {error_data}")
+                except:
+                    logger.error(f"Response: {e.response.text}")
+            
+            self.integration.update_error(error_msg)
+            logger.error(f"Failed to delete Pinterest pin {pin_id}: {error_msg}")
+            return False
+    
+    @classmethod
+    def get_pins_with_token(cls, access_token, board_id, page_size=25):
+        """
+        Get all pins from a Pinterest board using an access token.
+        
+        Args:
+            access_token: Pinterest OAuth access token
+            board_id: Board ID
+            page_size: Number of pins per page (max 250)
+        
+        Returns:
+            list: List of pin dictionaries, or None if error
+        """
+        url = f"{cls.get_api_base_url()}/boards/{board_id}/pins"
+        
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+        }
+        
+        all_pins = []
+        bookmark = None
+        
+        try:
+            while True:
+                params = {
+                    "page_size": min(page_size, 250),
+                }
+                if bookmark:
+                    params["bookmark"] = bookmark
+                
+                response = requests.get(url, headers=headers, params=params, timeout=30)
+                response.raise_for_status()
+                
+                data = response.json()
+                pins = data.get('items', [])
+                all_pins.extend(pins)
+                
+                bookmark = data.get('bookmark')
+                if not bookmark or len(pins) == 0:
+                    break
+            
+            return all_pins
+            
+        except requests.exceptions.RequestException as e:
+            error_msg = str(e)
+            if hasattr(e, 'response') and e.response is not None:
+                try:
+                    error_data = e.response.json()
+                    error_msg = error_data.get('message', error_data.get('error_description', str(e)))
+                    logger.error(f"Pinterest API Error: {error_data}")
+                except:
+                    logger.error(f"Response: {e.response.text}")
+            
+            logger.error(f"Failed to get Pinterest pins: {error_msg}")
+            return None
+    
+    @classmethod
+    def delete_pin_with_token(cls, access_token, pin_id):
+        """
+        Delete a pin from Pinterest using an access token.
+        
+        Args:
+            access_token: Pinterest OAuth access token
+            pin_id: Pinterest pin ID to delete
+        
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        url = f"{cls.get_api_base_url()}/pins/{pin_id}"
+        
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+        }
+        
+        try:
+            response = requests.delete(url, headers=headers, timeout=30)
+            response.raise_for_status()
+            
+            logger.info(f"Pinterest pin deleted successfully: {pin_id}")
+            return True
+            
+        except requests.exceptions.RequestException as e:
+            error_msg = str(e)
+            if hasattr(e, 'response') and e.response is not None:
+                try:
+                    error_data = e.response.json()
+                    error_msg = error_data.get('message', error_data.get('error_description', str(e)))
+                    logger.error(f"Pinterest API Error: {error_data}")
+                except:
+                    logger.error(f"Response: {e.response.text}")
+            
+            logger.error(f"Failed to delete Pinterest pin {pin_id}: {error_msg}")
+            return False
+    
     def refresh_access_token(self):
         """
         Refresh the access token using refresh token.
