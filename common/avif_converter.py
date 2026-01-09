@@ -270,7 +270,8 @@ def create_avif_from_media_file(media_file_path, product_number, is_mockup=False
         
         # #region agent log
         import json
-        log_path = '/home/janmay/Desktop/WeDesignz Source Code/.cursor/debug.log'
+        import os
+        log_path = os.getenv('DEBUG_LOG_PATH', os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'logs', 'debug.log'))
         try:
             with open(log_path, 'a') as f:
                 f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"D","location":"common/avif_converter.py:create_avif_from_media_file","message":"AVIF conversion starting","data":{"media_file_path":media_file_path,"file_dir":file_dir,"product_id":product.id if product else None,"product_number":product_number,"using_product_dir":product is not None},"timestamp":int(__import__('time').time()*1000)})+'\n')

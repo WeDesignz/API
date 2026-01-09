@@ -485,7 +485,8 @@ def process_design_upload_task(self, task_id, zip_file_path):
                         # Set product context for file path generation
                         # #region agent log
                         import json
-                        log_path = '/home/janmay/Desktop/WeDesignz Source Code/.cursor/debug.log'
+                        import os
+                        log_path = os.getenv('DEBUG_LOG_PATH', os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'logs', 'debug.log'))
                         try:
                             with open(log_path, 'a') as f:
                                 f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"B","location":"Profiles/tasks.py:process_design_upload_task","message":"Setting product context before Media.create (bulk upload)","data":{"product_id":product.id,"task_id":task_id},"timestamp":int(__import__('time').time()*1000)})+'\n')

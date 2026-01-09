@@ -30,7 +30,7 @@ def get_media_upload_path(instance, filename):
     # #region agent log
     import json
     import os
-    log_path = '/home/janmay/Desktop/WeDesignz Source Code/.cursor/debug.log'
+    log_path = os.getenv('DEBUG_LOG_PATH', os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'logs', 'debug.log'))
     try:
         product_id = getattr(_thread_local, 'product_id', None)
         order_id = getattr(_thread_local, 'order_id', None)
