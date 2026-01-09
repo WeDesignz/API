@@ -91,7 +91,8 @@ def process_single_design_upload(
                 # Set product context for file path generation
                 # #region agent log
                 import json
-                log_path = '/home/janmay/Desktop/WeDesignz Source Code/.cursor/debug.log'
+                import os
+                log_path = os.getenv('DEBUG_LOG_PATH', os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'logs', 'debug.log'))
                 try:
                     with open(log_path, 'a') as f:
                         f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"B","location":"Catalog/tasks.py:process_single_design_upload","message":"Setting product context before Media.create","data":{"product_id":product.id,"filename":new_filename,"file_name":file_name},"timestamp":int(__import__('time').time()*1000)})+'\n')
