@@ -394,7 +394,8 @@ class ProductSerializer(serializers.ModelSerializer):
                     if file_name:
                         file_name_lower = file_name.lower()
                         base_name = os.path.splitext(os.path.basename(file_name_lower))[0]
-                        is_mockup = base_name == 'mockup'
+                        # Check for exact match or _MOCKUP pattern (e.g., WDG00000005_MOCKUP.jpg)
+                        is_mockup = base_name == 'mockup' or base_name.endswith('_mockup') or '_mockup' in base_name
                     
                     # Also check metadata if available (FIX: Check dict value, not string search)
                     if not is_mockup and relation_meta:
@@ -1158,9 +1159,9 @@ class DesignListSerializer(serializers.ModelSerializer):
             if not media or (hasattr(media, 'exists') and not media.exists()):
                 return []
             
-            # Convert to list and limit to first 5 for list view
+            # Convert to list - return all files (not just first 5) to include mockup files
             try:
-                media_list = list(media[:5])
+                media_list = list(media)
             except (TypeError, AttributeError):
                 return []
             
@@ -1215,7 +1216,8 @@ class DesignListSerializer(serializers.ModelSerializer):
                     if file_name:
                         file_name_lower = file_name.lower()
                         base_name = os.path.splitext(os.path.basename(file_name_lower))[0]
-                        is_mockup = base_name == 'mockup'
+                        # Check for exact match or _MOCKUP pattern (e.g., WDG00000005_MOCKUP.jpg)
+                        is_mockup = base_name == 'mockup' or base_name.endswith('_mockup') or '_mockup' in base_name
                     
                     # Also check metadata if available
                     if not is_mockup and relation_meta:
@@ -1458,11 +1460,12 @@ class DesignDetailSerializer(serializers.ModelSerializer):
                     except Exception:
                         pass
                     
-                    # Also check filename for mockup (exact match on base name)
+                    # Also check filename for mockup (exact match or _MOCKUP pattern)
                     if not is_mockup and file_name:
                         file_name_lower = file_name.lower()
                         base_name = os.path.splitext(os.path.basename(file_name_lower))[0]
-                        if base_name == 'mockup':
+                        # Check for exact match or _MOCKUP pattern (e.g., WDG00000005_MOCKUP.jpg)
+                        if base_name == 'mockup' or base_name.endswith('_mockup') or '_mockup' in base_name:
                             is_mockup = True
                     
                     result.append({
@@ -1516,9 +1519,10 @@ class DesignDetailSerializer(serializers.ModelSerializer):
                     # Check if it's JPG or PNG
                     is_jpg_png = any(ext in file_name_lower for ext in ['.jpg', '.jpeg', '.png'])
                     
-                    # Check if it's a mockup file (exact match on base name)
+                    # Check if it's a mockup file (exact match or _MOCKUP pattern)
                     base_name = os.path.splitext(os.path.basename(file_name_lower))[0]
-                    is_mockup = base_name == 'mockup'
+                    # Check for exact match or _MOCKUP pattern (e.g., WDG00000005_MOCKUP.jpg)
+                    is_mockup = base_name == 'mockup' or base_name.endswith('_mockup') or '_mockup' in base_name
                     
                     # Also check metadata if available
                     try:
