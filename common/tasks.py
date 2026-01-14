@@ -1749,16 +1749,20 @@ def post_to_instagram(self, instagram_post_id):
                 jpg_media = media
         
         # Select image based on priority
-        if mockup_media:
-            # Always prefer mockup if available
-            image_media = mockup_media
-            logger.info(f"Selected mockup image for product {product.id}")
+        # First, respect the user's requested type
+        if requested_type == 'jpg' and jpg_media:
+            image_media = jpg_media
+            logger.info(f"Selected JPG image for product {product.id} (as requested)")
         elif requested_type == 'png' and png_media:
             image_media = png_media
             logger.info(f"Selected PNG image for product {product.id} (as requested)")
-        elif requested_type == 'jpg' and jpg_media:
-            image_media = jpg_media
-            logger.info(f"Selected JPG image for product {product.id} (as requested)")
+        elif requested_type == 'mockup' and mockup_media:
+            image_media = mockup_media
+            logger.info(f"Selected mockup image for product {product.id} (as requested)")
+        # Fallback: use whatever is available (mockup > png > jpg)
+        elif mockup_media:
+            image_media = mockup_media
+            logger.info(f"Selected mockup image for product {product.id} (fallback)")
         elif png_media:
             image_media = png_media
             logger.info(f"Selected PNG image for product {product.id} (fallback)")
