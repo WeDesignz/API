@@ -64,6 +64,7 @@ class Product(models.Model):
     color = models.CharField(max_length=50, blank=True, null=True)
     price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     visibility_status = models.CharField(max_length=10, choices=PRODUCT_VISIBILITY_CHOICES, default='show')
+    is_indexed = models.BooleanField(default=False)
     rejection_reason = models.TextField(blank=True, null=True, help_text="Reason for rejection if design is rejected")
     created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='created_products')
     created_at = models.DateTimeField(auto_now_add=True)
