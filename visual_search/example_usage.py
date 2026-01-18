@@ -33,19 +33,19 @@ def example_training():
     # Prepare your image data
     images_data = [
         {
-            'ProductId': 'PROD001',
+            'ProductId': '1084',
             'MediaFileId': 'MEDIA001',
-            'image': Image.open("path/to/image1.jpg")
+            'image': Image.open("/Users/vaibhav/Work/wedesignz/Application/API/media/8/designs/1084/WDG00000001.jpg")
         },
         {
-            'ProductId': 'PROD002',
+            'ProductId': '1141',
             'MediaFileId': 'MEDIA002',
-            'image': Image.open("path/to/image2.jpg")
+            'image': Image.open("/Users/vaibhav/Work/wedesignz/Application/API/media/8/designs/1141/WDG00000008.jpg")
         },
         {
-            'ProductId': 'PROD003',
+            'ProductId': '1143',
             'MediaFileId': 'MEDIA003',
-            'image': Image.open("path/to/image3.jpg")
+            'image': Image.open("/Users/vaibhav/Work/wedesignz/Application/API/media/8/designs/1143/WDG00000010.jpg")
         },
     ]
     
