@@ -86,6 +86,8 @@ class TrainingEngine:
                 
                 # Encode image
                 vector = self.model.encode_image(img)
+                if hasattr(vector, "tolist"):
+                    vector = vector.tolist()
                 
                 # Generate description (optional, can fail)
                 description = None
