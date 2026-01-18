@@ -2,10 +2,11 @@
 Training Engine for Visual Search.
 Handles batch indexing of images with ProductId and MediaFileId.
 """
+import math
 import uuid
 from typing import List, Dict, Any
 from PIL import Image
-from qdrant_client.http.models import PointStruct, Batch, PointsBatch
+from qdrant_client import models
 
 from visual_search.core.models import get_models
 from visual_search.config import COLLECTION_NAME, BATCH_SIZE
@@ -89,6 +90,33 @@ class TrainingEngine:
                 if hasattr(vector, "tolist"):
                     vector = vector.tolist()
                 
+                # Ensure vector is a list and check its length
+                if not isinstance(vector, list):
+                    vector = list(vector)
+                
+                # Check vector length
+                if len(vector) == 0:
+                    raise ValueError(f"Encoded vector is empty for ProductId {product_id}")
+                
+                # Check for NaN or invalid values and fix them - ensure we preserve length
+                cleaned_vector = []
+                has_nan = False
+                for v in vector:
+                    try:
+                        val = float(v)
+                        if math.isnan(val) or math.isinf(val):
+                            has_nan = True
+                            val = 0.0
+                        cleaned_vector.append(val)
+                    except (TypeError, ValueError):
+                        has_nan = True
+                        cleaned_vector.append(0.0)
+                
+                if has_nan:
+                    print(f"[WARN] Vector for ProductId {product_id} contains NaN/Inf values, replaced with zeros (length: {len(cleaned_vector)})")
+                
+                vector = cleaned_vector
+                
                 # Generate description (optional, can fail)
                 description = None
                 try:
@@ -125,24 +153,72 @@ class TrainingEngine:
         # Upload batch to Qdrant
         if ids:
             try:
-                self.client.http.points_api.upsert_points(
+                # Prepare points - ensure vectors are proper Python lists of floats
+                points = []
+                for point_id, vector, payload in zip(ids, vectors, payloads):
+                    # Ensure vector is a plain Python list of floats
+                    if not isinstance(vector, list):
+                        if hasattr(vector, "tolist"):
+                            vector = vector.tolist()
+                        else:
+                            vector = list(vector)
+                    
+                    # Verify vector length and content
+                    if len(vector) == 0:
+                        print(f"[ERROR] Vector is empty for point {point_id}, skipping")
+                        continue
+                    
+                    # Final check: ensure all are valid floats (should already be done above, but double-check)
+                    try:
+                        cleaned = []
+                        for v in vector:
+                            val = float(v)
+                            if math.isnan(val) or math.isinf(val):
+                                val = 0.0
+                            cleaned.append(val)
+                        vector = cleaned
+                        
+                        # Verify length matches expected (512)
+                        if len(vector) != 512:
+                            print(f"[ERROR] Vector length mismatch: expected 512, got {len(vector)} for point {point_id}")
+                            continue
+                    except (TypeError, ValueError) as e:
+                        print(f"[ERROR] Cannot convert vector to floats: {e}")
+                        continue
+                    
+                    # Create PointStruct - use string ID
+                    point = models.PointStruct(
+                        id=str(point_id),  # Ensure string
+                        vector=vector,      # Plain list of floats
+                        payload=payload or {}  # Ensure payload is dict
+                    )
+                    points.append(point)
+                
+                # Batch upsert all points
+                self.client.upsert(
                     collection_name=COLLECTION_NAME,
                     wait=True,
-                    point_insert_operations=PointsBatch(
-                        batch=Batch(
-                            ids=ids,
-                            vectors=vectors,
-                            payloads=payloads,
-                        )
-                    ),
+                    points=points
                 )
                 print(f"[INFO] Successfully indexed {len(ids)} images")
             except Exception as exc:
-                print(f"[ERROR] Failed to upload batch: {exc}")
+                import traceback
+                error_msg = str(exc)
+                print(f"[ERROR] Failed to upload batch: {error_msg}")
+                print(f"[ERROR] Exception type: {type(exc).__name__}")
+                # Try to provide more context
+                if "VectorStruct" in error_msg:
+                    print(f"[ERROR] VectorStruct error - checking first vector:")
+                    if vectors:
+                        v = vectors[0]
+                        print(f"  Type: {type(v)}, Is list: {isinstance(v, list)}")
+                        if isinstance(v, list):
+                            print(f"  Length: {len(v)}, First 3: {v[:3]}")
+                            print(f"  Element types: {[type(x) for x in v[:3]]}")
+                traceback.print_exc()
                 # Mark all in batch as failed
                 for result in batch_results:
                     if result['isIndexed']:
                         result['isIndexed'] = False
         
         return batch_results
-

@@ -36,7 +36,27 @@ class EmbeddingModel:
         inputs = self.processor(images=img, return_tensors="pt").to(self.device)
         with torch.inference_mode():
             embeddings = self.model.get_image_features(**inputs)
-            embeddings = embeddings / embeddings.norm(p=2, dim=-1, keepdim=True)
+            
+            # Check for NaN/Inf in raw embeddings
+            if torch.isnan(embeddings).any() or torch.isinf(embeddings).any():
+                print(f"[WARN] Raw embeddings contain NaN/Inf before normalization")
+                # Replace NaN/Inf with zeros
+                embeddings = torch.where(torch.isnan(embeddings) | torch.isinf(embeddings), 
+                                        torch.zeros_like(embeddings), embeddings)
+            
+            # Normalize: divide by L2 norm, but avoid division by zero or NaN
+            norm = embeddings.norm(p=2, dim=-1, keepdim=True)
+            # Replace zero or NaN norms with 1.0 to avoid division issues
+            norm = torch.where((norm == 0) | torch.isnan(norm) | torch.isinf(norm), 
+                              torch.ones_like(norm), norm)
+            embeddings = embeddings / norm
+            
+            # Final check for NaN/Inf after normalization
+            if torch.isnan(embeddings).any() or torch.isinf(embeddings).any():
+                print(f"[WARN] Embeddings contain NaN/Inf after normalization, replacing with zeros")
+                embeddings = torch.where(torch.isnan(embeddings) | torch.isinf(embeddings),
+                                        torch.zeros_like(embeddings), embeddings)
+            
         return embeddings.squeeze(0).cpu().tolist()
     
     def encode_images_batch(self, images: list) -> list:
