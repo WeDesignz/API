@@ -426,6 +426,7 @@ class CustomOrderListSerializer(serializers.ModelSerializer):
     sla_status = serializers.SerializerMethodField()
     media_count = serializers.SerializerMethodField()
     deliverables = serializers.SerializerMethodField()
+    reference_files = serializers.SerializerMethodField()
     
     order_id = serializers.SerializerMethodField()
     
@@ -436,7 +437,7 @@ class CustomOrderListSerializer(serializers.ModelSerializer):
             'created_by', 'created_at', 'updated_at',
             'assigned_to', 'time_remaining', 'sla_status', 'media_count',
             'sla_deadline', 'started_at', 'completed_at', 'delivered_at',
-            'delivery_files_uploaded', 'order_id', 'deliverables'
+            'delivery_files_uploaded', 'order_id', 'deliverables', 'reference_files'
         ]
     
     def get_order_id(self, obj):
@@ -557,6 +558,76 @@ class CustomOrderListSerializer(serializers.ModelSerializer):
                 continue
         
         return deliverables
+    
+    def get_reference_files(self, obj):
+        """Get reference files (media that are NOT delivery files)."""
+        from MediaFiles.models import Media, Relation
+        from MediaFiles.serializers import MediaSerializer
+        
+        # Get request from context to build absolute URLs
+        request = self.context.get('request') if hasattr(self, 'context') and self.context else None
+        
+        # Get all media files for this custom order
+        media = obj.get_media()
+        reference_files = []
+        delivery_file_ids = set()
+        
+        # First, collect all delivery file IDs
+        for m in media:
+            try:
+                relation = Relation.objects.filter(
+                    relation_type='CustomRequest:Media',
+                    id_1=obj.pk,
+                    id_2=m.pk
+                ).first()
+                
+                if relation and relation.meta:
+                    meta_data = relation.meta
+                    is_delivery_file = False
+                    if isinstance(meta_data, dict):
+                        is_delivery_file = meta_data.get('type') == 'delivery_file'
+                    elif isinstance(meta_data, str):
+                        is_delivery_file = 'delivery_file' in str(meta_data).lower()
+                    
+                    if is_delivery_file:
+                        delivery_file_ids.add(m.pk)
+            except Exception:
+                continue
+        
+        # Now collect all non-delivery files as reference files
+        for m in media:
+            if m.pk not in delivery_file_ids:
+                try:
+                    # Get file URL and build absolute URL if request context is available
+                    file_url = None
+                    if m.file:
+                        url = m.file.url
+                        file_name = m.file.name.split('/')[-1] if m.file.name else 'file'
+                        
+                        # Build absolute URL if we have request context
+                        if request and url:
+                            if url.startswith('/'):
+                                file_url = request.build_absolute_uri(url)
+                            elif url.startswith('http'):
+                                file_url = url
+                            else:
+                                file_url = request.build_absolute_uri('/' + url)
+                        else:
+                            file_url = url
+                    else:
+                        file_name = 'file'
+                    
+                    if file_url:
+                        reference_files.append({
+                            'id': str(m.id),
+                            'fileName': file_name,
+                            'url': file_url,
+                            'uploadedAt': m.created_at.isoformat() if m.created_at else None
+                        })
+                except Exception:
+                    continue
+        
+        return reference_files
 
 
 class CustomOrderDetailSerializer(serializers.ModelSerializer):

@@ -202,12 +202,19 @@ def submit_custom_request(request):
     from Orders.models import Order
     from common.business_config import BusinessConfig
     from decimal import Decimal
+    import os
     
     title = request.data.get('title', '').strip() or 'Custom Order'
     description = request.data.get('description', '').strip() or 'No description provided'
     # Get default price from system config
     default_price = float(BusinessConfig.get_custom_order_price())
-    budget = request.data.get('budget', default_price)
+    
+    # Get budget and convert to float (FormData sends strings)
+    budget_str = request.data.get('budget', default_price)
+    try:
+        budget = float(budget_str) if budget_str is not None else default_price
+    except (ValueError, TypeError):
+        budget = default_price
     
     # Validate budget
     if budget is None or budget <= 0:
@@ -229,6 +236,73 @@ def submit_custom_request(request):
         created_by=request.user
     )
     
+    # Handle file uploads (reference files)
+    uploaded_files = []
+    if request.FILES:
+        # Get all files from request.FILES
+        files = []
+        # Check for 'files' key (multiple files with same key)
+        if 'files' in request.FILES:
+            files_list = request.FILES.getlist('files')
+            files.extend(files_list)
+        # Also check for individual file keys
+        for key in request.FILES:
+            if key != 'files':  # Skip 'files' as we already handled it
+                file_obj = request.FILES[key]
+                files.append(file_obj)
+        
+        # Helper function to determine media_type from filename
+        def get_media_type_from_filename(filename):
+            """Determine media_type from file extension."""
+            if not filename:
+                return 'other'
+            filename_lower = filename.lower()
+            ext = os.path.splitext(filename_lower)[1]
+            
+            if ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg']:
+                return 'image'
+            elif ext in ['.mp4', '.avi', '.mov', '.wmv', '.flv']:
+                return 'video'
+            elif ext == '.cdr':
+                return 'cdr'
+            elif ext == '.eps':
+                return 'eps'
+            elif ext == '.pdf':
+                return 'pdf'
+            elif ext in ['.doc']:
+                return 'doc'
+            elif ext in ['.docx']:
+                return 'docx'
+            elif ext in ['.xls']:
+                return 'xls'
+            elif ext in ['.xlsx']:
+                return 'xlsx'
+            else:
+                return 'other'
+        
+        # Upload files and attach to custom request
+        for file_obj in files:
+            try:
+                # Determine media_type from filename
+                media_type = get_media_type_from_filename(file_obj.name)
+                
+                # Create Media object
+                media_obj = Media.objects.create(
+                    file=file_obj,
+                    media_type=media_type,
+                    created_by=request.user
+                )
+                
+                # Attach to custom request (without 'delivery_file' meta, so it's a reference file)
+                custom_request.attach_media(media_obj, meta=None, created_by=request.user)
+                uploaded_files.append(media_obj.id)
+            except Exception as e:
+                # Log error but don't fail the entire request
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.error(f"Error uploading file {file_obj.name}: {str(e)}")
+                continue
+    
     # Create corresponding Order record with order_type='custom'
     order = Order.objects.create(
         order_type='custom',
@@ -248,7 +322,8 @@ def submit_custom_request(request):
         'order_id': order.id,
         'payment_required': True,
         'amount': float(budget),
-        'payment_message': 'Please complete payment to process your custom request'
+        'payment_message': 'Please complete payment to process your custom request',
+        'uploaded_files': uploaded_files
     }, status=status.HTTP_201_CREATED)
 
 
@@ -518,6 +593,124 @@ def custom_request_media(request, request_id):
         return Response({
             'error': 'Custom request not found'
         }, status=status.HTTP_404_NOT_FOUND)
+
+
+@swagger_auto_schema(
+    method='get',
+    operation_summary='Download Custom Order Reference Files ZIP',
+    operation_description='Download all reference files for a custom order as a zip file.',
+    responses={
+        200: openapi.Response(description='Zip file download'),
+        400: openapi.Response(description='Bad request - order not found or no reference files'),
+        401: openapi.Response(description='Unauthorized - authentication required'),
+        403: openapi.Response(description='Forbidden - order belongs to another user')
+    },
+    tags=['Custom Requests']
+)
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def download_custom_order_reference_files_zip(request, request_id):
+    """
+    Download all reference files for a custom order as a zip file.
+    """
+    try:
+        custom_request = CustomOrderRequest.objects.get(id=request_id)
+        # For admin users, allow access to any order
+        # For regular users, only allow access to their own orders
+        from CoreAdmin.models import AdminUserProfile
+        is_admin = AdminUserProfile.objects.filter(user=request.user).exists()
+        if not is_admin and custom_request.created_by != request.user:
+            return Response({
+                'error': 'You do not have permission to access this order'
+            }, status=status.HTTP_403_FORBIDDEN)
+    except CustomOrderRequest.DoesNotExist:
+        return Response({
+            'error': 'Custom order not found'
+        }, status=status.HTTP_404_NOT_FOUND)
+    
+    # Get all media files for this custom order
+    media_files = custom_request.get_media()
+    reference_files = []
+    delivery_file_ids = set()
+    
+    # First, collect all delivery file IDs
+    for m in media_files:
+        try:
+            relation = Relation.objects.filter(
+                relation_type='CustomRequest:Media',
+                id_1=custom_request.pk,
+                id_2=m.pk
+            ).first()
+            
+            if relation and relation.meta:
+                meta_data = relation.meta
+                is_delivery_file = False
+                if isinstance(meta_data, dict):
+                    is_delivery_file = meta_data.get('type') == 'delivery_file'
+                elif isinstance(meta_data, str):
+                    is_delivery_file = 'delivery_file' in str(meta_data).lower()
+                
+                if is_delivery_file:
+                    delivery_file_ids.add(m.pk)
+        except Exception:
+            continue
+    
+    # Now collect all non-delivery files as reference files
+    for m in media_files:
+        if m.pk not in delivery_file_ids:
+            reference_files.append(m)
+    
+    if not reference_files:
+        return Response({
+            'error': 'No reference files found for this order'
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    # Create zip file in memory
+    zip_buffer = io.BytesIO()
+    
+    try:
+        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+            for media in reference_files:
+                if media.file:
+                    try:
+                        # Get file path
+                        file_path = media.file.name
+                        
+                        # Read file from storage
+                        if default_storage.exists(file_path):
+                            with default_storage.open(file_path, 'rb') as storage_file:
+                                file_content = storage_file.read()
+                                
+                                # Get original filename or use a default
+                                file_name = media.file.name.split('/')[-1] if '/' in media.file.name else media.file.name
+                                
+                                # Add to zip with sanitized filename
+                                zip_file.writestr(file_name, file_content)
+                    except Exception as e:
+                        # Log error but continue with other files
+                        import logging
+                        logger = logging.getLogger(__name__)
+                        logger.error(f'Error adding media {media.id} to zip: {str(e)}')
+                        continue
+        
+        # Prepare response
+        zip_buffer.seek(0)
+        response = HttpResponse(zip_buffer.read(), content_type='application/zip')
+        # Sanitize title for filename
+        safe_title = custom_request.title.replace(" ", "_").replace("/", "_").replace("\\", "_")
+        safe_title = ''.join(c for c in safe_title if c.isalnum() or c in ('_', '-'))[:50]
+        response['Content-Disposition'] = f'attachment; filename="order_{request_id}_reference_files.zip"'
+        response['Content-Length'] = zip_buffer.tell()
+        
+        return response
+        
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f'Error creating zip file for custom order {request_id}: {str(e)}')
+        return Response({
+            'error': f'Failed to create zip file: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @swagger_auto_schema(
