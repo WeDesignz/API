@@ -203,16 +203,11 @@ def submit_custom_request(request):
     from common.business_config import BusinessConfig
     from decimal import Decimal
     
-    title = request.data.get('title')
-    description = request.data.get('description')
+    title = request.data.get('title', '').strip() or 'Custom Order'
+    description = request.data.get('description', '').strip() or 'No description provided'
     # Get default price from system config
     default_price = float(BusinessConfig.get_custom_order_price())
     budget = request.data.get('budget', default_price)
-    
-    if not all([title, description]):
-        return Response({
-            'error': 'Title and description are required'
-        }, status=status.HTTP_400_BAD_REQUEST)
     
     # Validate budget
     if budget is None or budget <= 0:
