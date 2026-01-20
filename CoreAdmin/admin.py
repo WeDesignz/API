@@ -324,7 +324,7 @@ class SystemConfigAdmin(admin.ModelAdmin):
     Only one instance should exist.
     """
     list_display = [
-        'id', 'commission_rate', 'gst_percentage', 'design_price', 'minimum_required_designs',
+        'id', 'commission_rate', 'gst_percentage', 'design_price', 'custom_order_price', 'minimum_required_designs',
         'maintenance_mode', 'updated_at'
     ]
     list_filter = ['maintenance_mode', 'updated_at', 'created_at']
@@ -336,6 +336,7 @@ class SystemConfigAdmin(admin.ModelAdmin):
                 'commission_rate',
                 'gst_percentage',
                 'design_price',
+                'custom_order_price',
                 'custom_order_time_slot_hours',
                 'minimum_required_designs',
             )

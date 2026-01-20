@@ -200,10 +200,14 @@ def submit_custom_request(request):
     Submit a custom request with payment.
     """
     from Orders.models import Order
+    from common.business_config import BusinessConfig
+    from decimal import Decimal
     
     title = request.data.get('title')
     description = request.data.get('description')
-    budget = request.data.get('budget', 200.00)  # Default charge of 200 Rs
+    # Get default price from system config
+    default_price = float(BusinessConfig.get_custom_order_price())
+    budget = request.data.get('budget', default_price)
     
     if not all([title, description]):
         return Response({
@@ -216,9 +220,10 @@ def submit_custom_request(request):
             'error': 'Budget must be a positive amount'
         }, status=status.HTTP_400_BAD_REQUEST)
     
-    if budget < 200:
+    # Validate against minimum price from config
+    if budget < default_price:
         return Response({
-            'error': 'Minimum budget is ₹200'
+            'error': f'Minimum budget is ₹{default_price}'
         }, status=status.HTTP_400_BAD_REQUEST)
     
     # Create custom request
