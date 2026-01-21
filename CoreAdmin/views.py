@@ -7142,7 +7142,7 @@ def subscription_plans_analytics(request):
 @swagger_auto_schema(
     method='get',
     operation_summary='Get Business Configuration',
-    operation_description='Get current business configuration values (commission rate, GST percentage, custom order time slot, minimum required designs). These values are read from SystemConfig (set in AdminWebApp), with fallback to environment variables.',
+    operation_description='Get current business configuration values (commission rate, GST percentage, custom order price, custom order time slot, minimum required designs). These values are read from SystemConfig (set in AdminWebApp), with fallback to environment variables.',
     responses={
         200: openapi.Response(
             description='Business configuration retrieved successfully',
@@ -7151,6 +7151,7 @@ def subscription_plans_analytics(request):
                 properties={
                     'commission_rate': openapi.Schema(type=openapi.TYPE_NUMBER, description='Platform commission rate (%)'),
                     'gst_percentage': openapi.Schema(type=openapi.TYPE_NUMBER, description='GST percentage (%)'),
+                    'custom_order_price': openapi.Schema(type=openapi.TYPE_NUMBER, description='Default price for custom orders (INR)'),
                     'custom_order_time_slot_hours': openapi.Schema(type=openapi.TYPE_INTEGER, description='Custom order time slot (hours)'),
                     'minimum_required_designs_onboard': openapi.Schema(type=openapi.TYPE_INTEGER, description='Minimum required designs for onboarding'),
                 }
@@ -7174,6 +7175,7 @@ def business_config(request):
         'data': {
             'commission_rate': BusinessConfig.get_commission_rate(),
             'gst_percentage': BusinessConfig.get_gst_percentage(),
+            'custom_order_price': float(BusinessConfig.get_custom_order_price()),
             'custom_order_time_slot_hours': BusinessConfig.get_custom_order_time_slot_hours(),
             'minimum_required_designs_onboard': BusinessConfig.get_minimum_required_designs_onboard(),
         }
@@ -7245,6 +7247,7 @@ def get_system_config(request):
             'commission_rate': config.commission_rate,
             'gst_percentage': config.gst_percentage,
             'design_price': float(config.design_price) if config.design_price else 50.00,
+            'custom_order_price': float(config.custom_order_price) if config.custom_order_price is not None else 0.00,
             'custom_order_time_slot_hours': config.custom_order_time_slot_hours,
             'minimum_required_designs': config.minimum_required_designs,
             'maintenance_mode': config.maintenance_mode,
@@ -7284,6 +7287,9 @@ def update_system_config(request):
         if 'design_price' in request.data:
             from decimal import Decimal
             config.design_price = Decimal(str(request.data['design_price']))
+        if 'custom_order_price' in request.data:
+            from decimal import Decimal
+            config.custom_order_price = Decimal(str(request.data['custom_order_price']))
         if 'custom_order_time_slot_hours' in request.data:
             config.custom_order_time_slot_hours = int(request.data['custom_order_time_slot_hours'])
         if 'minimum_required_designs' in request.data:
@@ -7343,6 +7349,8 @@ def update_system_config(request):
             'message': 'System configuration updated successfully',
             'commission_rate': config.commission_rate,
             'gst_percentage': config.gst_percentage,
+            'design_price': float(config.design_price) if config.design_price else 50.00,
+            'custom_order_price': float(config.custom_order_price) if config.custom_order_price is not None else 0.00,
             'custom_order_time_slot_hours': config.custom_order_time_slot_hours,
             'minimum_required_designs': config.minimum_required_designs,
             'maintenance_mode': config.maintenance_mode,

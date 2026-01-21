@@ -1908,6 +1908,7 @@ class SystemConfig(models.Model):
     commission_rate = models.FloatField(default=15.0)
     gst_percentage = models.FloatField(default=18.0)
     design_price = models.DecimalField(max_digits=10, decimal_places=2, default=50.00, help_text="Global price per design (all paid designs will use this price)")
+    custom_order_price = models.DecimalField(max_digits=10, decimal_places=2, default=200.00, help_text="Default price for custom orders (minimum charge)")
     custom_order_time_slot_hours = models.IntegerField(default=1)
     minimum_required_designs = models.IntegerField(default=50)
     maintenance_mode = models.BooleanField(default=False)

@@ -484,8 +484,6 @@ def process_design_upload_task(self, task_id, zip_file_path):
                         
                         # Set product context for file path generation
                         # #region agent log
-                        import json
-                        import os
                         log_path = os.getenv('DEBUG_LOG_PATH', os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'logs', 'debug.log'))
                         try:
                             with open(log_path, 'a') as f:

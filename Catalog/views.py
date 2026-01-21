@@ -3693,3 +3693,163 @@ def browse_designs_catalog(request):
             'max_price': max_price
         }
     })
+
+
+@swagger_auto_schema(
+    method='post',
+    operation_summary='Lens Search - Search by Image',
+    operation_description='Upload an image to find similar products using visual search. Returns products matching the image pattern.',
+    request_body=openapi.Schema(
+        type=openapi.TYPE_OBJECT,
+        properties={
+            'image': openapi.Schema(type=openapi.TYPE_FILE, description='Image file to search (jpg, png, webp)'),
+            'num_results': openapi.Schema(type=openapi.TYPE_INTEGER, description='Number of results to return (default: 20)', default=20)
+        },
+        required=['image']
+    ),
+    responses={
+        200: openapi.Response(
+            description='Success',
+            examples={
+                'application/json': {
+                    'success': True,
+                    'products': [],
+                    'extracted_image': 'data:image/png;base64,...',
+                    'count': 20,
+                    'total_matched': 20
+                }
+            }
+        ),
+        400: openapi.Response(description='Bad request - no image provided or invalid image'),
+        500: openapi.Response(description='Internal server error')
+    },
+    tags=['Catalog']
+)
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def lens_search(request):
+    """
+    Visual search endpoint - search for similar products by uploading an image.
+    Uses the visual_search package to find similar patterns/products.
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    try:
+        from visual_search import search_image
+        from PIL import Image
+        import base64
+        from io import BytesIO
+    except ImportError as e:
+        logger.error(f"Visual search package not available: {e}")
+        return Response({
+            'error': 'Visual search feature is not available',
+            'success': False
+        }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+    
+    if 'image' not in request.FILES:
+        return Response({
+            'error': 'No image provided',
+            'success': False
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    try:
+        image_file = request.FILES['image']
+        num_results = int(request.POST.get('num_results', 20))
+        
+        # Validate file type
+        allowed_extensions = ['.jpg', '.jpeg', '.png', '.webp']
+        file_name = image_file.name.lower()
+        if not any(file_name.endswith(ext) for ext in allowed_extensions):
+            return Response({
+                'error': 'Invalid file type. Please upload JPG, PNG, or WebP image',
+                'success': False
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Validate file size (max 10MB)
+        if image_file.size > 10 * 1024 * 1024:
+            return Response({
+                'error': 'File size too large. Maximum size is 10MB',
+                'success': False
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Load image with PIL
+        try:
+            img = Image.open(image_file)
+            # Convert to RGB if needed (handles RGBA, P, etc.)
+            img = img.convert('RGB')
+        except Exception as e:
+            logger.error(f"Error opening image: {e}")
+            return Response({
+                'error': 'Invalid image file. Please upload a valid image',
+                'success': False
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Search using visual search
+        logger.info(f"Starting lens search for image: {image_file.name}, num_results: {num_results}")
+        product_ids, extracted_image = search_image(img, num_results=num_results)
+        logger.info(f"Lens search returned {len(product_ids)} product IDs: {product_ids[:5]}...")
+        
+        if not product_ids:
+            return Response({
+                'success': True,
+                'products': [],
+                'extracted_image': None,
+                'count': 0,
+                'total_matched': 0,
+                'message': 'No similar products found. Try uploading a different image.'
+            })
+        
+        # Fetch product details
+        products = Product.objects.filter(
+            product_number__in=product_ids,
+            status='active',
+            visibility_status='show'
+        ).select_related('category', 'created_by')
+        
+        # Maintain order from search results (order by product_id order in product_ids list)
+        product_dict = {p.product_number: p for p in products}
+        ordered_products = [
+            product_dict[pid] for pid in product_ids 
+            if pid in product_dict
+        ]
+        
+        logger.info(f"Found {len(ordered_products)} active products from {len(product_ids)} matched IDs")
+        
+        # Convert extracted image to base64 for preview
+        extracted_image_base64 = None
+        if extracted_image:
+            try:
+                buffered = BytesIO()
+                extracted_image.save(buffered, format="PNG")
+                extracted_image_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
+                extracted_image_base64 = f'data:image/png;base64,{extracted_image_base64}'
+            except Exception as e:
+                logger.warning(f"Could not encode extracted image: {e}")
+        
+        return Response({
+            'success': True,
+            'products': ProductSerializer(
+                ordered_products, 
+                many=True, 
+                context={'request': request}
+            ).data,
+            'extracted_image': extracted_image_base64,
+            'count': len(ordered_products),
+            'total_matched': len(product_ids)
+        })
+        
+    except ValueError as e:
+        logger.error(f"Invalid parameter in lens search: {e}")
+        return Response({
+            'error': f'Invalid parameter: {str(e)}',
+            'success': False
+        }, status=status.HTTP_400_BAD_REQUEST)
+    except Exception as e:
+        import traceback
+        logger.error(f"Lens search error: {e}\n{traceback.format_exc()}")
+        return Response({
+            'error': 'An error occurred while processing your image. Please try again.',
+            'success': False,
+            'details': str(e) if settings.DEBUG else None
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

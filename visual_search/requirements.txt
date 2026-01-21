@@ -1,0 +1,10 @@
+torch>=2.0.0
+transformers>=4.30.0
+pillow>=9.0.0
+qdrant-client>=1.7.0
+numpy>=1.24.0
+
+# Optional dependencies for garment extraction
+# ultralytics>=8.0.0  # For YOLO-based extraction
+# sam2  # For SAM2-based extraction (install separately)
+
