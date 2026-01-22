@@ -204,7 +204,8 @@ def dashboard_summary(request):
             # Pending Tasks
             from Profiles.models import DesignerProfile
             pending_designer_approvals = DesignerProfile.objects.filter(
-                status='pending'
+                status='pending',
+                onboarding_completed=True
             ).count()
             
             pending_design_reviews = Product.objects.filter(
@@ -370,7 +371,8 @@ def dashboard_summary(request):
             # Pending Tasks
             from Profiles.models import DesignerProfile
             pending_designer_approvals = DesignerProfile.objects.filter(
-                status='pending'
+                status='pending',
+                onboarding_completed=True
             ).count()
             
             pending_design_reviews = Product.objects.filter(
