@@ -1911,6 +1911,10 @@ class SystemConfig(models.Model):
     custom_order_price = models.DecimalField(max_digits=10, decimal_places=2, default=200.00, help_text="Default price for custom orders (minimum charge)")
     custom_order_time_slot_hours = models.IntegerField(default=1)
     minimum_required_designs = models.IntegerField(default=50)
+    free_mock_pdf_downloads_no_plan_per_month = models.IntegerField(
+        default=999,
+        help_text="Free mock PDF downloads per month for users without a plan (use high value e.g. 999 for unlimited)"
+    )
     maintenance_mode = models.BooleanField(default=False)
     
     # Landing page settings - Different sections need different designs

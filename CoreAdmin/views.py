@@ -7250,6 +7250,7 @@ def get_system_config(request):
             'custom_order_price': float(config.custom_order_price) if config.custom_order_price is not None else 0.00,
             'custom_order_time_slot_hours': config.custom_order_time_slot_hours,
             'minimum_required_designs': config.minimum_required_designs,
+            'free_mock_pdf_downloads_no_plan_per_month': getattr(config, 'free_mock_pdf_downloads_no_plan_per_month', 999),
             'maintenance_mode': config.maintenance_mode,
             'hero_section_designs': config.hero_section_designs or [],
             'featured_designs': config.featured_designs or [],
@@ -7294,6 +7295,8 @@ def update_system_config(request):
             config.custom_order_time_slot_hours = int(request.data['custom_order_time_slot_hours'])
         if 'minimum_required_designs' in request.data:
             config.minimum_required_designs = int(request.data['minimum_required_designs'])
+        if 'free_mock_pdf_downloads_no_plan_per_month' in request.data:
+            config.free_mock_pdf_downloads_no_plan_per_month = int(request.data['free_mock_pdf_downloads_no_plan_per_month'])
         if 'maintenance_mode' in request.data:
             config.maintenance_mode = bool(request.data['maintenance_mode'])
         if 'hero_section_designs' in request.data:
@@ -7353,6 +7356,7 @@ def update_system_config(request):
             'custom_order_price': float(config.custom_order_price) if config.custom_order_price is not None else 0.00,
             'custom_order_time_slot_hours': config.custom_order_time_slot_hours,
             'minimum_required_designs': config.minimum_required_designs,
+            'free_mock_pdf_downloads_no_plan_per_month': getattr(config, 'free_mock_pdf_downloads_no_plan_per_month', 999),
             'maintenance_mode': config.maintenance_mode,
             'hero_section_designs': config.hero_section_designs,
             'featured_designs': config.featured_designs,

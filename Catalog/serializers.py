@@ -950,6 +950,7 @@ class PDFDownloadRequestSerializer(serializers.Serializer):
     def validate_download_type(self, value):
         """
         Validate download type and check free download eligibility.
+        Uses system config free_mock_pdf_downloads_no_plan_per_month for per-month limit.
         """
         user = self.context.get('request').user if self.context.get('request') else None
         
@@ -957,19 +958,27 @@ class PDFDownloadRequestSerializer(serializers.Serializer):
             use_subscription_mock_pdf = self.initial_data.get('use_subscription_mock_pdf', False)
             
             if not use_subscription_mock_pdf:
-                # Regular free download - check if user has already used their one-time free download
+                # Regular free download - check monthly limit (configurable in admin)
                 from common.relations import get_related_ids_for_right
+                from common.business_config import BusinessConfig
+                from django.utils import timezone
+                from calendar import monthrange
+                limit = BusinessConfig.get_free_mock_pdf_downloads_no_plan_per_month()
+                now = timezone.now()
+                month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+                _, last_day = monthrange(now.year, now.month)
+                month_end = month_start.replace(day=last_day, hour=23, minute=59, second=59, microsecond=999999)
                 pdf_download_ids = get_related_ids_for_right(user, 'User:PDFDownload')
-                free_downloads = PDFDownload.objects.filter(
+                free_downloads_this_month = PDFDownload.objects.filter(
                     id__in=pdf_download_ids,
                     download_type='free',
-                    status='completed'
+                    status='completed',
+                    created_at__range=(month_start, month_end)
                 ).count()
-                
-                if free_downloads > 0:
+                if free_downloads_this_month >= limit:
                     raise serializers.ValidationError(
-                        "You have already used your free download. "
-                        "Please use paid download for additional PDFs or use your subscription mock PDF downloads if available."
+                        f"You have used {free_downloads_this_month} of {limit} free PDF downloads this month. "
+                        "Please use paid download or your subscription mock PDF downloads if available."
                     )
         
         return value
