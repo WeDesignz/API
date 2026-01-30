@@ -2649,6 +2649,23 @@ def design_analytics(request, design_id):
 
 # ==================== PDF DOWNLOAD FUNCTIONALITY ====================
 
+def _get_user_free_pdf_downloads_this_month(user):
+    """Count user's free (non-subscription) PDF downloads in the current calendar month."""
+    from common.relations import get_related_ids_for_right
+    from calendar import monthrange
+    now = timezone.now()
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    _, last_day = monthrange(now.year, now.month)
+    month_end = month_start.replace(day=last_day, hour=23, minute=59, second=59, microsecond=999999)
+    pdf_download_ids = get_related_ids_for_right(user, 'User:PDFDownload')
+    return PDFDownload.objects.filter(
+        id__in=pdf_download_ids,
+        download_type='free',
+        status='completed',
+        created_at__range=(month_start, month_end)
+    ).count()
+
+
 @swagger_auto_schema(
     method='get',
     operation_summary='Check Free Download Eligibility',
@@ -2667,28 +2684,27 @@ def design_analytics(request, design_id):
     },
     tags=['API']
 )
-
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def check_free_download_eligibility(request):
     """
     Check if user is eligible for free PDF download.
+    Uses system config free_mock_pdf_downloads_no_plan_per_month for users without a plan (per month).
     """
     user = request.user
-    
-    # Check if user has already used their free download
-    # Get all PDF downloads and filter by user via relations
-    all_pdf_downloads = PDFDownload.objects.filter(download_type='free', status='completed')
-    user_free_downloads = [pdf for pdf in all_pdf_downloads if pdf.get_user() == user]
-    free_downloads = len(user_free_downloads)
-    
-    is_eligible = free_downloads == 0
-    
+    limit = BusinessConfig.get_free_mock_pdf_downloads_no_plan_per_month()
+    free_downloads_this_month = _get_user_free_pdf_downloads_this_month(user)
+    is_eligible = free_downloads_this_month < limit
+
     return Response({
         'is_eligible': is_eligible,
-        'free_downloads_used': free_downloads,
+        'free_downloads_used': free_downloads_this_month,
+        'free_pdf_downloads_limit_per_month': limit,
         'free_pdf_designs_count': settings.PAID_PDF_DESIGNS_OPTIONS[0] if settings.PAID_PDF_DESIGNS_OPTIONS else 50,
-        'message': 'You are eligible for a free download' if is_eligible else 'You have already used your free download'
+        'message': (
+            'You are eligible for a free download' if is_eligible
+            else f'You have used {free_downloads_this_month} of {limit} free PDF downloads this month.'
+        )
     })
 
 
@@ -2774,18 +2790,12 @@ def create_pdf_download_request(request):
                     'total_mock_pdf_downloads': active_subscription.plan.mock_pdf_count
                 }, status=status.HTTP_400_BAD_REQUEST)
         else:
-            # Regular free download - check if user has already used their one-time free download
-            from common.relations import get_related_ids_for_right
-            pdf_download_ids = get_related_ids_for_right(user, 'User:PDFDownload')
-            free_downloads = PDFDownload.objects.filter(
-                id__in=pdf_download_ids,
-                download_type='free',
-                status='completed'
-            ).count()
-            
-            if free_downloads > 0:
+            # Regular free download - check monthly limit for users (configurable in admin)
+            limit = BusinessConfig.get_free_mock_pdf_downloads_no_plan_per_month()
+            free_downloads_this_month = _get_user_free_pdf_downloads_this_month(user)
+            if free_downloads_this_month >= limit:
                 return Response({
-                    'error': 'You have already used your free download. Please use paid download for additional PDFs or use your subscription mock PDF downloads if available.'
+                    'error': f'You have used {free_downloads_this_month} of {limit} free PDF downloads this month. Please use paid download or your subscription mock PDF downloads if available.'
                 }, status=status.HTTP_400_BAD_REQUEST)
     else:
         # Paid downloads must use one of the configured options

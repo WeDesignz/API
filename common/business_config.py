@@ -66,6 +66,16 @@ class BusinessConfig:
         return getattr(settings, 'MINIMUM_REQUIRED_DESIGNS_ONBOARD', 50)
     
     @staticmethod
+    def get_free_mock_pdf_downloads_no_plan_per_month():
+        """Get free mock PDF downloads per month for users without a plan.
+        Reads from SystemConfig. Use a high value (e.g. 999) for unlimited.
+        """
+        config = BusinessConfig._get_system_config()
+        if config and hasattr(config, 'free_mock_pdf_downloads_no_plan_per_month') and config.free_mock_pdf_downloads_no_plan_per_month is not None:
+            return int(config.free_mock_pdf_downloads_no_plan_per_month)
+        return getattr(settings, 'FREE_MOCK_PDF_DOWNLOADS_NO_PLAN_PER_MONTH', 999)
+    
+    @staticmethod
     def calculate_commission_amount(amount):
         """Calculate commission amount from a given amount."""
         # Convert to Decimal to avoid mixing Decimal and float
