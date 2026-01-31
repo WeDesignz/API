@@ -31,19 +31,29 @@ class EmbeddingModel:
         self.vector_size = vector_size
         print(f"[INFO] CLIP model initialized successfully")
     
+    def _get_embedding_tensor(self, outputs):
+        """Unwrap CLIP output: newer transformers return BaseModelOutputWithPooling with .pooler_output."""
+        if hasattr(outputs, "pooler_output") and outputs.pooler_output is not None:
+            return outputs.pooler_output
+        if hasattr(outputs, "last_hidden_state"):
+            return outputs.last_hidden_state[:, 0, :]
+        return outputs
+
     def encode_image(self, img: Image.Image) -> list:
         """Encode a PIL image into a vector using CLIP's image encoder."""
         inputs = self.processor(images=img, return_tensors="pt").to(self.device)
         with torch.inference_mode():
-            embeddings = self.model.get_image_features(**inputs)
+            out = self.model.get_image_features(**inputs)
+            embeddings = self._get_embedding_tensor(out)
             embeddings = embeddings / embeddings.norm(p=2, dim=-1, keepdim=True)
         return embeddings.squeeze(0).cpu().tolist()
-    
+
     def encode_images_batch(self, images: list) -> list:
         """Batch encode multiple images for faster processing."""
         inputs = self.processor(images=images, return_tensors="pt").to(self.device)
         with torch.inference_mode():
-            embeddings = self.model.get_image_features(**inputs)
+            out = self.model.get_image_features(**inputs)
+            embeddings = self._get_embedding_tensor(out)
             embeddings = embeddings / embeddings.norm(p=2, dim=-1, keepdim=True)
         return embeddings.cpu().tolist()
 

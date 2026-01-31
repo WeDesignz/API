@@ -89,17 +89,18 @@ class SearchEngine:
         # Search limit
         search_limit = max(num_results * 3, num_results + 40)
         
-        # Parallelize Qdrant searches
+        # Parallelize Qdrant searches (qdrant_client uses query_points, not search)
         def search_region(idx: int, query_vector: list, weight: float):
             """Search Qdrant for a single region and return weighted hits."""
-            hits = self.client.search(
+            response = self.client.query_points(
                 collection_name=COLLECTION_NAME,
-                query_vector=query_vector,
+                query=query_vector,
                 query_filter=None,
                 with_payload=True,
                 limit=search_limit,
-                search_params={"hnsw_ef": max(HNSW_EF, 200)},
+                search_params=None,
             )
+            hits = response.points
             return idx, hits, weight
         
         # Execute searches in parallel
@@ -149,7 +150,8 @@ class SearchEngine:
         product_ids = []
         for hit in final_results:
             # Get ProductId from payload, fallback to point ID if not available
-            product_id = hit.payload.get("ProductId")
+            payload = hit.payload if hit.payload is not None else {}
+            product_id = payload.get("ProductId")
             if not product_id:
                 product_id = str(hit.id)
             product_ids.append(str(product_id))
