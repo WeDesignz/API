@@ -935,16 +935,16 @@ class PDFDownloadRequestSerializer(serializers.Serializer):
         help_text="Whether to use subscription's mock PDF download (only for free downloads)"
     )
     customer_name = serializers.CharField(
-        required=False,
-        allow_blank=True,
+        required=True,
+        allow_blank=False,
         max_length=255,
-        help_text="Customer name for mock PDF"
+        help_text="Customer name for mock PDF (required for every download)"
     )
     customer_mobile = serializers.CharField(
-        required=False,
-        allow_blank=True,
+        required=True,
+        allow_blank=False,
         max_length=20,
-        help_text="Customer mobile number for mock PDF"
+        help_text="Customer mobile number for mock PDF (required for every download)"
     )
     
     def validate_download_type(self, value):

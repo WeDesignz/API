@@ -233,9 +233,10 @@ class PDFDownload(models.Model):
     price_per_design = models.DecimalField(max_digits=10, decimal_places=2, default=2.00)
     total_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
     
-    # Customer information for mock PDF
+    # Customer information for mock PDF (stored per download; same user can use different name/number each time)
     customer_name = models.CharField(max_length=255, blank=True, null=True, help_text="Customer name for mock PDF")
     customer_mobile = models.CharField(max_length=20, blank=True, null=True, help_text="Customer mobile number for mock PDF")
+    customer_logo = models.ImageField(upload_to='pdf_logos/%Y/%m/', blank=True, null=True, help_text="Optional logo for PDF; if not set, WeDesignz default logo is used")
     
     # Payment information (for paid downloads)
     razorpay_payment = models.ForeignKey('Razorpay.RazorpayPayment', on_delete=models.SET_NULL, null=True, blank=True, related_name='pdf_downloads')
