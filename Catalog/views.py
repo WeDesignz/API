@@ -11,6 +11,7 @@ from django.core.paginator import Paginator
 from django.core.files.storage import default_storage
 import random
 import os
+import uuid
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
 from .models import Product, Category, CollectionBundle, Tags, ProductCounter, PDFDownload
@@ -3780,18 +3781,24 @@ def lens_search(request):
     Uses the visual_search package to find similar patterns/products.
     """
     import logging
+    import sys
     logger = logging.getLogger(__name__)
     
     try:
+        # Ensure API project root is on path so "visual_search" resolves to API/visual_search
+        api_root = str(settings.BASE_DIR)
+        if api_root not in sys.path:
+            sys.path.insert(0, api_root)
         from visual_search import search_image
         from PIL import Image
         import base64
         from io import BytesIO
-    except ImportError as e:
-        logger.error(f"Visual search package not available: {e}")
+    except Exception as e:
+        logger.exception("Visual search not available: %s", e)
         return Response({
             'error': 'Visual search feature is not available',
-            'success': False
+            'success': False,
+            'details': str(e) if getattr(settings, 'DEBUG', False) else None,
         }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
     
     if 'image' not in request.FILES:
@@ -3820,9 +3827,23 @@ def lens_search(request):
                 'success': False
             }, status=status.HTTP_400_BAD_REQUEST)
         
-        # Load image with PIL
+        # Save uploaded image to media: guests -> media/search/guests/<date>, authenticated -> media/<user_id>/search/<date>
+        date_str = timezone.now().strftime('%Y-%m-%d')
+        ext = os.path.splitext(file_name)[1] or '.jpg'
+        unique_name = f"{uuid.uuid4().hex}{ext}"
+        if request.user.is_authenticated:
+            save_dir = os.path.join(settings.MEDIA_ROOT, str(request.user.id), 'search', date_str)
+        else:
+            save_dir = os.path.join(settings.MEDIA_ROOT, 'search', 'guests', date_str)
+        os.makedirs(save_dir, exist_ok=True)
+        save_path = os.path.join(save_dir, unique_name)
+        with open(save_path, 'wb') as f:
+            for chunk in image_file.chunks():
+                f.write(chunk)
+        
+        # Load image with PIL (from saved path so upload is already persisted)
         try:
-            img = Image.open(image_file)
+            img = Image.open(save_path)
             # Convert to RGB if needed (handles RGBA, P, etc.)
             img = img.convert('RGB')
         except Exception as e:
