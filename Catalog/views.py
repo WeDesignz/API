@@ -2742,13 +2742,28 @@ def create_pdf_download_request(request):
     """
     Create a PDF download request (free or paid).
     Handles both specific product selection and search results.
-    Now supports using subscription's mock PDF downloads.
+    Name and number are required for every download; optional logo can be sent via multipart.
     """
     from Plans.models import Subscription
     import logging
+    import json
     logger = logging.getLogger(__name__)
     
-    serializer = PDFDownloadRequestSerializer(data=request.data, context={'request': request})
+    # Accept JSON or multipart (multipart when frontend sends logo file)
+    if request.content_type and 'multipart/form-data' in request.content_type:
+        data_str = request.POST.get('data')
+        if not data_str:
+            return Response({'error': 'Missing "data" field in form.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            data = json.loads(data_str)
+        except json.JSONDecodeError as e:
+            return Response({'error': f'Invalid JSON in data: {e}'}, status=status.HTTP_400_BAD_REQUEST)
+        logo_file = request.FILES.get('customer_logo')
+    else:
+        data = request.data
+        logo_file = None
+    
+    serializer = PDFDownloadRequestSerializer(data=data, context={'request': request})
     
     if not serializer.is_valid():
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -2768,15 +2783,10 @@ def create_pdf_download_request(request):
     # Validate total_pages based on download type
     # Get free design count from first value of PAID_PDF_DESIGNS_OPTIONS
     free_designs_count = settings.PAID_PDF_DESIGNS_OPTIONS[0] if settings.PAID_PDF_DESIGNS_OPTIONS else 50
+    paid_options = settings.PAID_PDF_DESIGNS_OPTIONS or [50]
     
     if data['download_type'] == 'free':
-        # Free downloads (both regular and subscription) must use first value of PAID_PDF_DESIGNS_OPTIONS
-        if data['total_pages'] != free_designs_count:
-            return Response({
-                'error': f'Free PDF downloads must contain exactly {free_designs_count} designs.'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
-        # If user wants to use subscription mock PDF
+        # If user wants to use subscription mock PDF (must use first option only)
         if use_subscription_mock_pdf:
             if not active_subscription:
                 return Response({
@@ -2797,6 +2807,26 @@ def create_pdf_download_request(request):
                 return Response({
                     'error': f'You have used {free_downloads_this_month} of {limit} free PDF downloads this month. Please use paid download or your subscription mock PDF downloads if available.'
                 }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Validate total_pages for free: subscription = first option only; regular free with limit >= 999 = any option
+        if use_subscription_mock_pdf:
+            if data['total_pages'] != free_designs_count:
+                return Response({
+                    'error': f'Subscription mock PDF must contain exactly {free_designs_count} designs.'
+                }, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            limit = BusinessConfig.get_free_mock_pdf_downloads_no_plan_per_month()
+            if limit >= 999:
+                # Limited-time unlimited: allow any configured PDF size for free
+                if data['total_pages'] not in paid_options:
+                    return Response({
+                        'error': f'PDF must use one of: {", ".join(map(str, paid_options))} designs.'
+                    }, status=status.HTTP_400_BAD_REQUEST)
+            else:
+                if data['total_pages'] != free_designs_count:
+                    return Response({
+                        'error': f'Free PDF downloads must contain exactly {free_designs_count} designs.'
+                    }, status=status.HTTP_400_BAD_REQUEST)
     else:
         # Paid downloads must use one of the configured options
         if data['total_pages'] not in settings.PAID_PDF_DESIGNS_OPTIONS:
@@ -2815,9 +2845,16 @@ def create_pdf_download_request(request):
             status='pending',
             products_count=0,
             included_products=[],
-            customer_name=data.get('customer_name', ''),
-            customer_mobile=data.get('customer_mobile', '')
+            customer_name=data.get('customer_name') or '',
+            customer_mobile=data.get('customer_mobile') or ''
         )
+        
+        # Save optional logo (if sent via multipart)
+        if logo_file:
+            name = logo_file.name or 'logo'
+            if not os.path.splitext(name)[1].lower() in ('.png', '.jpg', '.jpeg', '.gif', '.webp'):
+                name = name + '.png'
+            pdf_download.customer_logo.save(name, logo_file, save=True)
         
         # Attach user via relation system
         pdf_download.attach_user(user)
