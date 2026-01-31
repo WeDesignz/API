@@ -46,10 +46,18 @@ from Orders.serializers import (
 )
 from django.db.models import Q, Sum, Count
 from django.contrib.auth.models import User
+from django.http import FileResponse
+from django.core.paginator import Paginator
+from datetime import timedelta
+import os
+import re
+import logging
+
 from Profiles.models import DesignerProfile
 from Wallet.models import Wallet, WalletTransaction, WalletWithdrawalRequest
 from Authentication.user_relations import get_user_wallets
 from common.relations import get_related
+from Catalog.models import PDFDownload
 
 
 @swagger_auto_schema(
@@ -8508,3 +8516,138 @@ def permission_group_detail(request, group_id):
             'success': False,
             'error': f'Failed to manage permission group: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@swagger_auto_schema(
+    method='get',
+    operation_summary='List Mock PDF download report (admin)',
+    operation_description='Returns stats (total, today, this week, this month) and paginated list of completed mock PDF downloads. Admin only.',
+    manual_parameters=[
+        openapi.Parameter('page', openapi.IN_QUERY, type=openapi.TYPE_INTEGER, description='Page number'),
+        openapi.Parameter('page_size', openapi.IN_QUERY, type=openapi.TYPE_INTEGER, description='Page size'),
+    ],
+    responses={200: openapi.Response(description='Mock PDF report data'), 403: openapi.Response(description='Admin required')},
+    tags=['CoreAdmin Reports']
+)
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def mock_pdf_reports_list(request):
+    """List mock PDF downloads for admin report: stats + paginated list. Uses existing PDFDownload model only."""
+    try:
+        admin_profile = request.user.admin_profile
+    except AdminUserProfile.DoesNotExist:
+        return Response({'error': 'Admin access required'}, status=status.HTTP_403_FORBIDDEN)
+
+    now = timezone.now()
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    week_start = now - timedelta(days=7)
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+    base_qs = PDFDownload.objects.filter(status='completed')
+    stats = {
+        'total': base_qs.count(),
+        'today': base_qs.filter(created_at__gte=today_start).count(),
+        'this_week': base_qs.filter(created_at__gte=week_start).count(),
+        'this_month': base_qs.filter(created_at__gte=month_start).count(),
+    }
+
+    page = int(request.GET.get('page', 1))
+    page_size = min(int(request.GET.get('page_size', 20)), 100)
+    paginator = Paginator(base_qs.order_by('-created_at'), page_size)
+    page_obj = paginator.get_page(page)
+
+    def build_logo_url(pdf_download, req):
+        if pdf_download.customer_logo:
+            try:
+                return req.build_absolute_uri(pdf_download.customer_logo.url)
+            except Exception:
+                return None
+        return None
+
+    items = []
+    for pdf in page_obj.object_list:
+        items.append({
+            'id': pdf.id,
+            'customer_name': pdf.customer_name or '',
+            'customer_mobile': pdf.customer_mobile or '',
+            'customer_logo_url': build_logo_url(pdf, request),
+            'number_of_designs': pdf.products_count or pdf.total_pages or 0,
+            'total_pages': pdf.total_pages,
+            'download_type': pdf.download_type,
+            'status': pdf.status,
+            'created_at': pdf.created_at.isoformat() if pdf.created_at else None,
+            'completed_at': pdf.completed_at.isoformat() if pdf.completed_at else None,
+        })
+
+    return Response({
+        'stats': stats,
+        'downloads': items,
+        'total_count': paginator.count,
+        'total_pages': paginator.num_pages,
+        'current_page': page,
+    })
+
+
+@swagger_auto_schema(
+    method='get',
+    operation_summary='Download Mock PDF file (admin)',
+    operation_description='Download a completed mock PDF file by id. Admin only.',
+    responses={200: openapi.Response(description='PDF file'), 403: openapi.Response(description='Admin required'), 404: openapi.Response(description='Not found')},
+    tags=['CoreAdmin Reports']
+)
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def mock_pdf_download_file(request, download_id):
+    """Allow admin to download any completed mock PDF. Uses existing PDFDownload model and file storage."""
+    try:
+        admin_profile = request.user.admin_profile
+    except AdminUserProfile.DoesNotExist:
+        return Response({'error': 'Admin access required'}, status=status.HTTP_403_FORBIDDEN)
+
+    try:
+        pdf_download = PDFDownload.objects.get(id=download_id)
+    except PDFDownload.DoesNotExist:
+        return Response({'error': 'PDF download not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    if pdf_download.status != 'completed':
+        return Response({'error': f'PDF is not ready. Status: {pdf_download.status}'}, status=status.HTTP_400_BAD_REQUEST)
+
+    file_path = None
+    if pdf_download.pdf_file_path:
+        file_path = os.path.join(settings.MEDIA_ROOT, pdf_download.pdf_file_path)
+    if not file_path or not os.path.exists(file_path):
+        user = pdf_download.get_user()
+        if user:
+            alt = os.path.join(settings.MEDIA_ROOT, str(user.id), 'pdfs', f'pdf_download_{download_id}.pdf')
+            if os.path.exists(alt):
+                file_path = alt
+        if not file_path or not os.path.exists(file_path):
+            alt = os.path.join(settings.MEDIA_ROOT, 'pdfs', f'pdf_download_{download_id}.pdf')
+            if os.path.exists(alt):
+                file_path = alt
+        if not file_path or not os.path.exists(file_path):
+            return Response({'error': 'PDF file not available'}, status=status.HTTP_404_NOT_FOUND)
+
+    customer_name = (pdf_download.customer_name or '').strip()
+    if customer_name:
+        sanitized = re.sub(r'[^a-zA-Z0-9\s-]', '', customer_name)
+        sanitized = re.sub(r'\s+', ' ', sanitized.strip())[:50]
+        filename = f'{sanitized}.pdf'
+    else:
+        filename = f'designs_{download_id}.pdf'
+
+    try:
+        response = FileResponse(
+            open(file_path, 'rb'),
+            as_attachment=True,
+            filename=filename,
+            content_type='application/pdf'
+        )
+        from urllib.parse import quote
+        response['Content-Disposition'] = f'attachment; filename="{filename}"; filename*=UTF-8\'\'{quote(filename)}'
+        response['X-Filename'] = filename
+        return response
+    except Exception as e:
+        logger = logging.getLogger(__name__)
+        logger.error(f"Error serving admin PDF download {download_id}: {str(e)}", exc_info=True)
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
