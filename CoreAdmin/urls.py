@@ -110,4 +110,8 @@ urlpatterns = [
     path('permission-groups/', views.permission_groups_list, name='permission_groups_list'),
     path('permission-groups/create/', views.permission_group_create, name='permission_group_create'),
     path('permission-groups/<int:group_id>/', views.permission_group_detail, name='permission_group_detail'),
+
+    # Reports - Mock PDF (admin)
+    path('mock-pdf-reports/', views.mock_pdf_reports_list, name='mock_pdf_reports_list'),
+    path('mock-pdf-reports/<int:download_id>/download/', views.mock_pdf_download_file, name='mock_pdf_download_file'),
 ]
