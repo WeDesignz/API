@@ -1,10 +1,12 @@
 from celery import shared_task
 from django.db import transaction
 from django.utils import timezone
+from django.core.files.storage import default_storage
 from common.relations import attach_relation
 from common.avif_converter import create_avif_from_media_file
 import logging
 import os
+import tempfile
 
 from Catalog.models import Product, Category, Tags, PDFDownload
 from MediaFiles.models import Media
@@ -362,38 +364,74 @@ def generate_pdf_task(self, pdf_download_id):
                     logger.warning(f'Error checking media {getattr(media, "id", "unknown")} for product {product.id}: {e}')
                     continue
             
-            # If no mockup found, skip this product entirely (don't include in PDF)
+            # If no mockup found, use first available supported image so every design gets a page
             if not mockup_media or not hasattr(mockup_media, 'file') or not mockup_media.file:
-                logger.warning(f'Skipping product {product.id} ({product.title}) - no mockup image found')
-                skipped_products.append(product.id)
-                continue  # Skip this product entirely
+                for media in media_list:
+                    try:
+                        if not hasattr(media, 'file') or not media.file:
+                            continue
+                        file_name = media.file.name if hasattr(media.file, 'name') else ''
+                        if not file_name:
+                            continue
+                        file_name_lower = file_name.lower()
+                        file_ext = os.path.splitext(file_name_lower)[1]
+                        if file_ext in SUPPORTED_IMAGE_EXTENSIONS:
+                            mockup_media = media
+                            logger.info(f'Using first available image for product {product.id} (no mockup): {file_name}')
+                            break
+                    except Exception:
+                        continue
+                if not mockup_media or not hasattr(mockup_media, 'file') or not mockup_media.file:
+                    logger.warning(f'Skipping product {product.id} ({product.title}) - no image found')
+                    skipped_products.append(product.id)
+                    continue
             
-            # Get image path for the mockup
+            # Get image path for the mockup (or fallback image) - use local path or copy from storage to temp file
             image_path = None
+            temp_files_to_cleanup = getattr(self, '_pdf_temp_files', None)
+            if temp_files_to_cleanup is None:
+                self._pdf_temp_files = []
+                temp_files_to_cleanup = self._pdf_temp_files
             try:
-                # Get absolute path to the media file
+                # Try absolute path first (local filesystem)
                 if hasattr(mockup_media.file, 'path'):
                     image_path = mockup_media.file.path
                 else:
-                    # Fallback: construct path from file name
                     image_path = os.path.join(settings.MEDIA_ROOT, mockup_media.file.name)
                 
-                # Verify file exists and is a supported format
-                if not os.path.exists(image_path):
-                    logger.warning(f'Mockup image not found at {image_path} for product {product.id}')
+                if not os.path.exists(image_path) and mockup_media.file.name:
+                    # File may be on remote storage (S3 etc.) - copy to temp file so reportlab can read it
+                    try:
+                        if default_storage.exists(mockup_media.file.name):
+                            with default_storage.open(mockup_media.file.name, 'rb') as src:
+                                suffix = os.path.splitext(mockup_media.file.name)[1].lower()
+                                if suffix not in SUPPORTED_IMAGE_EXTENSIONS:
+                                    suffix = '.jpg'
+                                fd, image_path = tempfile.mkstemp(suffix=suffix, prefix='pdf_img_')
+                                os.close(fd)
+                                with open(image_path, 'wb') as dst:
+                                    dst.write(src.read())
+                                temp_files_to_cleanup.append(image_path)
+                                logger.info(f'Copied media to temp file for product {product.id}: {image_path}')
+                        else:
+                            image_path = None
+                    except Exception as e:
+                        logger.warning(f'Could not open storage file for product {product.id}: {e}')
+                        image_path = None
+                
+                if not image_path or not os.path.exists(image_path):
+                    logger.warning(f'Image not found for product {product.id} at {getattr(image_path, "path", image_path)}')
                     skipped_products.append(product.id)
-                    continue  # Skip this product
-                else:
-                    # Verify it's a supported image format
-                    file_ext = os.path.splitext(image_path.lower())[1]
-                    if file_ext not in SUPPORTED_IMAGE_EXTENSIONS:
-                        logger.warning(f'Mockup image has unsupported format {file_ext} for product {product.id}: {image_path}')
-                        skipped_products.append(product.id)
-                        continue  # Skip this product
+                    continue
+                file_ext = os.path.splitext(image_path.lower())[1]
+                if file_ext not in SUPPORTED_IMAGE_EXTENSIONS:
+                    logger.warning(f'Image has unsupported format {file_ext} for product {product.id}')
+                    skipped_products.append(product.id)
+                    continue
             except Exception as e:
                 logger.warning(f'Error getting image path for product {product.id}: {e}')
                 skipped_products.append(product.id)
-                continue  # Skip this product
+                continue
             
             # Only add products with valid mockup images
             # Maintain original position index for sequence tracking
@@ -410,12 +448,18 @@ def generate_pdf_task(self, pdf_download_id):
         
         # Log skipped products
         if skipped_products:
-            logger.warning(f'Skipped {len(skipped_products)} products without mockup images: {skipped_products}')
+            logger.warning(f'Skipped {len(skipped_products)} products without images: {skipped_products}')
+        
+        if not included_products:
+            raise ValueError(
+                f'No products with usable images for PDF. All {len(products)} product(s) were skipped. '
+                'Ensure each design has at least one image (JPG, PNG, etc.).'
+            )
         
         pdf_download.included_products = included_products
         pdf_download.products_count = len(included_products)  # Use actual count of included products
         
-        # Generate PDF with reportlab
+        # Generate PDF with reportlab - one page per design
         try:
             logger.info(f'Creating PDF file at: {pdf_file_path}')
             
@@ -431,280 +475,103 @@ def generate_pdf_task(self, pdf_download_id):
             customer_name = pdf_download.customer_name or ''
             customer_mobile = pdf_download.customer_mobile or ''
             
-            # Log customer information for debugging
-            logger.info(f'PDF generation for download {pdf_download_id}: customer_name="{customer_name}", customer_mobile="{customer_mobile}"')
+            # Resolve logo path: customer logo or default WeDesignz logo (no boxes around any text)
+            logo_path = None
+            if pdf_download.customer_logo and hasattr(pdf_download.customer_logo, 'path') and pdf_download.customer_logo.path:
+                if os.path.exists(pdf_download.customer_logo.path):
+                    logo_path = pdf_download.customer_logo.path
+            if not logo_path:
+                # Default WeDesignz logo: set PDF_DEFAULT_LOGO_PATH in settings, or place wedesignz_logo.png in media/defaults/
+                default_logo = getattr(settings, 'PDF_DEFAULT_LOGO_PATH', None)
+                if default_logo and os.path.exists(default_logo):
+                    logo_path = default_logo
+                else:
+                    alt_default = os.path.join(settings.MEDIA_ROOT, 'defaults', 'wedesignz_logo.png')
+                    if os.path.exists(alt_default):
+                        logo_path = alt_default
+            
+            logger.info(f'PDF generation for download {pdf_download_id}: customer_name="{customer_name}", customer_mobile="{customer_mobile}", logo={bool(logo_path)}')
             
             for idx, product_info in enumerate(included_products, 1):
-                # Add a new page for each product
                 if idx > 1:
                     c.showPage()
                 
                 product_id = product_info['product_id']
                 product_title = product_info['title']
-                product_number = product_info.get('product_number', f"WD{product_id}")  # Get product number from dict
+                product_number = product_info.get('product_number', f"WD{product_id}")
                 image_path = product_info['image_path']
+                
+                # --- Layout: top-left logo, top-center name+number (no boxes), center design, bottom design number ---
+                page_w, page_h = page_width, page_height
+                m = margin
+                
+                # 1) Top-left: logo (optional; no box)
+                logo_size = 56
+                if logo_path and os.path.exists(logo_path):
+                    try:
+                        c.drawImage(logo_path, m, page_h - m - logo_size, width=logo_size, height=logo_size, preserveAspectRatio=True)
+                    except Exception as e:
+                        logger.warning(f'Could not draw logo for page {idx}: {e}')
+                
+                # 2) Top-center: name, then number below (plain text, no boxes)
+                name_text = customer_name or ''
+                number_text = customer_mobile or ''
+                c.setFillColorRGB(0.2, 0.2, 0.25)
+                c.setFont("Helvetica-Bold", 14)
+                name_width = c.stringWidth(name_text or ' ', "Helvetica-Bold", 14)
+                center_x = page_w / 2
+                c.drawString(center_x - name_width / 2, page_h - m - 28, name_text[:60] or ' ')
+                c.setFont("Helvetica", 12)
+                num_width = c.stringWidth(number_text or ' ', "Helvetica", 12)
+                c.drawString(center_x - num_width / 2, page_h - m - 46, number_text[:20] or ' ')
+                
+                # 3) Bottom: design number (plain text, no box)
+                c.setFont("Helvetica", 11)
+                c.setFillColorRGB(0.35, 0.35, 0.4)
+                c.drawString(m, m + 8, f"Design: {product_number}")
+                
+                # 4) Center: design image (with margins for header and footer)
+                header_used = 70
+                footer_used = 36
+                available_width = page_w - (2 * m)
+                available_height = page_h - (2 * m) - header_used - footer_used
                 
                 if image_path and os.path.exists(image_path):
                     try:
-                        # Open and get image dimensions
                         img = Image.open(image_path)
-                        img_width, img_height = img.size
-                        
-                        # Calculate scaling to fit page (with margins)
-                        # Reserve space at top for header (60 points - compact three boxes)
-                        available_width = page_width - (2 * margin)
-                        available_height = page_height - (2 * margin) - 60
-                        
-                        # Calculate scale to fit image within available space
-                        scale_x = available_width / img_width
-                        scale_y = available_height / img_height
+                        iw, ih = img.size
+                        scale_x = available_width / iw
+                        scale_y = available_height / ih
                         scale = min(scale_x, scale_y)
-                        
-                        # Calculate centered position for image (below header)
-                        scaled_width = img_width * scale
-                        scaled_height = img_height * scale
-                        x = (page_width - scaled_width) / 2
-                        y = (page_height - scaled_height) / 2 - 30  # Offset down to make room for compact header
-                        
-                        # Draw compact header with 3 boxes in horizontal line
-                        header_height = 55  # Compact height
-                        header_y = page_height - margin - header_height
-                        header_rect_width = page_width - (2 * margin)
-                        
-                        # Calculate box dimensions
-                        box_spacing = 10  # Space between boxes
-                        box_width = (header_rect_width - (2 * box_spacing)) / 3  # Three equal boxes
-                        box_height = header_height - 10  # Slightly smaller than header
-                        box_y = header_y + 5  # Small margin from top
-                        
-                        # Box 1 - For / Customer Name
-                        box1_x = margin + 10
-                        c.setFillColorRGB(1, 1, 1)  # White background for box
-                        c.setStrokeColorRGB(0.85, 0.85, 0.9)
-                        c.setLineWidth(0.5)
-                        c.roundRect(box1_x, box_y, box_width, box_height, 4, fill=1, stroke=1)
-                        
-                        # Label
-                        c.setFillColorRGB(0.5, 0.5, 0.55)
-                        c.setFont("Helvetica", 9)
-                        c.drawString(box1_x + 8, box_y + box_height - 12, "For")
-                        
-                        # Separator line inside box
-                        c.setStrokeColorRGB(0.9, 0.9, 0.95)
-                        c.setLineWidth(0.3)
-                        c.line(box1_x + 6, box_y + box_height - 15, box1_x + box_width - 6, box_y + box_height - 15)
-                        
-                        # Value
-                        c.setFillColorRGB(0.2, 0.2, 0.25)
-                        c.setFont("Helvetica-Bold", 12)
-                        if customer_name:
-                            name_text = customer_name
-                            # Truncate if too long
-                            name_width = c.stringWidth(name_text, "Helvetica-Bold", 12)
-                            max_name_width = box_width - 16
-                            if name_width > max_name_width:
-                                char_width = name_width / len(name_text)
-                                max_chars = int(max_name_width / char_width) - 3
-                                name_text = name_text[:max_chars] + "..."
-                        else:
-                            name_text = "[Not Provided]"
-                        c.drawString(box1_x + 8, box_y + 8, name_text)
-                        
-                        # Box 2 - Contact / Mobile Number
-                        box2_x = box1_x + box_width + box_spacing
-                        c.setFillColorRGB(1, 1, 1)
-                        c.roundRect(box2_x, box_y, box_width, box_height, 4, fill=1, stroke=1)
-                        
-                        # Label
-                        c.setFillColorRGB(0.5, 0.5, 0.55)
-                        c.setFont("Helvetica", 9)
-                        c.drawString(box2_x + 8, box_y + box_height - 12, "Contact")
-                        
-                        # Separator line inside box
-                        c.setStrokeColorRGB(0.9, 0.9, 0.95)
-                        c.setLineWidth(0.3)
-                        c.line(box2_x + 6, box_y + box_height - 15, box2_x + box_width - 6, box_y + box_height - 15)
-                        
-                        # Value
-                        c.setFillColorRGB(0.2, 0.2, 0.25)
-                        c.setFont("Helvetica-Bold", 12)
-                        if customer_mobile:
-                            contact_text = customer_mobile
-                        else:
-                            contact_text = "[Not Provided]"
-                        c.drawString(box2_x + 8, box_y + 8, contact_text)
-                        
-                        # Box 3 - Design ID
-                        box3_x = box2_x + box_width + box_spacing
-                        c.setFillColorRGB(1, 1, 1)
-                        c.roundRect(box3_x, box_y, box_width, box_height, 4, fill=1, stroke=1)
-                        
-                        # Label
-                        c.setFillColorRGB(0.5, 0.5, 0.55)
-                        c.setFont("Helvetica", 9)
-                        c.drawString(box3_x + 8, box_y + box_height - 12, "Design ID")
-                        
-                        # Separator line inside box
-                        c.setStrokeColorRGB(0.9, 0.9, 0.95)
-                        c.setLineWidth(0.3)
-                        c.line(box3_x + 6, box_y + box_height - 15, box3_x + box_width - 6, box_y + box_height - 15)
-                        
-                        # Value
-                        c.setFillColorRGB(0.2, 0.2, 0.25)
-                        c.setFont("Helvetica-Bold", 12)
-                        design_id_text = product_number
-                        c.drawString(box3_x + 8, box_y + 8, design_id_text)
-                        
-                        # Draw image below header
-                        c.drawImage(image_path, x, y, width=scaled_width, height=scaled_height, preserveAspectRatio=True)
-                        logger.info(f'Added metadata and image for product {product_id} on page {idx}')
+                        sw = iw * scale
+                        sh = ih * scale
+                        img_x = (page_w - sw) / 2
+                        img_y = m + footer_used + (available_height - sh) / 2
+                        c.drawImage(image_path, img_x, img_y, width=sw, height=sh, preserveAspectRatio=True)
+                        logger.info(f'Added image for product {product_id} on page {idx}')
                     except Exception as e:
                         logger.error(f'Error adding image for product {product_id}: {e}', exc_info=True)
-                        # Draw header even if image fails
-                        header_height = 55
-                        header_y = page_height - margin - header_height
-                        header_rect_width = page_width - (2 * margin)
-                        box_spacing = 10
-                        box_width = (header_rect_width - (2 * box_spacing)) / 3
-                        box_height = header_height - 10
-                        box_y = header_y + 5
-                        
-                        # Box 1 - For
-                        box1_x = margin + 10
-                        c.setFillColorRGB(1, 1, 1)
-                        c.setStrokeColorRGB(0.85, 0.85, 0.9)
-                        c.setLineWidth(0.5)
-                        c.roundRect(box1_x, box_y, box_width, box_height, 4, fill=1, stroke=1)
+                        c.setFont("Helvetica", 12)
                         c.setFillColorRGB(0.5, 0.5, 0.55)
-                        c.setFont("Helvetica", 9)
-                        c.drawString(box1_x + 8, box_y + box_height - 12, "For")
-                        c.setStrokeColorRGB(0.9, 0.9, 0.95)
-                        c.setLineWidth(0.3)
-                        c.line(box1_x + 6, box_y + box_height - 15, box1_x + box_width - 6, box_y + box_height - 15)
-                        c.setFillColorRGB(0.2, 0.2, 0.25)
-                        c.setFont("Helvetica-Bold", 12)
-                        if customer_name:
-                            name_text = customer_name
-                            name_width = c.stringWidth(name_text, "Helvetica-Bold", 12)
-                            max_name_width = box_width - 16
-                            if name_width > max_name_width:
-                                char_width = name_width / len(name_text)
-                                max_chars = int(max_name_width / char_width) - 3
-                                name_text = name_text[:max_chars] + "..."
-                        else:
-                            name_text = "[Not Provided]"
-                        c.drawString(box1_x + 8, box_y + 8, name_text)
-                        
-                        # Box 2 - Contact
-                        box2_x = box1_x + box_width + box_spacing
-                        c.setFillColorRGB(1, 1, 1)
-                        c.roundRect(box2_x, box_y, box_width, box_height, 4, fill=1, stroke=1)
-                        c.setFillColorRGB(0.5, 0.5, 0.55)
-                        c.setFont("Helvetica", 9)
-                        c.drawString(box2_x + 8, box_y + box_height - 12, "Contact")
-                        c.setStrokeColorRGB(0.9, 0.9, 0.95)
-                        c.setLineWidth(0.3)
-                        c.line(box2_x + 6, box_y + box_height - 15, box2_x + box_width - 6, box_y + box_height - 15)
-                        c.setFillColorRGB(0.2, 0.2, 0.25)
-                        c.setFont("Helvetica-Bold", 12)
-                        if customer_mobile:
-                            contact_text = customer_mobile
-                        else:
-                            contact_text = "[Not Provided]"
-                        c.drawString(box2_x + 8, box_y + 8, contact_text)
-                        
-                        # Box 3 - Design ID
-                        box3_x = box2_x + box_width + box_spacing
-                        c.setFillColorRGB(1, 1, 1)
-                        c.roundRect(box3_x, box_y, box_width, box_height, 4, fill=1, stroke=1)
-                        c.setFillColorRGB(0.5, 0.5, 0.55)
-                        c.setFont("Helvetica", 9)
-                        c.drawString(box3_x + 8, box_y + box_height - 12, "Design ID")
-                        c.setStrokeColorRGB(0.9, 0.9, 0.95)
-                        c.setLineWidth(0.3)
-                        c.line(box3_x + 6, box_y + box_height - 15, box3_x + box_width - 6, box_y + box_height - 15)
-                        c.setFillColorRGB(0.2, 0.2, 0.25)
-                        c.setFont("Helvetica-Bold", 12)
-                        design_id_text = product_number
-                        c.drawString(box3_x + 8, box_y + 8, design_id_text)
-                        
-                        c.setFont("Helvetica", 16)
-                        c.drawString(margin, page_height - margin - 100, "Image not available")
+                        c.drawString(center_x - 60, page_h / 2 - 20, "Image not available")
                 else:
-                    # Handle missing image case with header
-                    logger.warning(f'No image path for product {product_id} in included_products')
-                    header_height = 55
-                    header_y = page_height - margin - header_height
-                    header_rect_width = page_width - (2 * margin)
-                    box_spacing = 10
-                    box_width = (header_rect_width - (2 * box_spacing)) / 3
-                    box_height = header_height - 10
-                    box_y = header_y + 5
-                    
-                    # Box 1 - For
-                    box1_x = margin + 10
-                    c.setFillColorRGB(1, 1, 1)
-                    c.setStrokeColorRGB(0.85, 0.85, 0.9)
-                    c.setLineWidth(0.5)
-                    c.roundRect(box1_x, box_y, box_width, box_height, 4, fill=1, stroke=1)
+                    c.setFont("Helvetica", 12)
                     c.setFillColorRGB(0.5, 0.5, 0.55)
-                    c.setFont("Helvetica", 9)
-                    c.drawString(box1_x + 8, box_y + box_height - 12, "For")
-                    c.setStrokeColorRGB(0.9, 0.9, 0.95)
-                    c.setLineWidth(0.3)
-                    c.line(box1_x + 6, box_y + box_height - 15, box1_x + box_width - 6, box_y + box_height - 15)
-                    c.setFillColorRGB(0.2, 0.2, 0.25)
-                    c.setFont("Helvetica-Bold", 12)
-                    if customer_name:
-                        name_text = customer_name
-                        name_width = c.stringWidth(name_text, "Helvetica-Bold", 12)
-                        max_name_width = box_width - 16
-                        if name_width > max_name_width:
-                            char_width = name_width / len(name_text)
-                            max_chars = int(max_name_width / char_width) - 3
-                            name_text = name_text[:max_chars] + "..."
-                    else:
-                        name_text = "[Not Provided]"
-                    c.drawString(box1_x + 8, box_y + 8, name_text)
-                    
-                    # Box 2 - Contact
-                    box2_x = box1_x + box_width + box_spacing
-                    c.setFillColorRGB(1, 1, 1)
-                    c.roundRect(box2_x, box_y, box_width, box_height, 4, fill=1, stroke=1)
-                    c.setFillColorRGB(0.5, 0.5, 0.55)
-                    c.setFont("Helvetica", 9)
-                    c.drawString(box2_x + 8, box_y + box_height - 12, "Contact")
-                    c.setStrokeColorRGB(0.9, 0.9, 0.95)
-                    c.setLineWidth(0.3)
-                    c.line(box2_x + 6, box_y + box_height - 15, box2_x + box_width - 6, box_y + box_height - 15)
-                    c.setFillColorRGB(0.2, 0.2, 0.25)
-                    c.setFont("Helvetica-Bold", 12)
-                    if customer_mobile:
-                        contact_text = customer_mobile
-                    else:
-                        contact_text = "[Not Provided]"
-                    c.drawString(box2_x + 8, box_y + 8, contact_text)
-                    
-                    # Box 3 - Design ID
-                    box3_x = box2_x + box_width + box_spacing
-                    c.setFillColorRGB(1, 1, 1)
-                    c.roundRect(box3_x, box_y, box_width, box_height, 4, fill=1, stroke=1)
-                    c.setFillColorRGB(0.5, 0.5, 0.55)
-                    c.setFont("Helvetica", 9)
-                    c.drawString(box3_x + 8, box_y + box_height - 12, "Design ID")
-                    c.setStrokeColorRGB(0.9, 0.9, 0.95)
-                    c.setLineWidth(0.3)
-                    c.line(box3_x + 6, box_y + box_height - 15, box3_x + box_width - 6, box_y + box_height - 15)
-                    c.setFillColorRGB(0.2, 0.2, 0.25)
-                    c.setFont("Helvetica-Bold", 12)
-                    design_id_text = product_number
-                    c.drawString(box3_x + 8, box_y + 8, design_id_text)
-                    
-                    c.setFont("Helvetica", 16)
-                    c.drawString(margin, page_height - margin - 100, "No mockup image available")
+                    c.drawString(center_x - 60, page_h / 2 - 20, "Image not available")
             
-            # Save PDF
+            # Save PDF (we already validated included_products is non-empty before this try block)
             c.save()
+            
+            # Clean up any temp files we created for remote storage images
+            temp_files_to_cleanup = getattr(self, '_pdf_temp_files', [])
+            for tmp in temp_files_to_cleanup:
+                try:
+                    if tmp and os.path.exists(tmp):
+                        os.unlink(tmp)
+                except Exception as e:
+                    logger.warning(f'Could not remove temp file {tmp}: {e}')
+            if hasattr(self, '_pdf_temp_files'):
+                self._pdf_temp_files = []
             
             logger.info(f'PDF file created successfully at {pdf_file_path}')
             
@@ -753,6 +620,16 @@ def generate_pdf_task(self, pdf_download_id):
             logger.info(f'PDF generation completed for download {pdf_download_id}')
         except Exception as e:
             logger.error(f'Error creating PDF file for download {pdf_download_id}: {str(e)}', exc_info=True)
+            # Clean up temp files on failure
+            temp_files_to_cleanup = getattr(self, '_pdf_temp_files', [])
+            for tmp in temp_files_to_cleanup:
+                try:
+                    if tmp and os.path.exists(tmp):
+                        os.unlink(tmp)
+                except Exception:
+                    pass
+            if hasattr(self, '_pdf_temp_files'):
+                self._pdf_temp_files = []
             # Don't mark as completed if file creation failed
             pdf_download.status = 'failed'
             pdf_download.save()
