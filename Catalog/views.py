@@ -3915,9 +3915,21 @@ def lens_search(request):
         }, status=status.HTTP_400_BAD_REQUEST)
     except Exception as e:
         import traceback
-        logger.error(f"Lens search error: {e}\n{traceback.format_exc()}")
+        logger.exception("Lens search error: %s", e)
+        err_msg = str(e).strip()
+        # In production, always include short safe hints for connection/config errors
+        details = None
+        if settings.DEBUG:
+            details = err_msg
+        elif err_msg:
+            err_lower = err_msg.lower()
+            # Allow short, safe messages (e.g. Qdrant connection, timeout, missing collection)
+            if len(err_msg) < 250 and not any(x in err_lower for x in ('traceback', 'file "', 'line ')):
+                details = err_msg
+            elif any(x in err_lower for x in ('connection refused', 'name or service not known', 'timed out', 'nodename nor servname', 'qdrant', 'connection')):
+                details = err_msg[:200] if len(err_msg) > 200 else err_msg
         return Response({
             'error': 'An error occurred while processing your image. Please try again.',
             'success': False,
-            'details': str(e) if settings.DEBUG else None
+            'details': details
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

@@ -98,7 +98,6 @@ class SearchEngine:
                 query_filter=None,
                 with_payload=True,
                 limit=search_limit,
-                search_params=None,
             )
             hits = response.points
             return idx, hits, weight
