@@ -5,7 +5,20 @@ All models are initialized once at import time for optimal performance.
 import torch
 from typing import Optional, Tuple
 from PIL import Image
-from transformers import CLIPModel, CLIPProcessor, BlipForConditionalGeneration, BlipProcessor
+
+# Support both top-level and submodule imports (transformers version / env differences)
+try:
+    from transformers import CLIPModel, CLIPProcessor, BlipForConditionalGeneration, BlipProcessor
+except (ImportError, AttributeError) as e:
+    try:
+        from transformers.models.clip import CLIPModel, CLIPProcessor
+        from transformers.models.blip import BlipForConditionalGeneration, BlipProcessor
+    except (ImportError, AttributeError):
+        raise ImportError(
+            "Visual search requires 'transformers' and 'torch'. "
+            "Install with: pip install transformers torch pillow"
+        ) from e
+
 from qdrant_client import QdrantClient
 
 from visual_search.config import (
