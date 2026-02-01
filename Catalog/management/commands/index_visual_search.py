@@ -8,7 +8,7 @@ Usage:
     python manage.py index_visual_search
     python manage.py index_visual_search --batch-size 50
     python manage.py index_visual_search --dry-run
-    python manage.py index_visual_search --remaining  # only products with is_indexed=False
+    python manage.py index_visual_search --remaining  # skip products already indexed (is_indexed=True)
 """
 
 import sys
@@ -66,7 +66,7 @@ class Command(BaseCommand):
         parser.add_argument(
             '--remaining',
             action='store_true',
-            help='Only index products where is_indexed=False (if you use that flag)',
+            help='Skip products already indexed (only index products with is_indexed=False)',
         )
         parser.add_argument(
             '--verbose',
@@ -161,11 +161,15 @@ class Command(BaseCommand):
                     self.stdout.write(f'Indexing batch {batch_num} ({len(accum)} images)...')
                     try:
                         results = train_images(accum)
+                        indexed_product_numbers = set()
                         for r in results:
                             if r.get('isIndexed'):
                                 success += 1
+                                indexed_product_numbers.add(r.get('ProductId'))
                             else:
                                 failed += 1
+                        if indexed_product_numbers and hasattr(Product, 'is_indexed'):
+                            Product.objects.filter(product_number__in=indexed_product_numbers).update(is_indexed=True)
                     except Exception as e:
                         self.stderr.write(self.style.ERROR(f'Batch failed: {e}'))
                         failed += len(accum)
@@ -176,11 +180,15 @@ class Command(BaseCommand):
             self.stdout.write(f'Indexing batch {batch_num} ({len(accum)} images)...')
             try:
                 results = train_images(accum)
+                indexed_product_numbers = set()
                 for r in results:
                     if r.get('isIndexed'):
                         success += 1
+                        indexed_product_numbers.add(r.get('ProductId'))
                     else:
                         failed += 1
+                if indexed_product_numbers and hasattr(Product, 'is_indexed'):
+                    Product.objects.filter(product_number__in=indexed_product_numbers).update(is_indexed=True)
             except Exception as e:
                 self.stderr.write(self.style.ERROR(f'Batch failed: {e}'))
                 failed += len(accum)
