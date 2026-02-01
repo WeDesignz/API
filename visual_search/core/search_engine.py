@@ -46,7 +46,38 @@ class SearchEngine:
                 print("[WARN] Garment extraction will be disabled")
         else:
             print("[WARN] OWL-ViT + SAM2 extractor not available. Garment extraction will be disabled")
-    
+
+    def _query_qdrant(self, query_vector: list, limit: int):
+        """
+        Query Qdrant for similar vectors. Uses query_points (modern API);
+        falls back to legacy search() if query_points returns 404 (older Qdrant server).
+        Returns list of hits with .id, .score, .payload.
+        """
+        try:
+            response = self.client.query_points(
+                collection_name=COLLECTION_NAME,
+                query=query_vector,
+                query_filter=None,
+                with_payload=True,
+                limit=limit,
+            )
+            return response.points
+        except Exception as e:
+            err_msg = str(e)
+            if "404" in err_msg or "not found" in err_msg.lower() or "Unexpected Response" in err_msg:
+                try:
+                    hits = self.client.search(
+                        collection_name=COLLECTION_NAME,
+                        query_vector=query_vector,
+                        limit=limit,
+                        with_payload=True,
+                    )
+                    return hits
+                except Exception as fallback_e:
+                    print(f"[WARN] Legacy search fallback failed: {fallback_e}")
+                    raise e
+            raise
+
     def search(
         self,
         image: Image.Image,
@@ -78,6 +109,9 @@ class SearchEngine:
         # Extract pattern regions (70% width × 90% height + additional regions)
         regions_to_search = self._extract_pattern_regions(extracted_image)
         
+        # Ensure collection exists before search (handles lazy init / missing collection)
+        ensure_collection_exists(self.client)
+
         # Encode and search
         all_hits = {}
         hit_scores_by_region = {}
@@ -89,17 +123,10 @@ class SearchEngine:
         # Search limit
         search_limit = max(num_results * 3, num_results + 40)
         
-        # Parallelize Qdrant searches (qdrant_client uses query_points, not search)
+        # Parallelize Qdrant searches; use legacy search() if query_points returns 404 (older Qdrant)
         def search_region(idx: int, query_vector: list, weight: float):
             """Search Qdrant for a single region and return weighted hits."""
-            response = self.client.query_points(
-                collection_name=COLLECTION_NAME,
-                query=query_vector,
-                query_filter=None,
-                with_payload=True,
-                limit=search_limit,
-            )
-            hits = response.points
+            hits = self._query_qdrant(query_vector, search_limit)
             return idx, hits, weight
         
         # Execute searches in parallel
