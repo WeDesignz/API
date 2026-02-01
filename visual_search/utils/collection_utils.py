@@ -23,10 +23,9 @@ def ensure_collection_exists(client: QdrantClient):
             print(f"[INFO] Collection '{COLLECTION_NAME}' already exists")
             return
     except Exception as e:
-        print(f"[INFO] Could not verify collection existence, will attempt to create if needed")
-        pass
+        print(f"[INFO] Could not verify collection existence ({e}), will attempt to create")
     
-    # Create collection with optimized HNSW configuration
+    # Create collection with optimized HNSW configuration (also if get_collections failed, e.g. 404)
     distance = Distance.COSINE if DISTANCE_FUNCTION.lower() == "cosine" else Distance.EUCLID
     
     hnsw_config = HnswConfigDiff(

@@ -3917,14 +3917,19 @@ def lens_search(request):
         import traceback
         logger.exception("Lens search error: %s", e)
         err_msg = str(e).strip()
+        err_lower = err_msg.lower()
         # In production, always include short safe hints for connection/config errors
         details = None
         if settings.DEBUG:
             details = err_msg
         elif err_msg:
-            err_lower = err_msg.lower()
-            # Allow short, safe messages (e.g. Qdrant connection, timeout, missing collection)
-            if len(err_msg) < 250 and not any(x in err_lower for x in ('traceback', 'file "', 'line ')):
+            # Qdrant 404 = collection missing or index not ready
+            if '404' in err_msg or 'not found' in err_lower:
+                details = (
+                    "Visual search index is not ready. "
+                    "Administrator should run: python manage.py index_visual_search"
+                )
+            elif len(err_msg) < 250 and not any(x in err_lower for x in ('traceback', 'file "', 'line ')):
                 details = err_msg
             elif any(x in err_lower for x in ('connection refused', 'name or service not known', 'timed out', 'nodename nor servname', 'qdrant', 'connection')):
                 details = err_msg[:200] if len(err_msg) > 200 else err_msg
