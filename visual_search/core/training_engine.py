@@ -91,8 +91,8 @@ class TrainingEngine:
                 description = None
                 try:
                     description = self.describer.describe(img)
-                except Exception as exc:
-                    print(f"Description generation failed for ProductId {product_id}: {exc}")
+                except Exception:
+                    pass
                 
                 # Create point ID (use UUID string)
                 point_id = str(uuid.uuid4())
@@ -113,8 +113,7 @@ class TrainingEngine:
                     'isIndexed': True
                 })
                 
-            except Exception as exc:
-                print(f"Failed to index image for ProductId {product_id}: {exc}")
+            except Exception:
                 batch_results.append({
                     'ProductId': str(product_id),
                     'isIndexed': False
@@ -134,9 +133,7 @@ class TrainingEngine:
                         )
                     ),
                 )
-                print(f"[INFO] Successfully indexed {len(ids)} images")
-            except Exception as exc:
-                print(f"[ERROR] Failed to upload batch: {exc}")
+            except Exception:
                 # Mark all in batch as failed
                 for result in batch_results:
                     if result['isIndexed']:

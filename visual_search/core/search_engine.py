@@ -40,12 +40,8 @@ class SearchEngine:
         if OWLVIT_SAM_EXTRACTOR_AVAILABLE and OwlViTSAMGarmentExtractor:
             try:
                 self.garment_extractor = OwlViTSAMGarmentExtractor()
-                print("[INFO] Using OWL-ViT + SAM2 for garment extraction")
-            except Exception as exc:
-                print(f"[WARN] OWL-ViT + SAM2 extractor initialization failed: {exc}")
-                print("[WARN] Garment extraction will be disabled")
-        else:
-            print("[WARN] OWL-ViT + SAM2 extractor not available. Garment extraction will be disabled")
+            except Exception:
+                self.garment_extractor = None
 
     def _query_qdrant(self, query_vector: list, limit: int):
         """
@@ -73,8 +69,7 @@ class SearchEngine:
                         with_payload=True,
                     )
                     return hits
-                except Exception as fallback_e:
-                    print(f"[WARN] Legacy search fallback failed: {fallback_e}")
+                except Exception:
                     raise e
             raise
 
@@ -103,8 +98,8 @@ class SearchEngine:
                 extracted_region = self.garment_extractor.extract_region(img, region_type="auto")
                 if extracted_region and extracted_region.size[0] > 50 and extracted_region.size[1] > 50:
                     extracted_image = extracted_region
-            except Exception as exc:
-                print(f"Garment extraction failed: {exc}, using original image")
+            except Exception:
+                pass
         
         # Extract pattern regions (70% width × 90% height + additional regions)
         regions_to_search = self._extract_pattern_regions(extracted_image)

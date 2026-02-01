@@ -17,6 +17,7 @@ urlpatterns = [
     # Search and filters
     path('search/', views.search_and_filter, name='search_and_filter'),
     path('lens-search/', views.lens_search, name='lens_search'),
+    path('lens-search-by-product/', views.lens_search_by_product, name='lens_search_by_product'),
     
     # Product details
     path('products/<int:product_id>/', views.product_detail, name='product_detail'),

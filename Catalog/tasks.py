@@ -650,3 +650,85 @@ def generate_pdf_task(self, pdf_download_id):
             pass
         raise self.retry(exc=e, countdown=60 * (self.request.retries + 1))
 
+
+# Only index PNG for visual search (per design media storage)
+VISUAL_SEARCH_IMAGE_EXTENSIONS = ('.png',)
+
+
+def _set_huggingface_timeout_for_visual_search(timeout_seconds=300):
+    """Set longer HTTP timeout for Hugging Face Hub when loading visual_search models."""
+    try:
+        from huggingface_hub import set_client_factory
+        import httpx
+        set_client_factory(lambda: httpx.Client(timeout=httpx.Timeout(float(timeout_seconds))))
+    except Exception as e:
+        logger.warning("Could not set Hugging Face client timeout for visual search: %s", e)
+
+
+@shared_task(bind=True, name='Catalog.tasks.index_product_visual_search')
+def index_product_visual_search(self, product_id):
+    """
+    Index a single product's PNG images into Qdrant for visual search (async).
+    Called when a design is approved so new designs are searchable without blocking admin.
+    Only PNG images are indexed.
+    """
+    import sys
+    from django.conf import settings
+    from PIL import Image
+    from common.relations import get_related
+    from MediaFiles.models import Media
+
+    try:
+        product = Product.objects.filter(pk=product_id).first()
+        if not product or not product.product_number:
+            logger.warning(f'[index_product_visual_search] Product {product_id} not found or has no product_number')
+            return {'status': 'skipped', 'reason': 'product_not_found'}
+
+        media_root = getattr(settings, 'MEDIA_ROOT', None)
+        if not media_root or not os.path.isdir(media_root):
+            logger.warning(f'[index_product_visual_search] MEDIA_ROOT not set or not a directory')
+            return {'status': 'skipped', 'reason': 'no_media_root'}
+
+        media_list = get_related(product, 'Product:Media', Media).filter(media_type='image')
+        images_data = []
+        for media in media_list:
+            if not media.file:
+                continue
+            ext = os.path.splitext(media.file.name)[1].lower()
+            if ext not in VISUAL_SEARCH_IMAGE_EXTENSIONS:
+                continue
+            path = getattr(media.file, 'path', None) or os.path.join(media_root, media.file.name)
+            if not os.path.isfile(path):
+                continue
+            try:
+                img = Image.open(path)
+                img.load()
+            except Exception as e:
+                logger.warning(f'[index_product_visual_search] Skip open failed product {product_id} {path}: {e}')
+                continue
+            images_data.append({
+                'ProductId': str(product.product_number),
+                'MediaFileId': str(media.id),
+                'image': img,
+            })
+
+        if not images_data:
+            logger.debug(f'[index_product_visual_search] No PNG images for product {product_id}')
+            return {'status': 'skipped', 'reason': 'no_png_images'}
+
+        _set_huggingface_timeout_for_visual_search(300)
+        api_root = str(settings.BASE_DIR)
+        if api_root not in sys.path:
+            sys.path.insert(0, api_root)
+        from visual_search import train_images
+
+        results = train_images(images_data)
+        success_count = sum(1 for r in results if r.get('isIndexed'))
+        if success_count and hasattr(Product, 'is_indexed'):
+            Product.objects.filter(product_number=product.product_number).update(is_indexed=True)
+        logger.info(f'[index_product_visual_search] Product {product_id} ({product.product_number}): indexed {success_count}/{len(images_data)} PNG images')
+        return {'status': 'ok', 'indexed': success_count, 'total': len(images_data)}
+    except Exception as e:
+        logger.exception(f'[index_product_visual_search] Failed for product {product_id}: {e}')
+        return {'status': 'failed', 'error': str(e)}
+

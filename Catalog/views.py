@@ -3946,3 +3946,183 @@ def lens_search(request):
             'success': False,
             'details': details
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@swagger_auto_schema(
+    method='post',
+    operation_summary='Lens Search by Product (Admin)',
+    operation_description='Run visual search using a product\'s PNG image. Used by admin to check if similar designs exist. Returns similar products (excluding the current one).',
+    request_body=openapi.Schema(
+        type=openapi.TYPE_OBJECT,
+        properties={
+            'product_id': openapi.Schema(type=openapi.TYPE_INTEGER, description='Product/design ID'),
+            'num_results': openapi.Schema(type=openapi.TYPE_INTEGER, description='Number of results (default: 10)', default=10)
+        },
+        required=['product_id']
+    ),
+    responses={
+        200: openapi.Response(description='Success - similar products'),
+        400: openapi.Response(description='Bad request - product not found or no PNG'),
+        503: openapi.Response(description='Visual search not available')
+    },
+    tags=['Catalog']
+)
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def lens_search_by_product(request):
+    """
+    Run visual search using a product's PNG file. Used in admin Design Details modal
+    to check if similar designs exist. Sends the design's PNG to visual search and
+    returns top N similar products (excluding the current design).
+    """
+    import logging
+    import sys
+    from io import BytesIO
+    from common.relations import get_related
+    from MediaFiles.models import Media
+
+    logger = logging.getLogger(__name__)
+
+    try:
+        api_root = str(settings.BASE_DIR)
+        if api_root not in sys.path:
+            sys.path.insert(0, api_root)
+        from visual_search import search_image
+        from PIL import Image
+        import base64
+    except Exception as e:
+        logger.exception("Visual search not available: %s", e)
+        err_str = str(e)
+        show_details = (
+            getattr(settings, 'DEBUG', False)
+            or isinstance(e, ImportError)
+            or 'import' in err_str.lower()
+            or 'module' in err_str.lower()
+        )
+        return Response({
+            'error': 'Visual search feature is not available',
+            'success': False,
+            'details': err_str if show_details else None,
+        }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+    product_id = request.data.get('product_id')
+    if product_id is None:
+        return Response({
+            'error': 'product_id is required',
+            'success': False,
+        }, status=status.HTTP_400_BAD_REQUEST)
+    try:
+        product_id = int(product_id)
+    except (TypeError, ValueError):
+        return Response({
+            'error': 'product_id must be an integer',
+            'success': False,
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    num_results = int(request.data.get('num_results', 10))
+    num_results = max(1, min(num_results, 20))
+
+    try:
+        product = Product.objects.filter(pk=product_id).first()
+        if not product or not product.product_number:
+            return Response({
+                'error': 'Design not found',
+                'success': False,
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        media_root = getattr(settings, 'MEDIA_ROOT', None)
+        if not media_root or not os.path.isdir(media_root):
+            return Response({
+                'error': 'Media root not configured',
+                'success': False,
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        media_list = get_related(product, 'Product:Media', Media).filter(media_type='image')
+        img = None
+        for media in media_list:
+            if not media.file:
+                continue
+            ext = os.path.splitext(media.file.name)[1].lower()
+            if ext != '.png':
+                continue
+            path = getattr(media.file, 'path', None) or os.path.join(media_root, media.file.name)
+            if not os.path.isfile(path):
+                continue
+            try:
+                img = Image.open(path)
+                img = img.convert('RGB')
+                break
+            except Exception as e:
+                logger.warning("Skip PNG open failed product %s %s: %s", product_id, path, e)
+                continue
+
+        if img is None:
+            return Response({
+                'error': 'No PNG image found for this design',
+                'success': False,
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Request one extra so we can drop self and still have num_results
+        product_ids, extracted_image = search_image(img, num_results=num_results + 5)
+        current_pn = str(product.product_number)
+        product_ids = [pid for pid in product_ids if pid != current_pn][:num_results]
+
+        if not product_ids:
+            return Response({
+                'success': True,
+                'products': [],
+                'count': 0,
+                'total_matched': 0,
+                'message': 'No similar designs found.',
+            })
+
+        products = Product.objects.filter(
+            product_number__in=product_ids,
+            status='active',
+            visibility_status='show'
+        ).select_related('category', 'created_by')
+        product_dict = {p.product_number: p for p in products}
+        ordered_products = [product_dict[pid] for pid in product_ids if pid in product_dict]
+
+        extracted_image_base64 = None
+        if extracted_image:
+            try:
+                buffered = BytesIO()
+                extracted_image.save(buffered, format="PNG")
+                extracted_image_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
+                extracted_image_base64 = f'data:image/png;base64,{extracted_image_base64}'
+            except Exception as e:
+                logger.warning("Could not encode extracted image: %s", e)
+
+        return Response({
+            'success': True,
+            'products': ProductSerializer(
+                ordered_products,
+                many=True,
+                context={'request': request}
+            ).data,
+            'extracted_image': extracted_image_base64,
+            'count': len(ordered_products),
+            'total_matched': len(product_ids),
+        })
+    except Exception as e:
+        import traceback
+        logger.exception("Lens search by product error: %s", e)
+        err_msg = str(e).strip()
+        details = None
+        if settings.DEBUG:
+            details = err_msg
+        elif err_msg:
+            err_lower = err_msg.lower()
+            if '404' in err_msg or 'not found' in err_lower:
+                details = (
+                    "Visual search index is not ready. "
+                    "Administrator should run: python manage.py index_visual_search"
+                )
+            elif any(x in err_lower for x in ('connection refused', 'qdrant', 'connection')):
+                details = err_msg[:200] if len(err_msg) > 200 else err_msg
+        return Response({
+            'error': 'An error occurred while running visual search.',
+            'success': False,
+            'details': details,
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
