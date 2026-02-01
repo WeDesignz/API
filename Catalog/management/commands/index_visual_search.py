@@ -23,8 +23,8 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Only index raster image files PIL can open; skip .cdr, .eps, etc.
-IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.avif', '.tiff', '.tif')
+# Only index PNG design images (per media storage: designs use .png)
+IMAGE_EXTENSIONS = ('.png',)
 
 
 def _set_huggingface_timeout(timeout_seconds=300):
@@ -115,7 +115,7 @@ class Command(BaseCommand):
                     path = getattr(media.file, 'path', None) or os.path.join(media_root, media.file.name)
                     if os.path.isfile(path):
                         count += 1
-            self.stdout.write(self.style.SUCCESS(f'[DRY RUN] Would index {count} images (raster only) in batches of {batch_size}'))
+            self.stdout.write(self.style.SUCCESS(f'[DRY RUN] Would index {count} images (PNG only) in batches of {batch_size}'))
             return
 
         train_images = get_visual_search()
@@ -133,7 +133,7 @@ class Command(BaseCommand):
                 ext = os.path.splitext(media.file.name)[1].lower()
                 if ext not in IMAGE_EXTENSIONS:
                     if verbose:
-                        self.stdout.write(f'Skip (not raster image): {product.product_number} media {media.id} {media.file.name}')
+                        self.stdout.write(f'Skip (not PNG): {product.product_number} media {media.id} {media.file.name}')
                     continue
                 path = getattr(media.file, 'path', None) or os.path.join(media_root, media.file.name)
                 if not os.path.isfile(path):
