@@ -13,7 +13,9 @@ DESCRIPTION_MODEL = os.environ.get(
 )
 BATCH_SIZE = int(os.environ.get("VISUAL_SEARCH_BATCH_SIZE", "200"))
 
-# Qdrant Configuration - default to local Qdrant; set VISUAL_SEARCH_QDRANT_URL for cloud
+# Qdrant Configuration - default to local Qdrant on same machine as API (e.g. VPS)
+# When API runs on VPS, localhost = VPS, so Qdrant on same VPS is reached at localhost:6333.
+# Do not set VISUAL_SEARCH_QDRANT_URL unless using Qdrant Cloud.
 QDRANT_URL = os.environ.get("VISUAL_SEARCH_QDRANT_URL", "").strip() or None
 QDRANT_API_KEY = os.environ.get("VISUAL_SEARCH_QDRANT_API_KEY", "")
 QDRANT_HOST = os.environ.get("VISUAL_SEARCH_QDRANT_HOST", "localhost")
