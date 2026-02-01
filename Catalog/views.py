@@ -3795,10 +3795,18 @@ def lens_search(request):
         from io import BytesIO
     except Exception as e:
         logger.exception("Visual search not available: %s", e)
+        err_str = str(e)
+        # Show details for import/dependency errors so devs see install hint
+        show_details = (
+            getattr(settings, 'DEBUG', False)
+            or isinstance(e, ImportError)
+            or 'import' in err_str.lower()
+            or 'module' in err_str.lower()
+        )
         return Response({
             'error': 'Visual search feature is not available',
             'success': False,
-            'details': str(e) if getattr(settings, 'DEBUG', False) else None,
+            'details': err_str if show_details else None,
         }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
     
     if 'image' not in request.FILES:
