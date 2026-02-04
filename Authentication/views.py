@@ -69,9 +69,6 @@ def send_otp_email(email, otp, purpose):
             error_trace = traceback.format_exc()
             logger.error(f"Failed to send OTP email to {email}: {str(e)}")
             logger.error(f"Error traceback: {error_trace}")
-            # Also print to console for immediate visibility
-            print(f"EMAIL ERROR: Failed to send OTP to {email}: {str(e)}")
-            print(f"EMAIL ERROR TRACEBACK: {error_trace}")
     
     # Start email sending in background thread to prevent request timeout
     thread = threading.Thread(target=send_email_async, daemon=True)

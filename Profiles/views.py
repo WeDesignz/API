@@ -1273,11 +1273,9 @@ def designer_onboarding_step1(request):
             }, status=status.HTTP_200_OK)
         
     except Exception as e:
-        import traceback
+        import logging
         from django.conf import settings
-        error_trace = traceback.format_exc()
-        print(f"Error in designer_onboarding_step1: {str(e)}")
-        print(error_trace)
+        logging.getLogger(__name__).exception("Error in designer_onboarding_step1: %s", e)
         return Response({
             'error': f'Failed to save Step 1 data: {str(e)}',
             'detail': str(e) if settings.DEBUG else 'An error occurred while saving your data'
@@ -2183,10 +2181,10 @@ def handle_design_upload(request):
             'error': 'Invalid zip file format'
         }, status=status.HTTP_400_BAD_REQUEST)
     except Exception as e:
+        import logging
         import traceback
+        logging.getLogger(__name__).exception("Error in designer_onboarding_step4: %s", e)
         error_traceback = traceback.format_exc()
-        print(f"Error in designer_onboarding_step4: {str(e)}")
-        print(f"Traceback: {error_traceback}")
         return Response({
             'error': f'Failed to process zip file: {str(e)}',
             'traceback': error_traceback if settings.DEBUG else None

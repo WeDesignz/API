@@ -534,6 +534,14 @@ class DesignApproval(models.Model):
                 # Don't fail approval if Pinterest posting fails
                 logger.warning(f'[approve_design] Failed to queue Pinterest post: {str(e)}', exc_info=True)
             
+            # Index product PNG images into Qdrant for visual search (async - don't block approval)
+            try:
+                from Catalog.tasks import index_product_visual_search
+                index_product_visual_search.delay(self.product_id)
+                logger.info(f'[approve_design] Queued visual search indexing for product {self.product_id}')
+            except Exception as e:
+                logger.warning(f'[approve_design] Failed to queue visual search indexing: {str(e)}', exc_info=True)
+            
             # TODO: Send notification to designer (async - don't block)
             # TODO: Send email notification (async - don't block)
             

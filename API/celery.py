@@ -89,7 +89,6 @@ if ENVIRONMENT == 'production':
         'common.tasks.*': {'queue': 'production'},
         'MediaFiles.tasks.*': {'queue': 'production'},
     }
-    print(f"[Celery] Environment: PRODUCTION - Tasks will be routed to 'production' queue")
 else:
     # Development/DevAPI environment - use 'development' queue
     app.conf.task_default_queue = 'development'
@@ -99,8 +98,6 @@ else:
         'common.tasks.*': {'queue': 'development'},
         'MediaFiles.tasks.*': {'queue': 'development'},
     }
-    print(f"[Celery] Environment: DEVELOPMENT - Tasks will be routed to 'development' queue")
-
 # Task execution settings
 app.conf.task_always_eager = False
 app.conf.task_eager_propagates = True
@@ -115,4 +112,4 @@ app.conf.task_send_sent_event = True
 
 @app.task(bind=True)
 def debug_task(self):
-    print(f'Request: {self.request!r}')
+    pass

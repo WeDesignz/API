@@ -34,7 +34,6 @@ class EmbeddingModel:
     
     def __init__(self, model_name: str, vector_size: int):
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        print(f"[INFO] Initializing CLIP model '{model_name}' on {self.device}...")
         self.model = CLIPModel.from_pretrained(
             model_name,
             torch_dtype=torch.float32,
@@ -42,7 +41,6 @@ class EmbeddingModel:
         ).to(self.device)
         self.processor = CLIPProcessor.from_pretrained(model_name)
         self.vector_size = vector_size
-        print(f"[INFO] CLIP model initialized successfully")
     
     def _get_embedding_tensor(self, outputs):
         """Unwrap CLIP output: newer transformers return BaseModelOutputWithPooling with .pooler_output."""
@@ -79,14 +77,12 @@ class ImageDescriber:
     def __init__(self, model_name: Optional[str] = None):
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         model_id = model_name or DESCRIPTION_MODEL
-        print(f"[INFO] Initializing BLIP model '{model_id}' on {self.device}...")
         self.processor = BlipProcessor.from_pretrained(model_id)
         self.model = BlipForConditionalGeneration.from_pretrained(
             model_id,
             torch_dtype=torch.float32,
             low_cpu_mem_usage=False,
         ).to(self.device)
-        print(f"[INFO] BLIP model initialized successfully")
     
     def describe(self, img: Image.Image) -> str:
         """Generate a description for the image."""
@@ -103,13 +99,11 @@ def create_qdrant_client() -> QdrantClient:
     """Instantiate QdrantClient using either URL/API key (cloud) or host/port (self-hosted)."""
     timeout = 86400  # 24 hours for large batch operations
     if QDRANT_URL:
-        print(f"[INFO] Connecting to Qdrant cloud at {QDRANT_URL}")
         return QdrantClient(
             url=QDRANT_URL,
             api_key=QDRANT_API_KEY,
             timeout=timeout
         )
-    print(f"[INFO] Connecting to Qdrant at {QDRANT_HOST}:{QDRANT_PORT}")
     return QdrantClient(
         host=QDRANT_HOST,
         port=QDRANT_PORT,

@@ -17,6 +17,7 @@ urlpatterns = [
     # Search and filters
     path('search/', views.search_and_filter, name='search_and_filter'),
     path('lens-search/', views.lens_search, name='lens_search'),
+    path('lens-search-by-product/', views.lens_search_by_product, name='lens_search_by_product'),
     
     # Product details
     path('products/<int:product_id>/', views.product_detail, name='product_detail'),
@@ -45,6 +46,7 @@ urlpatterns = [
     path('pdf/downloads/', views.list_user_pdf_downloads, name='list_user_pdf_downloads'),
     path('pdf/process-payment/', views.process_pdf_payment, name='process_pdf_payment'),
     path('pdf/download/<int:download_id>/', views.download_pdf_file, name='download_pdf_file'),
+    path('pdf/download-url/<int:download_id>/', views.get_pdf_download_url, name='get_pdf_download_url'),
     path('pdf/pricing/', views.get_pdf_pricing_info, name='get_pdf_pricing_info'),
     path('pdf/search-products/', views.search_products_for_pdf, name='search_products_for_pdf'),
     path('pdf/browse-designs/', views.browse_designs_catalog, name='browse_designs_catalog'),

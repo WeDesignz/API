@@ -5,7 +5,10 @@ Service for generating invoices for customers and designers.
 Handles PDF generation, financial calculations, and wallet settlements.
 """
 
+import logging
 import os
+
+logger = logging.getLogger(__name__)
 from decimal import Decimal
 from typing import Dict, Any, List
 from datetime import date, datetime
@@ -178,7 +181,7 @@ def _draw_logo_and_company(c: canvas.Canvas, data: Dict[str, Any], page_width: f
                 c.drawImage(full_path, logo_x, top_y - logo_size, width=logo_width, height=logo_size, preserveAspectRatio=True)
                 logo_drawn = True
         except Exception as e:
-            print(f"Warning: Could not load logo image '{logo_path}': {e}")
+            logger.warning("Could not load logo image '%s': %s", logo_path, e)
     
     # If logo not drawn, draw placeholder
     if not logo_drawn:
@@ -222,7 +225,7 @@ def _draw_logo_and_company(c: canvas.Canvas, data: Dict[str, Any], page_width: f
                            width=text_logo_width, height=text_logo_size, preserveAspectRatio=True)
                 text_logo_drawn = True
         except Exception as e:
-            print(f"Warning: Could not load text logo image '{text_logo_path}': {e}")
+            logger.warning("Could not load text logo image '%s': %s", text_logo_path, e)
     
     # If text logo not drawn, draw company name as text
     if not text_logo_drawn:

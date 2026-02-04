@@ -2313,10 +2313,7 @@ def instagram_post(request):
     Create a single Instagram post.
     Accepts a single post object and queues it for async processing.
     """
-    # Force output to stderr (Gunicorn captures this)
-    import sys
-    print("=== INSTAGRAM POST REQUEST RECEIVED ===", file=sys.stderr, flush=True)
-    logger.info(f"=== INSTAGRAM POST REQUEST RECEIVED ===")
+    logger.info("Instagram post request received")
     logger.info(f"Request method: {request.method}, Content-Type: {request.content_type}")
     logger.info(f"Request data: {request.data}")
     

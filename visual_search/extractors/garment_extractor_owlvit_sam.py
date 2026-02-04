@@ -78,7 +78,6 @@ class OwlViTSAMGarmentExtractor:
         self.text_prompt = text_prompt
 
         # Load OWL-ViT
-        print(f"[INFO] Loading OWL-ViT model: {owlvit_model}")
         self.owlvit_processor = OwlViTProcessor.from_pretrained(owlvit_model)
         self.owlvit_model = OwlViTForObjectDetection.from_pretrained(owlvit_model)
         self.owlvit_model.to(self.device)
@@ -86,16 +85,11 @@ class OwlViTSAMGarmentExtractor:
 
         # Load YOLO
         yolo_model = os.environ.get("YOLO_MODEL_PATH", yolo_model)
-        print(f"[INFO] Loading YOLO model: {yolo_model}")
         self.yolo = YOLO(yolo_model)
         self.yolo.to(self.device)
-        print(f"[INFO] YOLO classes: {self.yolo.names}")
 
         # Load SAM2
-        print(f"[INFO] Loading SAM2 model: {sam2_model} (device: {actual_device})")
         self.sam2_predictor = SAM2ImagePredictor.from_pretrained(sam2_model, device=actual_device)
-
-        print(f"[INFO] OWL-ViT + YOLO + SAM2 extractor initialized successfully")
 
     def _detect_boxes_owlvit(self, img: Image.Image) -> List[dict]:
         """
@@ -199,12 +193,10 @@ class OwlViTSAMGarmentExtractor:
             List of detection dictionaries with bbox, text, score
         """
         # Step 1: YOLO detection
-        print("[INFO] Step 1: YOLO detection (class 0)...")
         yolo_boxes = self._detect_boxes_yolo(img, class_id=0)
         
         if yolo_boxes:
             # YOLO detected boxes - use them directly, skip OWL-ViT
-            print(f"[INFO] YOLO detected {len(yolo_boxes)} boxes, using YOLO detections (skipping OWL-ViT)")
             detections = []
             for yolo_box in yolo_boxes:
                 detections.append({
@@ -215,15 +207,8 @@ class OwlViTSAMGarmentExtractor:
             return detections
         else:
             # YOLO didn't detect - run OWL-ViT on whole image
-            print("[INFO] YOLO didn't detect boxes, running OWL-ViT on whole image...")
             owlvit_detections = self._detect_boxes_owlvit(img)
-            
-            if owlvit_detections:
-                print(f"[INFO] OWL-ViT found {len(owlvit_detections)} detections on whole image")
-                return owlvit_detections
-            else:
-                print("[WARN] Neither YOLO nor OWL-ViT detected any boxes")
-                return []
+            return owlvit_detections if owlvit_detections else []
 
     def _generate_masks(self, img: Image.Image, detections: List[dict]) -> List[np.ndarray]:
         """
@@ -317,7 +302,6 @@ class OwlViTSAMGarmentExtractor:
             Extracted region as PIL Image with background removed, or original image if extraction fails
         """
         # Step 1: YOLO detection
-        print("[INFO] Step 1: YOLO detection (class 0)...")
         yolo_boxes = self._detect_boxes_yolo(img, class_id=0)
         
         detections = []
@@ -325,40 +309,28 @@ class OwlViTSAMGarmentExtractor:
         
         if yolo_boxes:
             # YOLO detected boxes - try SAM2 on them first
-            print(f"[INFO] YOLO detected {len(yolo_boxes)} boxes, trying SAM2...")
             yolo_detections = [{"bbox": box, "text": "person", "score": 0.8} for box in yolo_boxes]
             masks = self._generate_masks(img, yolo_detections)
             
             if masks:
-                # SAM2 succeeded with YOLO boxes
-                print(f"[INFO] SAM2 successfully generated {len(masks)} masks from YOLO boxes")
                 detections = yolo_detections
             else:
-                # SAM2 failed with YOLO boxes - fallback to OWL-ViT
-                print("[WARN] SAM2 failed to generate masks from YOLO boxes, falling back to OWL-ViT...")
                 use_owlvit = True
         else:
-            # YOLO didn't detect - use OWL-ViT
-            print("[INFO] YOLO didn't detect boxes, using OWL-ViT...")
             use_owlvit = True
         
         # Step 2: OWL-ViT if needed
         if use_owlvit:
-            print("[INFO] Step 2: OWL-ViT detection...")
             owlvit_detections = self._detect_boxes_owlvit(img)
             
             if not owlvit_detections:
-                print("[WARN] No detections found (neither YOLO nor OWL-ViT), using original image")
                 return img
             
-            print(f"[INFO] OWL-ViT found {len(owlvit_detections)} detections")
             detections = owlvit_detections
         
         # Step 3: SAM2 generates masks from final detections
-        print("[INFO] Step 3: SAM2 mask generation...")
         masks = self._generate_masks(img, detections)
         if not masks:
-            print("[WARN] No masks generated, using original image")
             return img
         
         # Select the mask with the largest pixel count
@@ -371,7 +343,6 @@ class OwlViTSAMGarmentExtractor:
             return img
         
         largest_mask, total_pixels, best_detection = max(mask_with_pixels, key=lambda x: x[1])
-        print(f"[INFO] Selected largest mask: {total_pixels:,} pixels (score: {best_detection['score']:.3f})")
         
         # Extract masked region
         extracted = self._extract_masked_region(img, largest_mask)

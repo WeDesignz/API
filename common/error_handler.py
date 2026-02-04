@@ -48,15 +48,6 @@ class ErrorHandlerMiddleware:
             }
         )
         
-        # Print to console for immediate visibility
-        print(f"\n{'='*80}")
-        print(f"500 ERROR: {request.method} {request.path}")
-        print(f"{'='*80}")
-        print(f"Error: {error_message}")
-        print(f"\nTraceback:")
-        print(error_traceback)
-        print(f"{'='*80}\n")
-        
         # Return JSON response with error details
         if settings.DEBUG:
             return JsonResponse({
