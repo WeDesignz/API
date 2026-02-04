@@ -1,6 +1,6 @@
 from rest_framework import status, filters
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated, BasePermission
 from rest_framework.response import Response
 from rest_framework.pagination import PageNumberPagination
 from django.db.models import Q, Count, F, Sum
@@ -3218,6 +3218,58 @@ def process_pdf_payment(request):
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+# Short-lived token for mobile download (avoid opening PDF in browser; save to device)
+PDF_DOWNLOAD_TOKEN_MAX_AGE_SECONDS = 120
+
+
+class AllowAuthenticatedOrPDFDownloadToken(BasePermission):
+    """Allow request if user is authenticated or if ?token= is present (validated in view)."""
+    def has_permission(self, request, view):
+        if request.GET.get('token'):
+            return True
+        return request.user and request.user.is_authenticated
+
+
+@swagger_auto_schema(
+    method='get',
+    operation_summary='Get signed PDF download URL (for mobile save-to-device)',
+    operation_description='Returns a short-lived URL that triggers file download (attachment) so mobile browsers save to device instead of opening in-app.',
+    responses={200: openapi.Response(description='Signed URL'), 403: openapi.Response(description='Forbidden'), 404: openapi.Response(description='Not found')},
+    tags=['API']
+)
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_pdf_download_url(request, download_id):
+    """
+    Get a short-lived signed URL for downloading the PDF.
+    Used on mobile so the user can navigate to this URL and get the file with
+    Content-Disposition: attachment, saving to device storage instead of opening in browser.
+    """
+    try:
+        pdf_download = PDFDownload.objects.get(id=download_id)
+        pdf_user = pdf_download.get_user()
+        if pdf_user != request.user:
+            return Response({'error': 'You do not have permission to download this PDF'}, status=status.HTTP_403_FORBIDDEN)
+        if pdf_download.status == 'processing':
+            return Response({
+                'error': 'PDF is still being generated. Please try again in a few moments.',
+                'status': 'processing'
+            }, status=status.HTTP_202_ACCEPTED)
+        if pdf_download.status != 'completed':
+            return Response({
+                'error': f'PDF is not ready for download. Current status: {pdf_download.status}'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        from django.core.signing import TimestampSigner
+        from urllib.parse import quote
+        signer = TimestampSigner()
+        token = signer.sign(str(download_id))
+        path = f'/api/catalog/pdf/download/{download_id}/'
+        url = request.build_absolute_uri(path) + '?token=' + quote(token, safe='')
+        return Response({'url': url, 'expires_in_seconds': PDF_DOWNLOAD_TOKEN_MAX_AGE_SECONDS})
+    except PDFDownload.DoesNotExist:
+        return Response({'error': 'PDF download not found'}, status=status.HTTP_404_NOT_FOUND)
+
+
 @swagger_auto_schema(
     method='get',
     operation_summary='Download Pdf File',
@@ -3236,23 +3288,36 @@ def process_pdf_payment(request):
     },
     tags=['API']
 )
-
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
+@permission_classes([AllowAuthenticatedOrPDFDownloadToken])
 def download_pdf_file(request, download_id):
     """
     Download the generated PDF file.
+    Accepts optional ?token= for short-lived signed URL (mobile save-to-device); when token is valid, auth is not required.
     """
+    token = request.GET.get('token')
+    if token:
+        try:
+            from django.core.signing import TimestampSigner, SignatureExpired, BadSignature
+            signer = TimestampSigner()
+            signed_value = signer.unsign(token, max_age=PDF_DOWNLOAD_TOKEN_MAX_AGE_SECONDS)
+            if str(download_id) != str(signed_value):
+                return Response({'error': 'Invalid download token'}, status=status.HTTP_403_FORBIDDEN)
+            # Token valid; serve file without requiring session auth (below we load pdf_download and serve)
+        except (SignatureExpired, BadSignature):
+            return Response({'error': 'Download link expired. Please request the download again.'}, status=status.HTTP_403_FORBIDDEN)
+
     try:
         pdf_download = PDFDownload.objects.get(id=download_id)
-        
-        # Verify user owns this PDF download via relations system
-        pdf_user = pdf_download.get_user()
-        if pdf_user != request.user:
-            return Response({
-                'error': 'You do not have permission to download this PDF'
-            }, status=status.HTTP_403_FORBIDDEN)
-        
+
+        # When no token: require authenticated user who owns the PDF
+        if not token:
+            pdf_user = pdf_download.get_user()
+            if pdf_user != request.user:
+                return Response({
+                    'error': 'You do not have permission to download this PDF'
+                }, status=status.HTTP_403_FORBIDDEN)
+
         # Check if PDF is still processing
         if pdf_download.status == 'processing':
             return Response({
