@@ -18,7 +18,6 @@ from common.avif_converter import create_avif_from_media_file
 
 logger = logging.getLogger(__name__)
 
-
 @shared_task(bind=True, name='Profiles.tasks.process_design_upload_task')
 def process_design_upload_task(self, task_id, zip_file_path):
     """
@@ -33,14 +32,12 @@ def process_design_upload_task(self, task_id, zip_file_path):
         try:
             task = DesignProcessingTask.objects.get(id=task_id)
         except DesignProcessingTask.DoesNotExist:
-            logger.error(f"DesignProcessingTask with id={task_id} does not exist. Task may have been deleted.")
+
             # Task doesn't exist, can't proceed - raise error to mark Celery task as failed
             raise ValueError(f"DesignProcessingTask with id={task_id} does not exist. Cannot process design upload.")
         task.status = 'processing'
         task.save(update_fields=['status', 'updated_at'])
-        
-        logger.info(f"Starting design processing task {task_id} for user {task.user.username}")
-        
+
         # Determine product owner and track if uploaded by studio member
         # For studio members, owner should be studio owner (not the member)
         # For studio owners or individual designers, owner is themselves
@@ -57,23 +54,18 @@ def process_design_upload_task(self, task_id, zip_file_path):
             studio = studio_membership.studio
             product_owner = studio.created_by
             uploaded_by_member_id = task.user.id
-            logger.info(f"Task {task_id}: User is studio member, product owner set to studio owner {product_owner.id} (uploaded by member {uploaded_by_member_id})")
+
         else:
-            logger.info(f"Task {task_id}: User is studio owner or individual designer, product owner is themselves")
-        
+
         # Use the path from the database record as the source of truth
         # The parameter might be outdated, but the database record is always current
         actual_zip_file_path = task.zip_file_path
-        logger.info(f"Task {task_id}: Using zip file path from database: {actual_zip_file_path}")
-        logger.info(f"Task {task_id}: Parameter zip_file_path was: {zip_file_path}")
-        
+
         # If database path differs from parameter, log a warning
         if actual_zip_file_path != zip_file_path:
-            logger.warning(f"Task {task_id}: Path mismatch - database has '{actual_zip_file_path}', parameter was '{zip_file_path}'. Using database path.")
-        
+
         # Read zip file from storage
-        logger.info(f"Task {task_id}: Checking zip file at path: {actual_zip_file_path}")
-        
+
         # Check if file exists in storage
         if not default_storage.exists(actual_zip_file_path):
             # Try to construct absolute path as fallback for debugging
@@ -81,40 +73,32 @@ def process_design_upload_task(self, task_id, zip_file_path):
             try:
                 if hasattr(settings, 'MEDIA_ROOT') and settings.MEDIA_ROOT:
                     absolute_path = os.path.join(settings.MEDIA_ROOT, actual_zip_file_path)
-                    logger.info(f"Task {task_id}: Constructed absolute path: {absolute_path}")
+
                     if os.path.exists(absolute_path):
-                        logger.warning(f"Task {task_id}: File exists at absolute path but not in storage backend. This may indicate a storage configuration issue.")
+
             except Exception as path_error:
-                logger.warning(f"Task {task_id}: Could not construct absolute path: {str(path_error)}")
-            
+
             # Log available storage information for debugging
-            logger.error(f"Task {task_id}: Zip file not found in storage. Path: {actual_zip_file_path}")
-            logger.error(f"Task {task_id}: MEDIA_ROOT: {getattr(settings, 'MEDIA_ROOT', 'Not set')}")
-            logger.error(f"Task {task_id}: Storage backend: {type(default_storage).__name__}")
-            
+
             if absolute_path:
-                logger.error(f"Task {task_id}: Absolute path check: {absolute_path} exists={os.path.exists(absolute_path) if absolute_path else False}")
-            
+
             raise FileNotFoundError(
                 f"Zip file not found at path: {actual_zip_file_path}. "
                 f"MEDIA_ROOT: {getattr(settings, 'MEDIA_ROOT', 'Not set')}. "
                 f"Storage backend: {type(default_storage).__name__}"
             )
-        
-        logger.info(f"Task {task_id}: Reading zip file...")
+
         zip_file = default_storage.open(actual_zip_file_path, 'rb')
         zip_content = zip_file.read()
         zip_file.close()
-        logger.info(f"Task {task_id}: Zip file read successfully, size: {len(zip_content)} bytes")
-        
+
         zip_buffer = io.BytesIO(zip_content)
         
         with zipfile.ZipFile(zip_buffer, 'r') as zip_ref:
             all_files = zip_ref.namelist()
-            logger.info(f"Task {task_id}: Zip file opened, found {len(all_files)} files")
-            
+
             # Find metadata.xlsx
-            logger.info(f"Task {task_id}: Looking for metadata.xlsx...")
+
             metadata_file = None
             for file_name in all_files:
                 lower_name = file_name.lower()
@@ -124,9 +108,7 @@ def process_design_upload_task(self, task_id, zip_file_path):
             
             if not metadata_file:
                 raise ValueError("metadata.xlsx file not found in zip")
-            
-            logger.info(f"Task {task_id}: Found metadata file: {metadata_file}")
-            
+
             # Parse metadata.xlsx
             # Fixed column positions (metadata.xlsx format):
             # Column 1: folder_name
@@ -140,15 +122,14 @@ def process_design_upload_task(self, task_id, zip_file_path):
             # - visible: defaults to '1' (show)
             # - color: defaults to None
             # Note: Price is now managed globally via SystemConfig, not from metadata
-            logger.info(f"Task {task_id}: Reading metadata file...")
+
             metadata_data = zip_ref.read(metadata_file)
             metadata_buffer = io.BytesIO(metadata_data)
             workbook = load_workbook(metadata_buffer, data_only=True)
             sheet = workbook.active
-            logger.info(f"Task {task_id}: Metadata file loaded, parsing with fixed column positions...")
-            
+
             # Create metadata mapping - start from row 2 (row 1 is headers)
-            logger.info(f"Task {task_id}: Parsing metadata rows starting from row 2...")
+
             metadata_dict = {}
             row_count = 0
             for row in sheet.iter_rows(min_row=2, values_only=False):  # Start from row 2
@@ -170,19 +151,16 @@ def process_design_upload_task(self, task_id, zip_file_path):
                         row_count += 1
                         # Log first entry for debugging
                         if row_count == 1:
-                            logger.info(f"Task {task_id}: Sample metadata entry for '{folder_name}': category='{row_data['category']}', subcategory='{row_data['subcategory']}'")
-            
-            logger.info(f"Task {task_id}: Parsed {len(metadata_dict)} metadata entries from Excel")
-            
+
             # Find root folder - handle both 2-part and 3-part paths
             # 2-part: design_folder/file.ext (zip created from inside root folder)
             # 3-part: root_folder/design_folder/file.ext (normal case)
-            logger.info(f"Task {task_id}: Finding root folder...")
+
             root_folder = ''
             if '/' in metadata_file:
                 # metadata.xlsx is in a subfolder, use that folder as root
                 root_folder = metadata_file.rsplit('/', 1)[0]  # Get parent folder
-                logger.info(f"Task {task_id}: Using metadata file parent folder as root: {root_folder}")
+
             else:
                 # metadata.xlsx is in root, find root folder from valid design folders
                 SYSTEM_FOLDERS = ['__macosx', '.ds_store', 'rar', '.rar', 'thumbs.db']
@@ -198,11 +176,9 @@ def process_design_upload_task(self, task_id, zip_file_path):
                             # 2-part path means no root folder (zip created from inside root)
                             root_folder = ''
                             break
-            
-            logger.info(f"Task {task_id}: Root folder: {root_folder if root_folder else '(none - 2-part paths detected)'}")
-            
+
             # Get valid design folders - handle both 2-part and 3-part paths (matching validation logic)
-            logger.info(f"Task {task_id}: Validating design folders...")
+
             SYSTEM_FOLDERS = ['__macosx', '.ds_store', 'rar', '.rar', 'thumbs.db']
             required_files = {'.eps', '.cdr', '.jpg', '.png'}
             valid_design_folders = {}
@@ -264,9 +240,7 @@ def process_design_upload_task(self, task_id, zip_file_path):
             for folder_name, files in valid_design_folders.items():
                 if all(ext in files for ext in required_files):
                     valid_folders[folder_name] = files
-            
-            logger.info(f"Task {task_id}: Found {len(valid_folders)} valid design folders out of {len(valid_design_folders)} total folders")
-            
+
             # Process each design folder
             processed_count = 0
             failed_count = 0
@@ -275,26 +249,23 @@ def process_design_upload_task(self, task_id, zip_file_path):
             # Set total designs count
             task.total_designs = len(valid_folders)
             task.save(update_fields=['total_designs', 'updated_at'])
-            logger.info(f"Task {task_id}: Starting to process {len(valid_folders)} designs...")
-            
+
             for idx, folder_name in enumerate(valid_folders.keys(), 1):
-                logger.info(f"Task {task_id}: Processing design {idx}/{len(valid_folders)}: {folder_name}")
+
                 try:
                     # Process each design in its own transaction
                     # This allows progress updates to be committed immediately
-                    logger.info(f"Task {task_id}: Starting transaction for design {idx}: {folder_name}")
+
                     with transaction.atomic():
                         # Get metadata for this folder
                         metadata = metadata_dict.get(folder_name, {})
-                        logger.info(f"Task {task_id}: Got metadata for {folder_name}, extracting files...")
-                        
+
                         # Extract files from zip - handle both 2-part and 3-part paths
                         if root_folder:
                             folder_path = f"{root_folder}/{folder_name}/"
                         else:
                             folder_path = f"{folder_name}/"  # Handle 2-part paths
-                        
-                        logger.info(f"Task {task_id}: Looking for files in path: {folder_path}")
+
                         design_files = {}
                         mockup_file = None
                         for file_name in all_files:
@@ -317,22 +288,18 @@ def process_design_upload_task(self, task_id, zip_file_path):
                                         mockup_file = file_name
                                     else:
                                         design_files[file_ext] = file_name
-                        
-                        logger.info(f"Task {task_id}: Found {len(design_files)} design files for {folder_name}: {list(design_files.keys())}")
+
                         if mockup_file:
-                            logger.info(f"Task {task_id}: Found optional mockup file for {folder_name}: {mockup_file}")
-                        
+
                         # Get category and subcategory from metadata (using fixed column positions)
                         category_name = metadata.get('category', '').strip() if metadata.get('category') else ''
                         if not category_name:
                             category_name = 'other'
-                            logger.warning(f"Task {task_id}: Category is empty for {folder_name}, using default 'other'")
+
                         else:
-                            logger.info(f"Task {task_id}: Extracted category from metadata: '{category_name}'")
-                        
+
                         subcategory_name = metadata.get('subcategory', '').strip() if metadata.get('subcategory') else ''
-                        logger.info(f"Task {task_id}: Processing category: '{category_name}', subcategory: '{subcategory_name}'")
-                        
+
                         # Create or get parent category (parent=None means it's a top-level category)
                         # First try to get existing category, then create if it doesn't exist
                         parent_category = None
@@ -341,18 +308,18 @@ def process_design_upload_task(self, task_id, zip_file_path):
                             parent_category = Category.objects.filter(name=category_name, parent__isnull=True).first()
                             
                             if parent_category:
-                                logger.info(f"Task {task_id}: Found existing parent category: '{category_name}' (ID: {parent_category.id})")
+
                             else:
                                 # Category doesn't exist, create it
-                                logger.info(f"Task {task_id}: Parent category '{category_name}' not found, creating new one...")
+
                                 parent_category = Category.objects.create(
                                     name=category_name,
                                     parent=None,
                                     created_by=task.user
                                 )
-                                logger.info(f"Task {task_id}: ✓ Created new parent category: '{category_name}' (ID: {parent_category.id})")
+
                         except Exception as e:
-                            logger.error(f"Task {task_id}: Error creating/getting parent category '{category_name}': {str(e)}", exc_info=True)
+
                             # Fallback: try to get 'other' category or create it
                             try:
                                 parent_category = Category.objects.filter(name='other', parent__isnull=True).first()
@@ -362,9 +329,9 @@ def process_design_upload_task(self, task_id, zip_file_path):
                                         parent=None,
                                         created_by=task.user
                                     )
-                                logger.warning(f"Task {task_id}: Using fallback 'other' category (ID: {parent_category.id})")
+
                             except Exception as e2:
-                                logger.error(f"Task {task_id}: Even fallback category creation failed: {str(e2)}", exc_info=True)
+
                                 raise  # Re-raise if even fallback fails
                         
                         # Ensure parent_category is set
@@ -381,27 +348,24 @@ def process_design_upload_task(self, task_id, zip_file_path):
                                 ).first()
                                 
                                 if category:
-                                    logger.info(f"Task {task_id}: Found existing subcategory: '{subcategory_name}' under '{category_name}' (ID: {category.id})")
+
                                 else:
                                     # Subcategory doesn't exist, create it
-                                    logger.info(f"Task {task_id}: Subcategory '{subcategory_name}' not found, creating new one under '{category_name}'...")
+
                                     category = Category.objects.create(
                                         name=subcategory_name,
                                         parent=parent_category,
                                         created_by=task.user
                                     )
-                                    logger.info(f"Task {task_id}: ✓ Created new subcategory: '{subcategory_name}' under '{category_name}' (ID: {category.id})")
+
                             except Exception as e:
-                                logger.error(f"Task {task_id}: Error creating/getting subcategory '{subcategory_name}': {str(e)}", exc_info=True)
+
                                 # Fallback: use parent category if subcategory creation fails
                                 category = parent_category
-                                logger.warning(f"Task {task_id}: Using parent category '{category_name}' instead of subcategory due to error")
+
                         else:
                             category = parent_category
-                            logger.info(f"Task {task_id}: No subcategory specified, using parent category: '{category_name}'")
-                        
-                        logger.info(f"Task {task_id}: Category ready, creating product...")
-                        
+
                         # Plan default: 4 (premium) - removed from metadata template
                         plan_value = '4'  # Default to premium plan
                         plan_mapping = {
@@ -437,12 +401,10 @@ def process_design_upload_task(self, task_id, zip_file_path):
                         description = metadata.get('description', '').strip() if metadata.get('description') else f"Design from folder {folder_name}"
                         if not description:
                             description = f"Design from folder {folder_name}"
-                        
-                        logger.info(f"Task {task_id}: About to create Product with title='{title[:50]}', category_id={category.id}, product_plan_type={product_plan_type}")
-                        
+
                         # Create Product
                         try:
-                            logger.info(f"Task {task_id}: Calling Product.objects.create()...")
+
                             # Build product_metadata with bulk upload info and member tracking
                             product_metadata = {
                                 'source': 'bulk_upload',
@@ -463,21 +425,19 @@ def process_design_upload_task(self, task_id, zip_file_path):
                                 created_by=product_owner,  # Use studio owner if member uploaded
                                 product_metadata=product_metadata  # Include member tracking
                             )
-                            logger.info(f"Task {task_id}: Product.objects.create() returned, product.id={product.id}")
-                            logger.info(f"Task {task_id}: Successfully created product {product.id} for {folder_name}")
+
                         except Exception as e:
-                            logger.error(f"Task {task_id}: Error creating product for {folder_name}: {str(e)}", exc_info=True)
+
                             raise
                         
                         # Create Media instances
-                        logger.info(f"Task {task_id}: Creating media files for {folder_name}...")
-                        
+
                         # Ensure product_number is available
                         if not product.product_number:
-                            logger.warning(f"Task {task_id}: Product {product.id} has no product_number, refreshing from DB...")
+
                             product.refresh_from_db()
                             if not product.product_number:
-                                logger.error(f"Task {task_id}: Product {product.id} still has no product_number after refresh")
+
                                 raise ValueError(f"Product {product.id} has no product_number")
                         
                         product_number = product.product_number
@@ -494,7 +454,7 @@ def process_design_upload_task(self, task_id, zip_file_path):
                         try:
                             for file_ext, file_path in design_files.items():
                                 try:
-                                    logger.info(f"Task {task_id}: Reading file {file_path}...")
+
                                     file_data = zip_ref.read(file_path)
                                     file_name = os.path.basename(file_path)
                                     media_type = 'image'
@@ -504,7 +464,7 @@ def process_design_upload_task(self, task_id, zip_file_path):
                                     new_filename = f'{product_number}{file_ext}'
                                     
                                     media_file = ContentFile(file_data, name=new_filename)
-                                    logger.info(f"Task {task_id}: Creating Media object for {file_name} -> {new_filename}...")
+
                                     # Create Media instance and set temp product_id as additional fallback
                                     media = Media(
                                         file=media_file,
@@ -526,7 +486,7 @@ def process_design_upload_task(self, task_id, zip_file_path):
                                     expected_path_prefix = f'{product_owner.id}/designs/{product.id}/'
                                     if not media.file.name.startswith(expected_path_prefix):
                                         error_msg = f'Media file saved to wrong location! Expected: {expected_path_prefix}*, Got: {media.file.name}'
-                                        logger.error(f"Task {task_id}: {error_msg}")
+
                                         # #region agent log
                                         try:
                                             with open(log_path, 'a') as f:
@@ -539,7 +499,7 @@ def process_design_upload_task(self, task_id, zip_file_path):
                                         'folder_name': folder_name,
                                         'original_filename': file_name
                                     }
-                                    logger.info(f"Task {task_id}: Attaching media {media.id} to product {product.id}...")
+
                                     product.attach_media(media, meta=meta_info, created_by=task.user)
                                     
                                     # Create AVIF version for JPG and PNG files
@@ -555,13 +515,13 @@ def process_design_upload_task(self, task_id, zip_file_path):
                                                 created_by=product_owner
                                             )
                                             if avif_path:
-                                                logger.info(f"Task {task_id}: Created AVIF version: {avif_path}")
+
                                                 if avif_media_obj:
-                                                    logger.info(f"Task {task_id}: Linked AVIF Media object {avif_media_obj.id} to product {product.id}")
+
                                         except Exception as avif_error:
-                                            logger.warning(f"Task {task_id}: Failed to create AVIF for {file_path}: {avif_error}")
+
                                 except Exception as e:
-                                    logger.error(f"Task {task_id}: Error creating media for {file_path}: {str(e)}", exc_info=True)
+
                         finally:
                             # Clear product context
                             Media.clear_product_context()
@@ -572,7 +532,7 @@ def process_design_upload_task(self, task_id, zip_file_path):
                             Media.set_product_context(product.id)
                             try:
                                 try:
-                                    logger.info(f"Task {task_id}: Processing mockup file {mockup_file}...")
+
                                     file_data = zip_ref.read(mockup_file)
                                     file_name = os.path.basename(mockup_file)
                                     media_type = 'image'
@@ -582,7 +542,7 @@ def process_design_upload_task(self, task_id, zip_file_path):
                                     new_filename = f'{product_number}_MOCKUP{file_ext}'
                                     
                                     media_file = ContentFile(file_data, name=new_filename)
-                                    logger.info(f"Task {task_id}: Creating Media object for mockup {file_name} -> {new_filename}...")
+
                                     # Create Media instance and set temp product_id as additional fallback
                                     media = Media(
                                         file=media_file,
@@ -600,7 +560,7 @@ def process_design_upload_task(self, task_id, zip_file_path):
                                         'original_filename': file_name,
                                         'is_mockup': True
                                     }
-                                    logger.info(f"Task {task_id}: Attaching mockup media {media.id} to product {product.id}...")
+
                                     product.attach_media(media, meta=meta_info, created_by=task.user)
                                     
                                     # Create AVIF version for mockup
@@ -614,20 +574,18 @@ def process_design_upload_task(self, task_id, zip_file_path):
                                             created_by=product_owner
                                         )
                                         if avif_path:
-                                            logger.info(f"Task {task_id}: Created MOCKUP AVIF version: {avif_path}")
+
                                             if avif_media_obj:
-                                                logger.info(f"Task {task_id}: Linked MOCKUP AVIF Media object {avif_media_obj.id} to product {product.id}")
+
                                     except Exception as avif_error:
-                                        logger.warning(f"Task {task_id}: Failed to create AVIF for mockup: {avif_error}")
+
                                 except Exception as e:
-                                    logger.error(f"Task {task_id}: Error creating mockup media for {mockup_file}: {str(e)}", exc_info=True)
+
                                     # Don't fail the whole process if mockup fails
                             finally:
                                 # Clear product context
                                 Media.clear_product_context()
-                        
-                        logger.info(f"Task {task_id}: Media files processed, processing tags...")
-                        
+
                         # Process Tags (column 9, previously column 10)
                         tags_str = metadata.get('tags', '').strip() if metadata.get('tags') else ''
                         if tags_str:
@@ -660,27 +618,23 @@ def process_design_upload_task(self, task_id, zip_file_path):
                                     )
                                     product.attach_plan(plan, meta={'source': 'bulk_upload'}, created_by=task.user)
                             except Exception as e:
-                                logger.error(f"Task {task_id}: Error attaching plan for product {product.id}: {str(e)}")
-                        
+
                         # SubProduct removed - using Product only
-                        logger.info(f"Task {task_id}: Product created successfully for {folder_name}")
-                    
+
                     # Transaction committed - design is now saved
-                    logger.info(f"Task {task_id}: Transaction committed for design {idx}: {folder_name}")
+
                     processed_count += 1
-                    logger.info(f"Task {task_id}: Successfully processed design {idx}/{len(valid_folders)}: {folder_name}")
-                    
+
                     # Update progress every 5 designs (outside transaction for immediate commit)
                     if idx % 5 == 0 or idx == len(valid_folders):
                         task.processed_designs = processed_count
                         task.failed_designs = failed_count
                         task.save(update_fields=['processed_designs', 'failed_designs', 'updated_at'])
-                        logger.info(f"Progress update: {processed_count}/{len(valid_folders)} designs processed")
-                        
+
                 except Exception as e:
                     failed_count += 1
                     error_msg = str(e)
-                    logger.error(f"Error processing design folder {folder_name}: {error_msg}", exc_info=True)
+
                     failed_details.append({
                         'folder_name': folder_name,
                         'error': error_msg
@@ -691,8 +645,7 @@ def process_design_upload_task(self, task_id, zip_file_path):
                         task.processed_designs = processed_count
                         task.failed_designs = failed_count
                         task.save(update_fields=['processed_designs', 'failed_designs', 'updated_at'])
-                        logger.info(f"Progress update after error: {processed_count}/{len(valid_folders)} designs processed, {failed_count} failed")
-            
+
             # Note: Onboarding status is set manually in designer_onboarding_step4 view
             # We don't automatically update it here to prevent overriding manual settings
             
@@ -710,15 +663,11 @@ def process_design_upload_task(self, task_id, zip_file_path):
                 task.status = 'completed'
             
             task.save(update_fields=['status', 'processed_designs', 'failed_designs', 'error_message', 'updated_at'])
-            
-            logger.info(f"Design processing task {task_id} completed. Processed: {processed_count}, Failed: {failed_count}")
-            
+
     except Exception as e:
         import traceback
         error_traceback = traceback.format_exc()
-        logger.error(f"Error in design processing task {task_id}: {str(e)}")
-        logger.error(error_traceback)
-        
+
         # Update task with error
         try:
             task = DesignProcessingTask.objects.get(id=task_id)
@@ -726,9 +675,8 @@ def process_design_upload_task(self, task_id, zip_file_path):
             task.error_message = str(e)
             task.save(update_fields=['status', 'error_message', 'updated_at'])
         except DesignProcessingTask.DoesNotExist:
-            logger.warning(f"Could not update DesignProcessingTask {task_id} status to 'failed' - task does not exist.")
+
         except Exception as update_error:
-            logger.error(f"Error updating DesignProcessingTask {task_id} status: {str(update_error)}", exc_info=True)
-        
+
         raise
 

@@ -858,9 +858,6 @@ class SupportMessageCreateSerializer(serializers.ModelSerializer):
                 from CoreAdmin.models import AdminUserProfile, AdminNotification
                 from django.contrib.auth.models import User
                 from common.relations import attach_relation
-                import logging
-                
-                logger = logging.getLogger(__name__)
                 
                 # Get all active admin users
                 admin_profiles = AdminUserProfile.objects.filter(is_active=True)
@@ -877,9 +874,8 @@ class SupportMessageCreateSerializer(serializers.ModelSerializer):
                             related_thread_id=thread.id,
                         )
                         attach_relation('User:AdminNotification', thread.assigned_to, notification)
-                        logger.info(f'Admin notification created for assigned admin {thread.assigned_to.id} in thread {thread.id}')
                     except Exception as e:
-                        logger.error(f'Error creating admin notification for assigned admin: {str(e)}')
+                        pass
                 else:
                     # Notify all active admins if no specific assignment
                     for admin_user in admin_users:
@@ -894,7 +890,7 @@ class SupportMessageCreateSerializer(serializers.ModelSerializer):
                                 )
                                 attach_relation('User:AdminNotification', admin_user, notification)
                             except Exception as e:
-                                logger.error(f'Error creating admin notification for admin {admin_user.id}: {str(e)}')
+                                pass
                 
                 # Also notify customer that their message was sent
                 try:
@@ -907,12 +903,10 @@ class SupportMessageCreateSerializer(serializers.ModelSerializer):
                     )
                     attach_relation('User:CustomerNotification', sender, notification)
                 except Exception as e:
-                    logger.error(f'Error creating customer confirmation notification: {str(e)}')
+                    pass
                     
         except Exception as e:
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.error(f'Error creating support message notifications: {str(e)}', exc_info=True)
+            pass
 
 
 # ==================== FAQ SERIALIZERS ====================

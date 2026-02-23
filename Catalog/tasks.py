@@ -33,21 +33,16 @@ def process_single_design_upload(
         platform_id: Platform ID for the product
     """
     try:
-        logger.info(f'Starting single design upload task for product {product_id}')
-        
         # Get the product
         try:
             product = Product.objects.get(id=product_id)
         except Product.DoesNotExist:
-            logger.error(f'Product {product_id} not found')
             return {'status': 'failed', 'error': 'Product not found'}
         
         # Ensure product_number is available
         if not product.product_number:
-            logger.warning(f'Product {product_id} has no product_number, refreshing from DB...')
             product.refresh_from_db()
             if not product.product_number:
-                logger.error(f'Product {product_id} still has no product_number after refresh')
                 return {'status': 'failed', 'error': 'Product has no product_number'}
         
         product_number = product.product_number
@@ -67,7 +62,6 @@ def process_single_design_upload(
                 # Use default_storage to check if file exists and open it
                 # This works with both local and cloud storage backends
                 if not default_storage.exists(file_path):
-                    logger.warning(f'File not found in storage: {file_path}')
                     continue
                 
                 # Determine media type
@@ -126,7 +120,6 @@ def process_single_design_upload(
                         expected_path_prefix = f'{product.created_by.id}/designs/{product.id}/'
                         if not media_obj.file.name.startswith(expected_path_prefix):
                             error_msg = f'Media file saved to wrong location! Expected: {expected_path_prefix}*, Got: {media_obj.file.name}'
-                            logger.error(error_msg)
                             # #region agent log
                             try:
                                 with open(log_path, 'a') as f:
@@ -146,9 +139,8 @@ def process_single_design_upload(
                 # Delete temporary file after processing
                 try:
                     default_storage.delete(file_path)
-                    logger.info(f'Deleted temp file: {file_path}')
                 except Exception as e:
-                    logger.warning(f'Failed to delete temp file {file_path}: {str(e)}')
+                    pass
                 
                 # Attach metadata
                 upload_metadata = {
@@ -167,7 +159,6 @@ def process_single_design_upload(
                 # Attach media to product
                 product.attach_media(media_obj, meta=upload_metadata, created_by=product.created_by)
                 processed_files += 1
-                logger.info(f'Processed file {file_name} -> {new_filename} for product {product_id}')
                 
                 # Create AVIF version for JPG and PNG files
                 if file_name_lower.endswith(('.jpg', '.jpeg', '.png')):
@@ -181,20 +172,16 @@ def process_single_design_upload(
                             created_by=product.created_by
                         )
                         if avif_path:
-                            logger.info(f'Created AVIF version for {file_name}: {avif_path}')
-                            if avif_media_obj:
-                                logger.info(f'Linked AVIF Media object {avif_media_obj.id} to product {product_id}')
+                            pass
                     except Exception as avif_error:
-                        logger.warning(f'Failed to create AVIF for {file_name}: {avif_error}')
+                        pass
                 
             except Exception as e:
-                logger.error(f'Failed to process file {file_data.get("name", "unknown")}: {str(e)}', exc_info=True)
+                pass
         
-        logger.info(f'Successfully processed {processed_files} files for product {product_id}')
         return {'status': 'success', 'processed_files': processed_files}
         
     except Exception as e:
-        logger.error(f'Failed to process single design upload for product {product_id}: {str(e)}', exc_info=True)
         return {'status': 'failed', 'error': str(e)}
 
 
@@ -220,8 +207,6 @@ def generate_pdf_task(self, pdf_download_id):
             if not selected_ids:
                 raise ValueError('No products selected for PDF generation')
             
-            # Log the received order for debugging
-            logger.info(f'Received product IDs in order: {selected_ids}')
             
             # Create a dict to preserve order
             products_dict = {p.id: p for p in Product.objects.filter(
@@ -233,13 +218,10 @@ def generate_pdf_task(self, pdf_download_id):
             # Preserve order from selected_products list - this is critical for sequence
             products = [products_dict[pid] for pid in selected_ids if pid in products_dict]
             
-            # Log the final order
             product_ids_ordered = [p.id for p in products]
-            logger.info(f'Products in final order: {product_ids_ordered}')
             
             if len(products) != len(selected_ids):
                 missing_ids = set(selected_ids) - set(product_ids_ordered)
-                logger.warning(f'Some products not found or inactive. Expected {len(selected_ids)}, got {len(products)}. Missing: {missing_ids}')
         else:
             # Use search filters to get products
             search_filters = pdf_download.search_filters or {}
@@ -283,8 +265,6 @@ def generate_pdf_task(self, pdf_download_id):
         if not products:
             raise ValueError('No products found for PDF generation')
         
-        logger.info(f'Generating PDF for {len(products)} products')
-        
         # Get mockup images for each product
         from MediaFiles.models import Relation
         from django.conf import settings
@@ -300,7 +280,6 @@ def generate_pdf_task(self, pdf_download_id):
         # Get user from PDFDownload
         user = pdf_download.get_user()
         if not user:
-            logger.warning(f'PDF download {pdf_download_id} has no associated user, using fallback location')
             # Fallback to old location if user not found
             pdf_dir = os.path.join(settings.MEDIA_ROOT, 'pdfs')
             os.makedirs(pdf_dir, exist_ok=True)
@@ -347,7 +326,6 @@ def generate_pdf_task(self, pdf_download_id):
                     file_ext = os.path.splitext(file_name_lower)[1]
                     
                     if file_ext in UNSUPPORTED_EXTENSIONS:
-                        logger.debug(f'Skipping unsupported file type {file_ext} for product {product.id}: {file_name}')
                         continue
                     
                     # Check if filename contains "mockup" (case-insensitive)
@@ -371,15 +349,13 @@ def generate_pdf_task(self, pdf_download_id):
                                 meta_lower = str(meta_data).lower()
                                 is_mockup_by_meta = 'mockup' in meta_lower or '"is_mockup":true' in meta_lower
                     except Exception as e:
-                        logger.debug(f'Error checking relation metadata for media {getattr(media, "id", "unknown")}: {e}')
+                        pass
                     
                     # Only use if it's a mockup AND a supported image format
                     if (is_mockup_by_name or is_mockup_by_meta) and file_ext in SUPPORTED_IMAGE_EXTENSIONS:
                         mockup_media = media
-                        logger.info(f'Found mockup image for product {product.id}: {file_name}')
                         break
                 except Exception as e:
-                    logger.warning(f'Error checking media {getattr(media, "id", "unknown")} for product {product.id}: {e}')
                     continue
             
             # If no mockup found, use first available supported image so every design gets a page
@@ -395,12 +371,10 @@ def generate_pdf_task(self, pdf_download_id):
                         file_ext = os.path.splitext(file_name_lower)[1]
                         if file_ext in SUPPORTED_IMAGE_EXTENSIONS:
                             mockup_media = media
-                            logger.info(f'Using first available image for product {product.id} (no mockup): {file_name}')
                             break
                     except Exception:
                         continue
                 if not mockup_media or not hasattr(mockup_media, 'file') or not mockup_media.file:
-                    logger.warning(f'Skipping product {product.id} ({product.title}) - no image found')
                     skipped_products.append(product.id)
                     continue
             
@@ -430,24 +404,19 @@ def generate_pdf_task(self, pdf_download_id):
                                 with open(image_path, 'wb') as dst:
                                     dst.write(src.read())
                                 temp_files_to_cleanup.append(image_path)
-                                logger.info(f'Copied media to temp file for product {product.id}: {image_path}')
                         else:
                             image_path = None
                     except Exception as e:
-                        logger.warning(f'Could not open storage file for product {product.id}: {e}')
                         image_path = None
                 
                 if not image_path or not os.path.exists(image_path):
-                    logger.warning(f'Image not found for product {product.id} at {getattr(image_path, "path", image_path)}')
                     skipped_products.append(product.id)
                     continue
                 file_ext = os.path.splitext(image_path.lower())[1]
                 if file_ext not in SUPPORTED_IMAGE_EXTENSIONS:
-                    logger.warning(f'Image has unsupported format {file_ext} for product {product.id}')
                     skipped_products.append(product.id)
                     continue
             except Exception as e:
-                logger.warning(f'Error getting image path for product {product.id}: {e}')
                 skipped_products.append(product.id)
                 continue
             
@@ -464,10 +433,6 @@ def generate_pdf_task(self, pdf_download_id):
             })
             mockup_paths.append(image_path)
         
-        # Log skipped products
-        if skipped_products:
-            logger.warning(f'Skipped {len(skipped_products)} products without images: {skipped_products}')
-        
         if not included_products:
             raise ValueError(
                 f'No products with usable images for PDF. All {len(products)} product(s) were skipped. '
@@ -479,7 +444,6 @@ def generate_pdf_task(self, pdf_download_id):
         
         # Generate PDF with reportlab - one page per design
         try:
-            logger.info(f'Creating PDF file at: {pdf_file_path}')
             
             # Create PDF canvas
             c = canvas.Canvas(pdf_file_path, pagesize=letter)
@@ -508,7 +472,6 @@ def generate_pdf_task(self, pdf_download_id):
                     if os.path.exists(alt_default):
                         logo_path = alt_default
             
-            logger.info(f'PDF generation for download {pdf_download_id}: customer_name="{customer_name}", customer_mobile="{customer_mobile}", logo={bool(logo_path)}')
             
             for idx, product_info in enumerate(included_products, 1):
                 if idx > 1:
@@ -529,7 +492,7 @@ def generate_pdf_task(self, pdf_download_id):
                     try:
                         c.drawImage(logo_path, m, page_h - m - logo_size, width=logo_size, height=logo_size, preserveAspectRatio=True)
                     except Exception as e:
-                        logger.warning(f'Could not draw logo for page {idx}: {e}')
+                        pass
                 
                 # 2) Top-center: name, then number below (plain text, no boxes)
                 name_text = customer_name or ''
@@ -566,9 +529,7 @@ def generate_pdf_task(self, pdf_download_id):
                         img_x = (page_w - sw) / 2
                         img_y = m + footer_used + (available_height - sh) / 2
                         c.drawImage(image_path, img_x, img_y, width=sw, height=sh, preserveAspectRatio=True)
-                        logger.info(f'Added image for product {product_id} on page {idx}')
                     except Exception as e:
-                        logger.error(f'Error adding image for product {product_id}: {e}', exc_info=True)
                         c.setFont("Helvetica", 12)
                         c.setFillColorRGB(0.5, 0.5, 0.55)
                         c.drawString(center_x - 60, page_h / 2 - 20, "Image not available")
@@ -587,11 +548,10 @@ def generate_pdf_task(self, pdf_download_id):
                     if tmp and os.path.exists(tmp):
                         os.unlink(tmp)
                 except Exception as e:
-                    logger.warning(f'Could not remove temp file {tmp}: {e}')
+                    pass
             if hasattr(self, '_pdf_temp_files'):
                 self._pdf_temp_files = []
             
-            logger.info(f'PDF file created successfully at {pdf_file_path}')
             
             # Verify file was created
             if not os.path.exists(pdf_file_path):
@@ -602,7 +562,6 @@ def generate_pdf_task(self, pdf_download_id):
             if file_size == 0:
                 raise Exception(f'PDF file was created but is empty (0 bytes) at {pdf_file_path}')
             
-            logger.info(f'PDF file size: {file_size} bytes')
             
             # Store relative path (without MEDIA_ROOT)
             pdf_download.pdf_file_path = relative_path
@@ -624,20 +583,11 @@ def generate_pdf_task(self, pdf_download_id):
                 ).select_related('subscription').first()
                 
                 if order and order.subscription:
-                    # This was a subscription mock PDF download
-                    # Counter was already incremented when order was created,
-                    # but we can verify it here as a safety measure
-                    logger.info(
-                        f"Subscription mock PDF download completed. "
-                        f"Subscription: {order.subscription.id}, "
-                        f"Remaining: {order.subscription.get_remaining_mock_pdf_downloads()}"
-                    )
+                    pass
             except Exception as e:
-                logger.warning(f"Could not verify subscription mock PDF usage: {str(e)}")
+                pass
             
-            logger.info(f'PDF generation completed for download {pdf_download_id}')
         except Exception as e:
-            logger.error(f'Error creating PDF file for download {pdf_download_id}: {str(e)}', exc_info=True)
             # Clean up temp files on failure
             temp_files_to_cleanup = getattr(self, '_pdf_temp_files', [])
             for tmp in temp_files_to_cleanup:
@@ -655,10 +605,8 @@ def generate_pdf_task(self, pdf_download_id):
         return {'status': 'completed', 'download_id': pdf_download_id}
         
     except PDFDownload.DoesNotExist:
-        logger.error(f'PDF download {pdf_download_id} not found')
         raise
     except Exception as e:
-        logger.error(f'Error generating PDF for download {pdf_download_id}: {str(e)}', exc_info=True)
         # Update status to failed
         try:
             pdf_download = PDFDownload.objects.get(id=pdf_download_id)
@@ -682,7 +630,6 @@ def cleanup_design_pdf_files():
     error_count = 0
     media_root = getattr(settings, 'MEDIA_ROOT', None)
     if not media_root or not os.path.isdir(media_root):
-        logger.warning('[cleanup_design_pdf_files] MEDIA_ROOT not set or not a directory')
         return {'deleted': 0, 'errors': 0}
     qs = PDFDownload.objects.filter(pdf_file_path__isnull=False).exclude(pdf_file_path='')
     for pdf_download in qs:
@@ -693,18 +640,14 @@ def cleanup_design_pdf_files():
         if not os.path.isabs(rel_path):
             full_path = os.path.normpath(os.path.join(media_root, rel_path))
         if not full_path.startswith(os.path.normpath(media_root)):
-            logger.warning(f'[cleanup_design_pdf_files] Skipping path outside MEDIA_ROOT: {rel_path}')
             continue
         if not os.path.isfile(full_path):
             continue
         try:
             os.unlink(full_path)
             deleted_count += 1
-            logger.info(f'[cleanup_design_pdf_files] Deleted {rel_path}')
         except Exception as e:
             error_count += 1
-            logger.warning(f'[cleanup_design_pdf_files] Failed to delete {rel_path}: {e}')
-    logger.info(f'[cleanup_design_pdf_files] Deleted {deleted_count} files, {error_count} errors')
     return {'deleted': deleted_count, 'errors': error_count}
 
 
@@ -719,7 +662,7 @@ def _set_huggingface_timeout_for_visual_search(timeout_seconds=300):
         import httpx
         set_client_factory(lambda: httpx.Client(timeout=httpx.Timeout(float(timeout_seconds))))
     except Exception as e:
-        logger.warning("Could not set Hugging Face client timeout for visual search: %s", e)
+        pass
 
 
 @shared_task(bind=True, name='Catalog.tasks.index_product_visual_search')
@@ -738,12 +681,10 @@ def index_product_visual_search(self, product_id):
     try:
         product = Product.objects.filter(pk=product_id).first()
         if not product or not product.product_number:
-            logger.warning(f'[index_product_visual_search] Product {product_id} not found or has no product_number')
             return {'status': 'skipped', 'reason': 'product_not_found'}
 
         media_root = getattr(settings, 'MEDIA_ROOT', None)
         if not media_root or not os.path.isdir(media_root):
-            logger.warning(f'[index_product_visual_search] MEDIA_ROOT not set or not a directory')
             return {'status': 'skipped', 'reason': 'no_media_root'}
 
         media_list = get_related(product, 'Product:Media', Media).filter(media_type='image')
@@ -761,7 +702,6 @@ def index_product_visual_search(self, product_id):
                 img = Image.open(path)
                 img.load()
             except Exception as e:
-                logger.warning(f'[index_product_visual_search] Skip open failed product {product_id} {path}: {e}')
                 continue
             images_data.append({
                 'ProductId': str(product.product_number),
@@ -770,7 +710,6 @@ def index_product_visual_search(self, product_id):
             })
 
         if not images_data:
-            logger.debug(f'[index_product_visual_search] No PNG images for product {product_id}')
             return {'status': 'skipped', 'reason': 'no_png_images'}
 
         _set_huggingface_timeout_for_visual_search(300)
@@ -783,9 +722,7 @@ def index_product_visual_search(self, product_id):
         success_count = sum(1 for r in results if r.get('isIndexed'))
         if success_count and hasattr(Product, 'is_indexed'):
             Product.objects.filter(product_number=product.product_number).update(is_indexed=True)
-        logger.info(f'[index_product_visual_search] Product {product_id} ({product.product_number}): indexed {success_count}/{len(images_data)} PNG images')
         return {'status': 'ok', 'indexed': success_count, 'total': len(images_data)}
     except Exception as e:
-        logger.exception(f'[index_product_visual_search] Failed for product {product_id}: {e}')
         return {'status': 'failed', 'error': str(e)}
 

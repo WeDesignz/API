@@ -19,7 +19,6 @@ import zipfile
 from MediaFiles.models import Media, Relation
 from common.relations import get_related
 
-
 @swagger_auto_schema(
     method='get',
     operation_summary='Get Custom Requests',
@@ -94,7 +93,6 @@ def custom_requests_list(request):
             }, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-
 @swagger_auto_schema(
     method='get',
     operation_summary='Custom Request Detail',
@@ -163,7 +161,6 @@ def custom_request_detail(request, request_id):
         return Response({
             'message': 'Custom request deleted successfully'
         })
-
 
 @swagger_auto_schema(
     method='post',
@@ -300,7 +297,7 @@ def submit_custom_request(request):
                 # Log error but don't fail the entire request
                 import logging
                 logger = logging.getLogger(__name__)
-                logger.error(f"Error uploading file {file_obj.name}: {str(e)}")
+
                 continue
     
     # Create corresponding Order record with order_type='custom'
@@ -325,7 +322,6 @@ def submit_custom_request(request):
         'payment_message': 'Please complete payment to process your custom request',
         'uploaded_files': uploaded_files
     }, status=status.HTTP_201_CREATED)
-
 
 @swagger_auto_schema(
     method='get',
@@ -368,7 +364,6 @@ def custom_request_status(request, request_id):
         return Response({
             'error': 'Custom request not found'
         }, status=status.HTTP_404_NOT_FOUND)
-
 
 @swagger_auto_schema(
     method='post',
@@ -428,7 +423,6 @@ def cancel_custom_request(request, request_id):
             'error': 'Custom request not found'
         }, status=status.HTTP_404_NOT_FOUND)
 
-
 @swagger_auto_schema(
     method='get',
     operation_summary='Custom Request Timer',
@@ -486,7 +480,6 @@ def custom_request_timer(request, request_id):
         return Response({
             'error': 'Custom request not found'
         }, status=status.HTTP_404_NOT_FOUND)
-
 
 @swagger_auto_schema(
     method='get',
@@ -546,7 +539,6 @@ def custom_request_history(request):
         }
     })
 
-
 @swagger_auto_schema(
     method='get',
     operation_summary='Custom Request Media',
@@ -593,7 +585,6 @@ def custom_request_media(request, request_id):
         return Response({
             'error': 'Custom request not found'
         }, status=status.HTTP_404_NOT_FOUND)
-
 
 @swagger_auto_schema(
     method='get',
@@ -690,7 +681,7 @@ def download_custom_order_reference_files_zip(request, request_id):
                         # Log error but continue with other files
                         import logging
                         logger = logging.getLogger(__name__)
-                        logger.error(f'Error adding media {media.id} to zip: {str(e)}')
+
                         continue
         
         # Prepare response
@@ -707,11 +698,10 @@ def download_custom_order_reference_files_zip(request, request_id):
     except Exception as e:
         import logging
         logger = logging.getLogger(__name__)
-        logger.error(f'Error creating zip file for custom order {request_id}: {str(e)}')
+
         return Response({
             'error': f'Failed to create zip file: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 @swagger_auto_schema(
     method='get',
@@ -805,7 +795,7 @@ def download_custom_order_deliverables_zip(request, request_id):
                         # Log error but continue with other files
                         import logging
                         logger = logging.getLogger(__name__)
-                        logger.error(f'Error adding media {media.id} to zip: {str(e)}')
+
                         continue
         
         # Prepare response
@@ -822,11 +812,10 @@ def download_custom_order_deliverables_zip(request, request_id):
     except Exception as e:
         import logging
         logger = logging.getLogger(__name__)
-        logger.error(f'Error creating zip file for custom order {request_id}: {str(e)}')
+
         return Response({
             'error': f'Failed to create zip file: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 # ==================== COMMENT SYSTEM VIEWS ====================
 

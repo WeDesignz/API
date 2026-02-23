@@ -359,36 +359,22 @@ def generate_design_numbers_signal(sender, instance, **kwargs):
     # Only generate if both numbers are missing
     if not instance.product_number and not instance.studio_design_number:
         try:
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.info(f"Product pre_save signal: Generating design numbers for product by user {instance.created_by.id if instance.created_by else 'None'}")
-            
             # Get the studio's auto name from the creator
             if instance.created_by:
                 # Check if the creator has a studio
                 from Profiles.models import Studio
-                logger.info(f"Product pre_save signal: Querying Studio for user {instance.created_by.id}...")
                 studio = Studio.objects.filter(created_by=instance.created_by).first()
-                logger.info(f"Product pre_save signal: Studio query completed, studio={studio.id if studio else None}")
                 
                 if studio and studio.wedesignz_auto_name:
                     # Generate both design numbers
-                    logger.info(f"Product pre_save signal: Generating design numbers with studio name {studio.wedesignz_auto_name}...")
                     design_numbers = generate_design_numbers(studio.wedesignz_auto_name)
                     instance.product_number = design_numbers['general_number']
                     instance.studio_design_number = design_numbers['studio_number']
-                    logger.info(f"Product pre_save signal: Generated numbers - general={instance.product_number}, studio={instance.studio_design_number}")
                 else:
                     # Fallback to general number only if no studio
-                    logger.info(f"Product pre_save signal: No studio found, generating general number only...")
                     from common.studio_name_generator import design_number_generator
                     instance.product_number = design_number_generator.generate_general_design_number()
-                    logger.info(f"Product pre_save signal: Generated general number={instance.product_number}")
         except Exception as e:
-            # Log error but don't fail the save
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.error(f"Error generating design numbers: {str(e)}", exc_info=True)
             
             # Fallback to general number only
             from common.studio_name_generator import design_number_generator

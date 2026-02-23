@@ -13,7 +13,6 @@ from .models import PinterestIntegration, InstagramIntegration, InstagramPost
 
 logger = logging.getLogger(__name__)
 
-
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def pinterest_oauth_initiate(request):
@@ -43,12 +42,8 @@ def pinterest_oauth_initiate(request):
         f"&response_type=code"
         f"&scope=pins:write,pins:read,boards:read,boards:write"
     )
-    
-    logger.info(f"Pinterest OAuth authorization URL: client_id={app_id}, redirect_uri={redirect_uri_clean}")
-    
-    logger.info(f"Redirecting to Pinterest OAuth: {auth_url}")
-    return redirect(auth_url)
 
+    return redirect(auth_url)
 
 @api_view(['GET'])
 @permission_classes([AllowAny])
@@ -65,7 +60,7 @@ def pinterest_oauth_callback(request):
     admin_webapp_url = getattr(settings, 'ADMIN_WEBAPP_URL', 'https://admin.wedesignz.com')
     
     if error:
-        logger.error(f"Pinterest OAuth error: {error}")
+
         return HttpResponse(
             f"""
             <!DOCTYPE html>
@@ -419,10 +414,7 @@ def pinterest_oauth_callback(request):
         'Content-Type': 'application/x-www-form-urlencoded',
         'Accept': 'application/json',
     }
-    
-    logger.info(f"Exchanging code for token. Redirect URI: {redirect_uri_clean}")
-    logger.info(f"Client ID: {app_id}, Code: {code[:10]}...")
-    
+
     try:
         # Pinterest API v5 uses Basic Auth + form-encoded data
         response = requests.post(token_url, data=data, headers=headers, timeout=30)
@@ -556,9 +548,7 @@ def pinterest_oauth_callback(request):
         if request.user and request.user.is_authenticated:
             integration.created_by = request.user
         integration.save()
-        
-        logger.info("Successfully obtained and saved Pinterest access token")
-        
+
         # Auto-retry failed Pinterest posts if any exist
         try:
             from .tasks import retry_failed_pinterest_posts
@@ -566,10 +556,9 @@ def pinterest_oauth_callback(request):
             failed_count = PinterestPost.objects.filter(status='failed').count()
             if failed_count > 0:
                 retry_failed_pinterest_posts.delay()
-                logger.info(f"Queued retry for {failed_count} failed Pinterest posts")
+
         except Exception as e:
-            logger.warning(f"Could not queue retry for failed posts: {str(e)}")
-        
+
         # Try to get boards and auto-select or create one
         boards_info = ""
         auto_selected_board = None
@@ -591,8 +580,7 @@ def pinterest_oauth_callback(request):
                 integration.save()
                 
                 auto_selected_board = first_board
-                logger.info(f"Auto-selected Pinterest board: {board_name} (ID: {board_id})")
-                
+
                 boards_info = f"<h3>Your Pinterest Boards:</h3><ul>"
                 for board in boards[:10]:  # Show first 10 boards
                     b_id = board.get('id', '')
@@ -621,8 +609,7 @@ def pinterest_oauth_callback(request):
                         integration.save()
                         
                         auto_selected_board = new_board
-                        logger.info(f"Created and auto-selected Pinterest board: {board_name} (ID: {board_id})")
-                        
+
                         boards_info = f"<h3>Created New Board:</h3><ul>"
                         boards_info += f"<li><strong>{board_name}</strong> ✅ (Auto-selected)<br><code>{board_id}</code></li>"
                         boards_info += "</ul><p><em>Note: In sandbox mode, boards may not appear in the list but can still be used.</em></p>"
@@ -632,7 +619,7 @@ def pinterest_oauth_callback(request):
                     boards_info = "<p><em>No boards found. Please create a board in Pinterest and select it in Settings.</em></p>"
                     
         except Exception as e:
-            logger.warning(f"Could not fetch/create boards: {str(e)}", exc_info=True)
+
             boards_info = "<p><em>Could not fetch boards. You can get your board ID from Pinterest API later.</em></p>"
         
         # Get admin webapp URL
@@ -870,13 +857,13 @@ def pinterest_oauth_callback(request):
         )
         
     except requests.exceptions.RequestException as e:
-        logger.error(f"Failed to exchange code for token: {str(e)}")
+
         error_msg = str(e)
         if hasattr(e, 'response') and e.response is not None:
             try:
                 error_data = e.response.json()
                 error_msg = error_data.get('message', error_data.get('error_description', str(e)))
-                logger.error(f"Pinterest API Error: {error_data}")
+
             except:
                 error_msg = e.response.text[:500]
         
@@ -999,7 +986,6 @@ def pinterest_oauth_callback(request):
             status=400
         )
 
-
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def pinterest_status(request):
@@ -1021,7 +1007,6 @@ def pinterest_status(request):
     }
     
     return JsonResponse(status_data)
-
 
 @api_view(['GET'])
 @permission_classes([AllowAny])
@@ -1072,19 +1057,17 @@ def pinterest_boards(request):
                 integration.board_id = str(new_board.get('id', ''))
                 integration.board_name = new_board.get('name', 'Design Gallery')
                 integration.save()
-                logger.info(f"Created and auto-selected board: {integration.board_name} (ID: {integration.board_id})")
-        
+
         return JsonResponse({
             'success': True,
             'boards': boards
         })
         
     except Exception as e:
-        logger.error(f"Error fetching Pinterest boards: {str(e)}", exc_info=True)
+
         return JsonResponse({
             'error': f'Error fetching boards: {str(e)}'
         }, status=500)
-
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
@@ -1140,9 +1123,7 @@ def pinterest_set_board(request):
                 except:
                     integration.board_name = board_name or f"Board {board_id}"
             integration.save()
-            
-            logger.info(f"Pinterest board set (sandbox): {integration.board_name} (ID: {integration.board_id})")
-            
+
             return JsonResponse({
                 'success': True,
                 'message': 'Board set successfully',
@@ -1177,9 +1158,7 @@ def pinterest_set_board(request):
             elif board_found.get('name'):
                 integration.board_name = board_found.get('name')
             integration.save()
-            
-            logger.info(f"Pinterest board set: {integration.board_name} (ID: {integration.board_id})")
-            
+
             return JsonResponse({
                 'success': True,
                 'message': 'Board set successfully',
@@ -1188,11 +1167,10 @@ def pinterest_set_board(request):
             })
         
     except Exception as e:
-        logger.error(f"Error setting Pinterest board: {str(e)}", exc_info=True)
+
         return JsonResponse({
             'error': f'Error setting board: {str(e)}'
         }, status=500)
-
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
@@ -1240,9 +1218,7 @@ def pinterest_create_board(request):
             return JsonResponse({
                 'error': 'Failed to create board. Check server logs for details.'
             }, status=500)
-        
-        logger.info(f"Pinterest board created: {new_board.get('name')} (ID: {new_board.get('id')})")
-        
+
         return JsonResponse({
             'success': True,
             'message': 'Board created successfully',
@@ -1256,11 +1232,10 @@ def pinterest_create_board(request):
         })
         
     except Exception as e:
-        logger.error(f"Error creating Pinterest board: {str(e)}", exc_info=True)
+
         return JsonResponse({
             'error': f'Error creating board: {str(e)}'
         }, status=500)
-
 
 @api_view(['PATCH'])
 @permission_classes([AllowAny])
@@ -1321,9 +1296,7 @@ def pinterest_update_board(request):
             if name:
                 integration.board_name = name
                 integration.save(update_fields=['board_name'])
-        
-        logger.info(f"Pinterest board updated: {updated_board.get('name')} (ID: {updated_board.get('id')})")
-        
+
         return JsonResponse({
             'success': True,
             'message': 'Board updated successfully',
@@ -1337,11 +1310,10 @@ def pinterest_update_board(request):
         })
         
     except Exception as e:
-        logger.error(f"Error updating Pinterest board: {str(e)}", exc_info=True)
+
         return JsonResponse({
             'error': f'Error updating board: {str(e)}'
         }, status=500)
-
 
 @api_view(['DELETE'])
 @permission_classes([AllowAny])
@@ -1388,20 +1360,17 @@ def pinterest_delete_board(request, board_id=None):
             return JsonResponse({
                 'error': 'Failed to delete board. Check server logs for details.'
             }, status=500)
-        
-        logger.info(f"Pinterest board deleted: {board_id}")
-        
+
         return JsonResponse({
             'success': True,
             'message': 'Board deleted successfully'
         })
         
     except Exception as e:
-        logger.error(f"Error deleting Pinterest board: {str(e)}", exc_info=True)
+
         return JsonResponse({
             'error': f'Error deleting board: {str(e)}'
         }, status=500)
-
 
 # ==================== INSTAGRAM VIEWS ====================
 
@@ -1440,11 +1409,8 @@ def instagram_oauth_initiate(request):
         f"&scope=pages_show_list,pages_read_engagement,business_management,instagram_content_publish"
         f"&state=instagram_auth"
     )
-    
-    logger.info(f"Instagram OAuth authorization URL: client_id={app_id}, redirect_uri={redirect_uri_clean}")
-    logger.info(f"Redirecting to Facebook OAuth for Instagram: {auth_url}")
-    return redirect(auth_url)
 
+    return redirect(auth_url)
 
 @api_view(['GET'])
 @permission_classes([AllowAny])
@@ -1466,7 +1432,7 @@ def instagram_oauth_callback(request):
         error_msg = error
         if error_description:
             error_msg += f": {error_description}"
-        logger.error(f"Instagram OAuth error: {error_msg}")
+
         return HttpResponse(
             f"""
             <!DOCTYPE html>
@@ -1689,7 +1655,7 @@ def instagram_oauth_callback(request):
     redirect_uri = getattr(settings, 'INSTAGRAM_REDIRECT_URI', None)
     
     if not app_id or not app_secret:
-        logger.error("Facebook/Instagram App ID or Secret not configured")
+
         return HttpResponse(
             f"""
             <!DOCTYPE html>
@@ -1803,10 +1769,9 @@ def instagram_oauth_callback(request):
         pages_data = pages_response.json()
         
         # Add detailed logging to debug what's being returned
-        logger.info(f"Pages API response received. Number of pages: {len(pages_data.get('data', []))}")
+
         if pages_data.get('data'):
-            logger.info(f"First page sample keys: {list(pages_data['data'][0].keys())}")
-        
+
         instagram_account_id = None
         instagram_username = None
         page_access_token = None  # This is the token we need for Instagram API
@@ -1814,25 +1779,18 @@ def instagram_oauth_callback(request):
         
         # Find the Instagram Business Account
         for page in pages_data.get('data', []):
-            logger.info(f"Processing page: ID={page.get('id')}, name={page.get('name')}")
-            logger.info(f"Page has 'access_token' field: {'access_token' in page}")
-            logger.info(f"Page has 'instagram_business_account': {'instagram_business_account' in page}")
-            
+
             if 'instagram_business_account' in page:
                 instagram_account = page['instagram_business_account']
                 instagram_account_id = instagram_account.get('id')
                 page_id = page.get('id')
-                
-                logger.info(f"Found Instagram Business Account ID: {instagram_account_id} for page: {page_id}")
-                
+
                 # CRITICAL: Get the page access token (required for Instagram Graph API)
                 # The page access token is different from the user's long-lived token
                 page_access_token = page.get('access_token')
                 
                 if not page_access_token:
-                    logger.warning(f"Page {page_id} has Instagram Business Account but no access_token in response")
-                    logger.warning(f"Trying fallback method to get page access token...")
-                    
+
                     # FALLBACK: Try to get page access token by querying the page directly
                     try:
                         page_token_url = f"https://graph.facebook.com/v18.0/{page_id}"
@@ -1845,16 +1803,15 @@ def instagram_oauth_callback(request):
                             page_token_data = page_token_response.json()
                             page_access_token = page_token_data.get('access_token')
                             if page_access_token:
-                                logger.info(f"Successfully retrieved page access token via fallback method")
+
                             else:
-                                logger.warning(f"Fallback method returned no access_token")
+
                         else:
-                            logger.warning(f"Fallback method failed with status {page_token_response.status_code}: {page_token_response.text[:200]}")
+
                     except Exception as e:
-                        logger.warning(f"Fallback method exception: {e}")
-                    
+
                     if not page_access_token:
-                        logger.warning(f"Could not get access token for page {page_id}, trying next page...")
+
                         continue
                 
                 # Get Instagram account details using the page access token
@@ -1872,9 +1829,9 @@ def instagram_oauth_callback(request):
                         instagram_data = instagram_response.json()
                         # Username is deprecated, so we can't get it from API
                         instagram_username = None
-                        logger.info(f"Instagram Business Account ID verified successfully")
+
                     else:
-                        logger.warning(f"Could not verify Instagram Business Account ID: {instagram_response.text[:200]}")
+
                     break
         
         # Validate that we have the required page access token
@@ -1887,24 +1844,20 @@ def instagram_oauth_callback(request):
                 f"Make sure your Instagram Business account is linked to a Facebook Page "
                 f"and you have granted 'pages_show_list' and 'pages_read_engagement' permissions."
             )
-            logger.error(error_msg)
-            logger.error(f"Full pages response structure: {list(pages_data.keys())}")
+
             if pages_data.get('data'):
-                logger.error(f"Sample page structure: {list(pages_data['data'][0].keys()) if pages_data['data'] else 'No pages'}")
+
             raise ValueError(error_msg)
         
         if not instagram_account_id:
             error_msg = "No Instagram Business Account found. Make sure your Instagram account is a Business or Creator account and is linked to a Facebook Page."
-            logger.error(error_msg)
+
             raise ValueError(error_msg)
         
         # Validate that we have the Instagram Business Account ID (not a Page ID)
         # Instagram Business Account IDs are typically 15-17 digits
         # Facebook Page IDs are typically shorter (10-12 digits)
-        logger.info(f"Found Instagram Business Account ID: {instagram_account_id}")
-        logger.info(f"Page ID: {page.get('id')}")
-        logger.info(f"Page Access Token (first 20 chars): {page_access_token[:20] if page_access_token else 'None'}...")
-        
+
         # Verify the Instagram Business Account ID is valid by testing it
         try:
             verify_url = f"https://graph.facebook.com/v18.0/{instagram_account_id}"
@@ -1916,11 +1869,11 @@ def instagram_oauth_callback(request):
             if verify_response.status_code != 200:
                 error_data = verify_response.json() if verify_response.text else {}
                 error_msg = error_data.get('error', {}).get('message', 'Invalid Instagram Business Account ID')
-                logger.error(f"Instagram Business Account ID validation failed: {error_msg}")
+
                 raise ValueError(f"Invalid Instagram Business Account ID: {error_msg}")
-            logger.info(f"Instagram Business Account ID validated successfully: {instagram_account_id}")
+
         except requests.exceptions.RequestException as e:
-            logger.warning(f"Could not verify Instagram Business Account ID: {e}")
+
             # Continue anyway, but log the warning
         
         # Save to database
@@ -1940,13 +1893,7 @@ def instagram_oauth_callback(request):
             integration.created_by = request.user
         
         integration.save()
-        
-        logger.info(f"Instagram OAuth successful!")
-        logger.info(f"  - Instagram Business Account ID (user_id): {integration.user_id}")
-        logger.info(f"  - Username: {integration.username or 'N/A (deprecated field)'}")
-        logger.info(f"  - Access Token: {integration.access_token[:30] if integration.access_token else 'None'}...")
-        logger.info(f"  - Token Expires: {integration.token_expires_at}")
-        
+
         # Return success page
         token_expires_at = integration.token_expires_at
         return HttpResponse(
@@ -2154,8 +2101,7 @@ def instagram_oauth_callback(request):
                 error_msg = error_data.get('error', {}).get('message', str(e))
             except:
                 error_msg = e.response.text[:500]
-        
-        logger.error(f"Instagram OAuth token exchange failed: {error_msg}", exc_info=True)
+
         return HttpResponse(
             f"""
             <!DOCTYPE html>
@@ -2219,7 +2165,7 @@ def instagram_oauth_callback(request):
             status=500
         )
     except Exception as e:
-        logger.error(f"Instagram OAuth error: {str(e)}", exc_info=True)
+
         return HttpResponse(
             f"""
             <!DOCTYPE html>
@@ -2283,7 +2229,6 @@ def instagram_oauth_callback(request):
             status=500
         )
 
-
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def instagram_status(request):
@@ -2305,7 +2250,6 @@ def instagram_status(request):
     
     return JsonResponse(status_data)
 
-
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def instagram_post(request):
@@ -2313,17 +2257,12 @@ def instagram_post(request):
     Create a single Instagram post.
     Accepts a single post object and queues it for async processing.
     """
-    logger.info("Instagram post request received")
-    logger.info(f"Request method: {request.method}, Content-Type: {request.content_type}")
-    logger.info(f"Request data: {request.data}")
-    
+
     # Get single post data (support both direct object and wrapped in 'post' key)
     post_data = request.data.get('post') or request.data
-    
-    logger.info(f"Extracted post_data: {post_data}")
-    
+
     if not post_data:
-        logger.error("No post data provided in request")
+
         return JsonResponse({
             'error': 'Post data is required'
         }, status=400)
@@ -2332,19 +2271,19 @@ def instagram_post(request):
     integration = InstagramIntegration.get_instance()
     
     if not integration.is_enabled:
-        logger.warning("Instagram integration is disabled")
+
         return JsonResponse({
             'error': 'Instagram integration is disabled'
         }, status=400)
     
     if not integration.access_token:
-        logger.warning("Instagram access token not configured")
+
         return JsonResponse({
             'error': 'Instagram access token not configured. Please authorize first.'
         }, status=400)
     
     if not integration.is_token_valid():
-        logger.warning("Instagram access token expired")
+
         return JsonResponse({
             'error': 'Instagram access token expired. Please re-authorize.'
         }, status=400)
@@ -2352,17 +2291,13 @@ def instagram_post(request):
     try:
         from Catalog.models import Product
         from .tasks import post_to_instagram
-        
-        logger.info(f"Successfully imported Product and post_to_instagram task")
-        
+
         # Extract post data
         product_id = post_data.get('productId')
         media_type = post_data.get('mediaType')
         caption = post_data.get('caption', '')
         post_type = post_data.get('postType', 'post')
-        
-        logger.info(f"=== Processing Instagram post: product_id={product_id}, media_type={media_type}, post_type={post_type}, caption_length={len(caption)} ===")
-        
+
         # Validate required fields
         if not product_id:
             return JsonResponse({
@@ -2388,8 +2323,7 @@ def instagram_post(request):
         # For stories, caption is not used (Instagram Stories don't support captions)
         if post_type == 'story':
             caption = ''  # Ensure caption is empty for stories
-            logger.info("Story post detected - caption will not be used")
-        
+
         # Get product
         try:
             product = Product.objects.get(id=product_id)
@@ -2407,28 +2341,23 @@ def instagram_post(request):
                 post_type=post_type,
                 status='pending'
             )
-            logger.info(f"Created InstagramPost record ID: {instagram_post.id} for product {product_id}")
+
         except Exception as e:
             error_msg = f"Failed to create InstagramPost record: {str(e)}"
-            logger.error(f"Failed to create post: {error_msg}", exc_info=True)
+
             return JsonResponse({
                 'error': error_msg
             }, status=500)
         
         # Queue Celery task for async posting
         try:
-            logger.info(f"=== ATTEMPTING TO QUEUE TASK for post {instagram_post.id}, type: {post_type}, media_type: {media_type} ===")
-            logger.info(f"Post details: product_id={product_id}, caption_length={len(caption)}, status={instagram_post.status}")
-            
+
             task_result = post_to_instagram.delay(instagram_post.id)
-            
-            logger.info(f"=== TASK QUEUED: task_result={task_result}, task_id={task_result.id if task_result else 'None'} ===")
-            logger.info(f"Task result type: {type(task_result)}, has id: {hasattr(task_result, 'id') if task_result else False}")
-            
+
             # Verify task was queued
             if not task_result:
                 error_msg = "Task queuing returned None (no task result)"
-                logger.error(f"Post {instagram_post.id} failed: {error_msg}")
+
                 instagram_post.status = 'failed'
                 instagram_post.error_message = error_msg
                 instagram_post.save(update_fields=['status', 'error_message'])
@@ -2438,16 +2367,14 @@ def instagram_post(request):
             
             if not hasattr(task_result, 'id') or not task_result.id:
                 error_msg = f"Task queuing returned no task ID. Task result: {task_result}, type: {type(task_result)}"
-                logger.error(f"Post {instagram_post.id} failed: {error_msg}")
+
                 instagram_post.status = 'failed'
                 instagram_post.error_message = error_msg
                 instagram_post.save(update_fields=['status', 'error_message'])
                 return JsonResponse({
                     'error': error_msg
                 }, status=500)
-            
-            logger.info(f"=== SUCCESS: Queued task {task_result.id} for post {instagram_post.id}, product {product_id}, type: {post_type} ===")
-            
+
             return JsonResponse({
                 'message': 'Post queued for Instagram',
                 'post_id': instagram_post.id,
@@ -2459,25 +2386,22 @@ def instagram_post(request):
             
         except Exception as e:
             error_msg = f"Failed to queue Instagram post task: {str(e)}"
-            logger.error(f"=== EXCEPTION QUEUING TASK for post {instagram_post.id}, type: {post_type} ===", exc_info=True)
-            logger.error(f"Exception type: {type(e).__name__}, Message: {str(e)}")
-            logger.error(f"Exception traceback:", exc_info=True)
+
             try:
                 instagram_post.status = 'failed'
                 instagram_post.error_message = error_msg
                 instagram_post.save(update_fields=['status', 'error_message'])
             except Exception as save_error:
-                logger.error(f"Failed to update InstagramPost {instagram_post.id} status: {save_error}", exc_info=True)
+
             return JsonResponse({
                 'error': error_msg
             }, status=500)
         
     except Exception as e:
-        logger.error(f"Critical error creating Instagram post: {str(e)}", exc_info=True)
+
         return JsonResponse({
             'error': f'Error creating post: {str(e)}'
         }, status=500)
-
 
 @api_view(['GET'])
 @permission_classes([AllowAny])

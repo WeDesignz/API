@@ -27,10 +27,7 @@ from Catalog.models import Product, PDFDownload
 from Orders.models import Invoice
 from common.relations import get_related_for_right
 import os
-import logging
 import shutil
-
-logger = logging.getLogger(__name__)
 
 
 class Command(BaseCommand):
@@ -218,11 +215,9 @@ class Command(BaseCommand):
                     stats['errors'] += 1
                     if verbose:
                         self.stdout.write(self.style.ERROR(f'    ✗ Error: {str(e)}'))
-                    logger.error(f'Error migrating invoice {invoice.id}: {str(e)}', exc_info=True)
 
             except Exception as e:
                 stats['errors'] += 1
-                logger.error(f'Error processing invoice {invoice.id}: {str(e)}', exc_info=True)
 
         return stats
 
@@ -299,11 +294,9 @@ class Command(BaseCommand):
                     stats['errors'] += 1
                     if verbose:
                         self.stdout.write(self.style.ERROR(f'    ✗ Error: {str(e)}'))
-                    logger.error(f'Error migrating PDF {pdf_download.id}: {str(e)}', exc_info=True)
 
             except Exception as e:
                 stats['errors'] += 1
-                logger.error(f'Error processing PDF {pdf_download.id}: {str(e)}', exc_info=True)
 
         return stats
 
@@ -393,13 +386,11 @@ class Command(BaseCommand):
                     stats['errors'] += 1
                     if verbose:
                         self.stdout.write(self.style.ERROR(f'    ✗ Error: {str(e)}'))
-                    logger.error(f'Error migrating media {media_id}: {str(e)}', exc_info=True)
 
             except Media.DoesNotExist:
                 continue
             except Exception as e:
                 stats['errors'] += 1
-                logger.error(f'Error processing media {media_id}: {str(e)}', exc_info=True)
 
         return stats
 
@@ -473,11 +464,9 @@ class Command(BaseCommand):
                         stats['errors'] += 1
                         if verbose:
                             self.stdout.write(self.style.ERROR(f'    ✗ Error: {str(e)}'))
-                        logger.error(f'Error migrating bulk upload {filename}: {str(e)}', exc_info=True)
 
                 except Exception as e:
                     stats['errors'] += 1
-                    logger.error(f'Error processing bulk upload {filename}: {str(e)}', exc_info=True)
 
         return stats
 
@@ -551,11 +540,9 @@ class Command(BaseCommand):
                         stats['errors'] += 1
                         if verbose:
                             self.stdout.write(self.style.ERROR(f'    ✗ Error: {str(e)}'))
-                        logger.error(f'Error migrating temp upload {filename}: {str(e)}', exc_info=True)
 
                 except Exception as e:
                     stats['errors'] += 1
-                    logger.error(f'Error processing temp upload {filename}: {str(e)}', exc_info=True)
 
         return stats
 
@@ -639,11 +626,9 @@ class Command(BaseCommand):
                     stats['errors'] += 1
                     if verbose:
                         self.stdout.write(self.style.ERROR(f'    ✗ Error: {str(e)}'))
-                    logger.error(f'Error migrating profile photo {media_id}: {str(e)}', exc_info=True)
                     
             except Exception as e:
                 stats['errors'] += 1
-                logger.error(f'Error processing profile photo {media_id}: {str(e)}', exc_info=True)
         
         return stats
 
@@ -756,11 +741,9 @@ class Command(BaseCommand):
                     stats['errors'] += 1
                     if verbose:
                         self.stdout.write(self.style.ERROR(f'    ✗ Error: {str(e)}'))
-                    logger.error(f'Error migrating document {media_id}: {str(e)}', exc_info=True)
                     
             except Exception as e:
                 stats['errors'] += 1
-                logger.error(f'Error processing document {media_id}: {str(e)}', exc_info=True)
         
         return stats
 
@@ -860,11 +843,9 @@ class Command(BaseCommand):
                     stats['errors'] += 1
                     if verbose:
                         self.stdout.write(self.style.ERROR(f'    ✗ Error: {str(e)}'))
-                    logger.error(f'Error migrating deliverable {media_id}: {str(e)}', exc_info=True)
                     
             except Exception as e:
                 stats['errors'] += 1
-                logger.error(f'Error processing deliverable {media_id}: {str(e)}', exc_info=True)
         
         return stats
 
@@ -943,7 +924,6 @@ class Command(BaseCommand):
                     stats['errors'] += 1
                     if verbose:
                         self.stdout.write(self.style.ERROR(f'  ✗ Error removing {folder_name}/: {str(e)}'))
-                    logger.error(f'Error removing folder {folder_path}: {str(e)}', exc_info=True)
         
         # Check and remove old user/product folders (old structure: {user_id}/{product_id}/)
         # These should be empty after migration to {user_id}/designs/{product_id}/
@@ -1000,7 +980,6 @@ class Command(BaseCommand):
                             ))
         except Exception as e:
             stats['errors'] += 1
-            logger.error(f'Error cleaning up old user/product folders: {str(e)}', exc_info=True)
         
         # Check media/ folder - only remove if it's empty or only has non-user files
         media_folder_path = os.path.join(media_root, 'media')
@@ -1021,7 +1000,6 @@ class Command(BaseCommand):
                 stats['errors'] += 1
                 if verbose:
                     self.stdout.write(self.style.ERROR(f'  ✗ Error removing media/: {str(e)}'))
-                logger.error(f'Error removing media folder: {str(e)}', exc_info=True)
         
         return stats
     
@@ -1056,7 +1034,7 @@ class Command(BaseCommand):
                                 f'  ⊘ Could not remove {dir_path}: {str(e)}'
                             ))
         except Exception as e:
-            logger.error(f'Error removing empty subdirectories in {folder_path}: {str(e)}', exc_info=True)
+            pass
         
         return removed_count
 

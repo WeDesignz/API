@@ -17,13 +17,10 @@ Usage:
 
 import os
 import re
-import logging
 from django.core.management.base import BaseCommand
 from django.core.files.storage import default_storage
 from Catalog.models import Product
 from MediaFiles.models import Media, Relation
-
-logger = logging.getLogger(__name__)
 
 
 class Command(BaseCommand):
@@ -158,7 +155,7 @@ class Command(BaseCommand):
                                     try:
                                         default_storage.delete(current_path)
                                     except Exception as e:
-                                        logger.warning(f'Could not delete file {current_path}: {str(e)}')
+                                        pass
                                 # Delete the duplicate Media object
                                 media.delete()
                                 stats['moved'] += 1
@@ -188,7 +185,7 @@ class Command(BaseCommand):
                         try:
                             default_storage.delete(current_path)
                         except Exception as e:
-                            logger.warning(f'Could not delete old file {current_path}: {str(e)}')
+                            pass
                             error_details.append({'media_id': media.id, 'error': f'Failed to delete old file: {str(e)}'})
 
                         stats['moved'] += 1
@@ -207,7 +204,6 @@ class Command(BaseCommand):
                     stats['errors'] += 1
                     error_msg = f'Unexpected error processing media {media.id}: {str(e)}'
                     error_details.append({'media_id': media.id, 'error': error_msg})
-                    logger.error(error_msg, exc_info=True)
                     if verbose:
                         self.stdout.write(self.style.ERROR(f'  ✗ {error_msg}'))
 
@@ -219,7 +215,6 @@ class Command(BaseCommand):
                 stats['errors'] += 1
                 error_msg = f'Unexpected error processing media {media.id}: {str(e)}'
                 error_details.append({'media_id': media.id, 'error': error_msg})
-                logger.error(error_msg, exc_info=True)
                 if verbose:
                     self.stdout.write(self.style.ERROR(f'  ✗ {error_msg}'))
 

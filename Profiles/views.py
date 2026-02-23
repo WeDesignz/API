@@ -31,7 +31,6 @@ from .serializers import (
     DesignProcessingTaskSerializer
 )
 
-
 @swagger_auto_schema(
     method='get',
     operation_summary='Addresses List',
@@ -73,7 +72,6 @@ def addresses_list(request):
                 'address': serializer.data
             }, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
 
 @swagger_auto_schema(
     method='get',
@@ -128,7 +126,6 @@ def address_detail(request, address_id):
             'message': 'Address deleted successfully'
         })
 
-
 @swagger_auto_schema(
     method='get',
     operation_summary='Designer Profile',
@@ -181,7 +178,6 @@ def designer_profile(request):
             }, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-
 @swagger_auto_schema(
     method='get',
     operation_summary='Studios List',
@@ -232,7 +228,6 @@ def studios_list(request):
         'total_studios': studios.count()
     })
 
-
 @swagger_auto_schema(
     method='get',
     operation_summary='Studio Detail',
@@ -280,7 +275,6 @@ def studio_detail(request, studio_id):
             })
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-
 @swagger_auto_schema(
     method='post',
     operation_summary='Create Studio',
@@ -323,7 +317,6 @@ def create_studio(request):
             'studio': serializer.data
         }, status=status.HTTP_201_CREATED)
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
 
 @swagger_auto_schema(
     method='get',
@@ -477,9 +470,7 @@ def studio_business_details(request, studio_id):
                 }, status=status.HTTP_201_CREATED)
             
             # Log validation errors for debugging
-            logger.error(f'Studio business details validation failed: {serializer.errors}')
-            logger.error(f'Data sent: {data}')
-            
+
             # Return detailed validation errors
             return Response({
                 'error': 'Validation failed',
@@ -487,12 +478,11 @@ def studio_business_details(request, studio_id):
             }, status=status.HTTP_400_BAD_REQUEST)
             
         except Exception as e:
-            logger.error(f'Error updating studio business details: {str(e)}', exc_info=True)
+
             return Response({
                 'error': 'An error occurred while updating business details',
                 'detail': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 @swagger_auto_schema(
     method='get',
@@ -585,7 +575,6 @@ def studio_members(request, studio_id):
                     'error': f'Failed to add studio member: {error_message}'
                 }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
 
 @swagger_auto_schema(
     method='post',
@@ -689,7 +678,6 @@ def create_studio_member_with_user(request, studio_id):
             'error': f'Failed to create studio member: {error_message}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-
 @swagger_auto_schema(
     method='post',
     operation_summary='Send Login Credentials to Studio Member',
@@ -769,7 +757,6 @@ def send_studio_member_credentials(request, studio_id, member_id):
             'error': f'Failed to send credentials: {error_message}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-
 @swagger_auto_schema(
     method='get',
     operation_summary='Studio Member Detail',
@@ -844,13 +831,12 @@ def studio_member_detail(request, studio_id, member_id):
         except Exception as e:
             import logging
             logger = logging.getLogger(__name__)
-            logger.error(f'Error deleting studio member: {e}')
+
             import traceback
-            logger.error(traceback.format_exc())
+
             return Response({
                 'error': f'Failed to delete studio member: {str(e)}'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 @swagger_auto_schema(
     method='get',
@@ -910,7 +896,6 @@ def ratings_list(request):
             }, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-
 @swagger_auto_schema(
     method='get',
     operation_summary='Studio Ratings',
@@ -953,7 +938,6 @@ def studio_ratings(request, studio_id):
         'total_ratings': ratings.count()
     })
 
-
 @swagger_auto_schema(
     method='get',
     operation_summary='My Studios',
@@ -986,7 +970,6 @@ def my_studios(request):
         'total_studios': studios.count()
     })
 
-
 @swagger_auto_schema(
     method='get',
     operation_summary='My Ratings',
@@ -1018,7 +1001,6 @@ def my_ratings(request):
         'ratings': RatingsSerializer(ratings, many=True).data,
         'total_ratings': ratings.count()
     })
-
 
 @swagger_auto_schema(
     method='get',
@@ -1059,7 +1041,6 @@ def top_studios(request):
         'top_studios': StudioSerializer(studios, many=True).data,
         'total_studios': studios.count()
     })
-
 
 @swagger_auto_schema(
     method='get',
@@ -1107,7 +1088,6 @@ def studio_member_ratings(request, studio_id, member_id):
         'average_rating': round(average_rating, 2),
         'total_ratings': ratings.count()
     })
-
 
 # ==================== DESIGNER CONSOLE VIEWS ====================
 
@@ -1281,7 +1261,6 @@ def designer_onboarding_step1(request):
             'detail': str(e) if settings.DEBUG else 'An error occurred while saving your data'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-
 @swagger_auto_schema(
     method='post',
     operation_summary='Verify Otp',
@@ -1378,7 +1357,6 @@ def verify_otp(request):
         return Response({
             'error': 'Invalid OTP'
         }, status=status.HTTP_400_BAD_REQUEST)
-
 
 @swagger_auto_schema(
     method='post',
@@ -1541,7 +1519,6 @@ def designer_onboarding_step2(request):
             'error': f'Failed to save Step 2 data: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-
 @swagger_auto_schema(
     method='post',
     operation_summary='Designer Onboarding Step3',
@@ -1660,7 +1637,6 @@ def designer_onboarding_step3(request):
             'error': f'Failed to save Step 3 data: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-
 @swagger_auto_schema(
     method='post',
     operation_summary='Designer Onboarding Step4',
@@ -1698,7 +1674,6 @@ def designer_onboarding_step4(request):
     
     # Otherwise, handle design upload (zip file)
     return handle_design_upload(request)
-
 
 def save_bank_details(request):
     """
@@ -1763,7 +1738,6 @@ def save_bank_details(request):
             'error': f'Failed to save bank details: {str(e)}',
             'traceback': error_traceback if settings.DEBUG else None
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 def handle_design_upload(request):
     """
@@ -2112,12 +2086,11 @@ def handle_design_upload(request):
             # Verify the file was saved correctly
             import logging
             logger = logging.getLogger(__name__)
-            logger.info(f"Saved zip file - requested path: {zip_file_path}, saved path: {saved_path}")
+
             if not default_storage.exists(saved_path):
-                logger.error(f"WARNING: File was saved but cannot be verified at path: {saved_path}")
+
             else:
-                logger.info(f"Verified: File exists at saved path: {saved_path}")
-            
+
             # Create DesignProcessingTask record
             with transaction.atomic():
                 processing_task = DesignProcessingTask.objects.create(
@@ -2169,8 +2142,7 @@ def handle_design_upload(request):
             error_traceback = traceback.format_exc()
             import logging
             logger = logging.getLogger(__name__)
-            logger.error(f"Error saving zip file: {str(e)}")
-            logger.error(error_traceback)
+
             return Response({
                 'error': f'Failed to save zip file: {str(e)}',
                 'traceback': error_traceback if settings.DEBUG else None
@@ -2189,7 +2161,6 @@ def handle_design_upload(request):
             'error': f'Failed to process zip file: {str(e)}',
             'traceback': error_traceback if settings.DEBUG else None
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 @swagger_auto_schema(
     method='get',
@@ -2227,7 +2198,6 @@ def get_design_processing_progress(request):
             'error': 'Task not found'
         }, status=status.HTTP_404_NOT_FOUND)
 
-
 @swagger_auto_schema(
     method='get',
     operation_summary='Get Design Processing Status',
@@ -2260,7 +2230,6 @@ def get_design_processing_status(request):
         return Response({
             'error': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 def stream_design_processing_progress(request):
     """
@@ -2304,13 +2273,13 @@ def stream_design_processing_progress(request):
                 except User.DoesNotExist:
                     import logging
                     logger = logging.getLogger(__name__)
-                    logger.warning(f'SSE: User {user_id} not found')
+
                     user = None
         except JWTTokenError as e:
             # Token is invalid (expired, malformed, etc.)
             import logging
             logger = logging.getLogger(__name__)
-            logger.warning(f'SSE: Invalid token - {str(e)}')
+
             user = None
         except Exception as e:
             # Log unexpected errors (including database connection errors)
@@ -2318,9 +2287,9 @@ def stream_design_processing_progress(request):
             from django.db import OperationalError
             logger = logging.getLogger(__name__)
             if isinstance(e, OperationalError) and 'too many clients' in str(e):
-                logger.error('SSE authentication failed: Database connection pool exhausted')
+
             else:
-                logger.error(f'SSE authentication unexpected error: {str(e)}', exc_info=True)
+
             user = None
     
     # Fallback: Try JWT authentication from Authorization header if no token in query
@@ -2333,12 +2302,12 @@ def stream_design_processing_progress(request):
         except (AuthenticationFailed, InvalidToken, TokenError) as e:
             import logging
             logger = logging.getLogger(__name__)
-            logger.warning(f'SSE JWT header authentication failed: {str(e)}')
+
             user = None
         except Exception as e:
             import logging
             logger = logging.getLogger(__name__)
-            logger.error(f'SSE JWT header authentication error: {str(e)}', exc_info=True)
+
             user = None
     
     # Don't try request.user fallback - it requires database access for session lookup
@@ -2443,7 +2412,6 @@ def stream_design_processing_progress(request):
     response['X-Accel-Buffering'] = 'no'  # Disable buffering in nginx
     return response
 
-
 @swagger_auto_schema(
     method='get',
     operation_summary='Get Designer Onboarding Step 1 Data',
@@ -2518,7 +2486,6 @@ def get_designer_onboarding_step1(request):
             'data': None,
             'message': 'No Step 1 data found'
         }, status=status.HTTP_404_NOT_FOUND)
-
 
 @swagger_auto_schema(
     method='get',
@@ -2613,7 +2580,6 @@ def get_designer_onboarding_step2(request):
             'error': f'Failed to retrieve Step 2 data: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-
 @swagger_auto_schema(
     method='get',
     operation_summary='Get Designer Onboarding Step 3 Data',
@@ -2667,7 +2633,6 @@ def get_designer_onboarding_step3(request):
             'error': f'Failed to retrieve Step 3 data: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-
 @swagger_auto_schema(
     method='get',
     operation_summary='Get Designer Onboarding Step4',
@@ -2715,7 +2680,6 @@ def get_designer_onboarding_step4(request):
         return Response({
             'error': f'Failed to retrieve Step 4 data: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 @swagger_auto_schema(
     method='get',
@@ -2984,7 +2948,6 @@ def designer_onboarding_status(request):
             'can_access_console': False
         }, status=status.HTTP_404_NOT_FOUND)
 
-
 @swagger_auto_schema(
     method='get',
     operation_summary='Designer Dashboard',
@@ -3210,7 +3173,6 @@ def designer_dashboard(request):
     
     return Response(dashboard_data)
 
-
 # ==================== STUDIO MANAGEMENT VIEWS ====================
 
 @swagger_auto_schema(
@@ -3302,7 +3264,6 @@ def create_studio(request):
             'error': f'Failed to create studio: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-
 @swagger_auto_schema(
     method='get',
     operation_summary='Studio Design Number Info',
@@ -3358,7 +3319,6 @@ def studio_design_number_info(request):
         return Response({
             'error': f'Failed to get design number info: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 @swagger_auto_schema(
     method='post',

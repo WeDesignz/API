@@ -1,9 +1,6 @@
 from celery import shared_task
 from django.core.management import call_command
 from django.core.management.base import CommandError
-import logging
-
-logger = logging.getLogger(__name__)
 
 
 @shared_task(bind=True, name='MediaFiles.tasks.rename_design_files')
@@ -30,8 +27,6 @@ def rename_design_files_task(
         dict: Task result with status and message
     """
     try:
-        logger.info(f'Starting rename_design_files task (user_id={user_id}, product_id={product_id}, dry_run={dry_run})')
-        
         # Prepare command arguments
         command_args = []
         if user_id:
@@ -56,8 +51,6 @@ def rename_design_files_task(
         try:
             call_command('rename_design_files', *command_args)
             output_text = output.getvalue()
-            logger.info(f'rename_design_files task completed successfully')
-            logger.debug(f'Command output: {output_text}')
             
             return {
                 'status': 'success',
@@ -68,11 +61,7 @@ def rename_design_files_task(
             sys.stdout = old_stdout
             
     except CommandError as e:
-        error_msg = f'Command error: {str(e)}'
-        logger.error(error_msg, exc_info=True)
         raise self.retry(exc=e, countdown=60, max_retries=3)
     except Exception as e:
-        error_msg = f'Unexpected error in rename_design_files task: {str(e)}'
-        logger.error(error_msg, exc_info=True)
         raise self.retry(exc=e, countdown=60, max_retries=3)
 

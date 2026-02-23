@@ -4,7 +4,6 @@ from django.contrib.auth.models import User
 from django.utils import timezone
 from django.core.mail import send_mail
 from django.conf import settings
-import logging
 
 from .email_service import EmailService
 from .tasks import (
@@ -21,8 +20,6 @@ from Wallet.models import Wallet, WalletTransaction
 from Profiles.models import Studio, StudioMember, DesignerProfile, StudioBusinessDetails
 from Catalog.models import Product
 
-logger = logging.getLogger(__name__)
-
 
 # Authentication Signals
 @receiver(post_save, sender=User)
@@ -36,7 +33,7 @@ def send_welcome_email_on_user_creation(sender, instance, created, **kwargs):
             try:
                 EmailService.send_welcome_email(instance)
             except Exception as e:
-                logger.error(f"Failed to send welcome email to {instance.email}: {str(e)}")
+                pass
         
         # Start email sending in background thread
         thread = threading.Thread(target=send_email_async, daemon=True)
@@ -52,7 +49,7 @@ def send_email_verification_otp(sender, instance, created, **kwargs):
             # EmailService.send_otp_email(instance.created_by, otp_code, "email")
             pass
         except Exception as e:
-            logger.error(f"Failed to send email verification OTP: {str(e)}")
+            pass
 
 
 @receiver(post_save, sender=MobileNumber)
@@ -64,7 +61,7 @@ def send_mobile_verification_otp(sender, instance, created, **kwargs):
             # EmailService.send_otp_email(instance.created_by, otp_code, "mobile")
             pass
         except Exception as e:
-            logger.error(f"Failed to send mobile verification OTP: {str(e)}")
+            pass
 
 
 # Order Signals
@@ -79,7 +76,7 @@ def send_order_confirmation_email(sender, instance, created, **kwargs):
             # Send email asynchronously using Celery to avoid blocking the request
             send_order_confirmation_email_async.delay(instance.id)
         except Exception as e:
-            logger.error(f"Failed to queue order confirmation email for order {instance.id}: {str(e)}")
+            pass
 
 
 # Custom Request Signals
@@ -97,7 +94,7 @@ def send_custom_order_notification(sender, instance, created, **kwargs):
                 fail_silently=False,
             )
         except Exception as e:
-            logger.error(f"Failed to send admin notification for custom order: {str(e)}")
+            pass
         
         # Schedule SLA check task to run at the order's deadline
         try:
@@ -108,9 +105,8 @@ def send_custom_order_notification(sender, instance, created, **kwargs):
                 args=[instance.id],
                 eta=instance.sla_deadline
             )
-            logger.info(f"Scheduled SLA check for custom order {instance.id} at {instance.sla_deadline}")
         except Exception as e:
-            logger.error(f"Failed to schedule SLA check for custom order {instance.id}: {str(e)}", exc_info=True)
+            pass
     
     elif instance.status == 'completed':
         # Send completion email to user
@@ -118,7 +114,7 @@ def send_custom_order_notification(sender, instance, created, **kwargs):
             delivery_time = int((timezone.now() - instance.created_at).total_seconds() / 60)
             EmailService.send_custom_order_completion_email(instance.created_by, instance, delivery_time)
         except Exception as e:
-            logger.error(f"Failed to send custom order completion email: {str(e)}")
+            pass
 
 
 # Coupon Signals
@@ -133,9 +129,8 @@ def check_coupon_usage_limit(sender, instance, created, **kwargs):
             if coupon.max_usage > 0 and total_usages >= coupon.max_usage:
                 coupon.status = 'expired'
                 coupon.save()
-                logger.info(f"Coupon {coupon.code} has reached its usage limit and is now expired")
         except Exception as e:
-            logger.error(f"Failed to check coupon usage limit: {str(e)}")
+            pass
 
 
 @receiver(pre_delete, sender=Coupon)
@@ -144,9 +139,8 @@ def cleanup_coupon_related_data(sender, instance, **kwargs):
     try:
         # Delete related coupon usages
         CouponUsage.objects.filter(coupon=instance).delete()
-        logger.info(f"Cleaned up data for deleted coupon {instance.code}")
     except Exception as e:
-        logger.error(f"Failed to cleanup coupon data: {str(e)}")
+        pass
 
 
 # Wallet Signals
@@ -162,9 +156,8 @@ def auto_link_wallet_to_user(sender, instance, created, **kwargs):
             if not wallets.filter(id=instance.id).exists():
                 # Link wallet to user via relation system
                 attach_user_wallet(instance.created_by, instance)
-                logger.info(f"Automatically linked wallet {instance.id} to user {instance.created_by.id} via relation system")
         except Exception as e:
-            logger.error(f"Failed to auto-link wallet {instance.id} to user: {str(e)}", exc_info=True)
+            pass
 
 
 @receiver(post_save, sender=WalletTransaction)
@@ -174,7 +167,7 @@ def send_wallet_transaction_notification(sender, instance, created, **kwargs):
         try:
             EmailService.send_wallet_transaction_email(instance.created_by, instance)
         except Exception as e:
-            logger.error(f"Failed to send wallet transaction notification: {str(e)}")
+            pass
 
 
 # Studio Signals
@@ -191,7 +184,7 @@ def send_studio_approval_notification(sender, instance, created, **kwargs):
                 fail_silently=False,
             )
         except Exception as e:
-            logger.error(f"Failed to send studio approval notification: {str(e)}")
+            pass
 
 
 @receiver(post_save, sender=StudioMember)
@@ -212,7 +205,7 @@ def send_studio_member_notification(sender, instance, created, **kwargs):
                 fail_silently=False,
             )
         except Exception as e:
-            logger.error(f"Failed to send studio member notification: {str(e)}")
+            pass
 
 
 # Product Signals
@@ -228,9 +221,8 @@ def handle_product_deletion(sender, instance, **kwargs):
                 # Update the product ownership
                 instance.created_by = admin_user
                 instance.save()
-                logger.info(f"Product {instance.name} ownership transferred to WeDesignz admin")
     except Exception as e:
-        logger.error(f"Failed to handle product deletion: {str(e)}")
+        pass
 
 
 # Subscription Signals
@@ -256,15 +248,13 @@ def send_subscription_notification(sender, instance, created, **kwargs):
             try:
                 from common.email_service import EmailService
                 EmailService.send_subscription_purchase_email(instance.created_by, instance)
-                logger.info(f"Subscription activation email sent to {instance.created_by.email} for subscription {instance.id}")
             except Exception as e:
-                logger.error(f"Failed to send subscription notification: {str(e)}")
+                pass
             
             # Initialize current_period_start for annual plans when subscription becomes active
             if instance.plan.plan_duration == 'annually' and not instance.current_period_start:
                 instance.current_period_start = instance.created_at.date()
                 instance.save(update_fields=['current_period_start'])
-                logger.info(f"Initialized current_period_start for annual subscription {instance.id}")
     
     elif instance.status == 'cancelled':
         try:
@@ -276,7 +266,7 @@ def send_subscription_notification(sender, instance, created, **kwargs):
                 fail_silently=False,
             )
         except Exception as e:
-            logger.error(f"Failed to send subscription cancellation notification: {str(e)}")
+            pass
 
 
 # OTP Cleanup Signal
@@ -292,9 +282,8 @@ def cleanup_expired_otps(sender, instance, **kwargs):
         ).exclude(id=instance.id)
         
         expired_otps.delete()
-        logger.info(f"Cleaned up {expired_otps.count()} expired OTPs for user {instance.created_by.username}")
     except Exception as e:
-        logger.error(f"Failed to cleanup expired OTPs: {str(e)}")
+        pass
 
 
 # ==================== DESIGNER CONSOLE SIGNALS ====================
@@ -313,7 +302,7 @@ def send_designer_profile_verification_notification(sender, instance, created, *
                 fail_silently=False,
             )
         except Exception as e:
-            logger.error(f"Failed to send designer profile verification notification: {str(e)}")
+            pass
     
     elif not created and instance.status == 'suspended':
         try:
@@ -325,7 +314,7 @@ def send_designer_profile_verification_notification(sender, instance, created, *
                 fail_silently=False,
             )
         except Exception as e:
-            logger.error(f"Failed to send designer profile suspension notification: {str(e)}")
+            pass
 
 
 # Design Upload Signals
@@ -343,10 +332,8 @@ def send_design_submission_notification(sender, instance, created, **kwargs):
             # Skip email notifications for bulk uploads to avoid blocking
             # Bulk uploads can have hundreds of products, sending emails would be too slow
             if is_bulk_upload:
-                logger.info(f"Product post_save signal: Skipping email notification for bulk upload product {instance.id}")
                 return
             
-            logger.info(f"Product post_save signal: Sending design submission notification for product {instance.id}...")
             # Send notification to admin asynchronously to avoid blocking the request
             import threading
             def send_email_async():
@@ -358,15 +345,14 @@ def send_design_submission_notification(sender, instance, created, **kwargs):
                         recipient_list=[settings.ADMIN_EMAIL],
                         fail_silently=True,
                     )
-                    logger.info(f"Product post_save signal: Design submission notification sent for product {instance.id}")
                 except Exception as e:
-                    logger.error(f"Failed to send design submission notification: {str(e)}", exc_info=True)
+                    pass
             
             # Start email sending in background thread to avoid blocking
             thread = threading.Thread(target=send_email_async, daemon=True)
             thread.start()
         except Exception as e:
-            logger.error(f"Failed to send design submission notification: {str(e)}", exc_info=True)
+            pass
     
     elif not created and instance.status == 'active':
         # Design approved
@@ -379,7 +365,7 @@ def send_design_submission_notification(sender, instance, created, **kwargs):
                 fail_silently=True,  # Changed to True to avoid blocking response
             )
         except Exception as e:
-            logger.error(f"Failed to send design approval notification: {str(e)}")
+            pass
     
     elif not created and instance.status == 'inactive':
         # Design rejected
@@ -392,7 +378,7 @@ def send_design_submission_notification(sender, instance, created, **kwargs):
                 fail_silently=False,
             )
         except Exception as e:
-            logger.error(f"Failed to send design rejection notification: {str(e)}")
+            pass
 
 
 # Settlement Signals
@@ -409,7 +395,7 @@ def send_settlement_notification(sender, instance, created, **kwargs):
                 fail_silently=False,
             )
         except Exception as e:
-            logger.error(f"Failed to send settlement notification: {str(e)}")
+            pass
 
 
 # Design Sale Signals

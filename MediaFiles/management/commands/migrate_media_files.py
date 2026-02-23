@@ -21,9 +21,6 @@ from MediaFiles.models import Media, Relation
 from Catalog.models import Product
 from common.relations import get_related_for_right
 import os
-import logging
-
-logger = logging.getLogger(__name__)
 
 
 class Command(BaseCommand):
@@ -214,8 +211,7 @@ class Command(BaseCommand):
                             try:
                                 default_storage.delete(current_path)
                             except Exception as e:
-                                # Log but don't fail - old file might be needed
-                                logger.warning(f'Could not delete old file {current_path}: {str(e)}')
+                                pass
                         
                         stats['migrated'] += 1
                         if verbose:
@@ -236,7 +232,6 @@ class Command(BaseCommand):
                             self.stdout.write(
                                 self.style.ERROR(f'    ✗ {error_msg}')
                             )
-                        logger.error(f'Error migrating media {media_id}: {error_msg}', exc_info=True)
                 
                 except Media.DoesNotExist:
                     stats['errors'] += 1
@@ -260,7 +255,6 @@ class Command(BaseCommand):
                         self.stdout.write(
                             self.style.ERROR(f'  Media {media_id}: {error_msg}')
                         )
-                    logger.error(f'Unexpected error processing media {media_id}: {error_msg}', exc_info=True)
 
         # Print summary
         self.stdout.write('\n' + '=' * 80)

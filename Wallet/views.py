@@ -10,7 +10,6 @@ from django.db import transaction
 from django.utils import timezone
 from django.http import HttpResponse
 from django.contrib.auth.models import User
-import logging
 from .models import Wallet, WalletTransaction, WalletWithdrawalRequest, SettlementRequest, SettlementTDS
 from .serializers import (
     WalletSerializer, WalletTransactionSerializer, WalletWithdrawalRequestSerializer
@@ -168,9 +167,6 @@ def wallet_transactions(request):
     """
     Get user's wallet transaction history.
     """
-    import logging
-    logger = logging.getLogger(__name__)
-    
     try:
         wallet = Wallet.objects.get(created_by=request.user)
     except Wallet.DoesNotExist:
@@ -192,11 +188,8 @@ def wallet_transactions(request):
     # Get all unique transactions ordered by created_at
     transactions = WalletTransaction.objects.filter(id__in=all_transaction_ids).order_by('-created_at')
     
-    # Log transaction count for debugging
-    transaction_count = transactions.count()
-    logger.info(f"Wallet transactions query for user {request.user.id}: Found {transaction_count} transactions (by user: {transactions_by_user.count()}, by wallet: {transactions_by_wallet.count()})")
-    
     # Get transaction summary
+    transaction_count = transactions.count()
     total_credit = transactions.filter(wallet_transaction_type='credit').aggregate(
         total=Sum('amount')
     )['total'] or 0
@@ -208,7 +201,6 @@ def wallet_transactions(request):
     try:
         wallet_data = WalletSerializer(wallet).data
     except Exception as e:
-        logger.error(f"Failed to serialize wallet data: {str(e)}", exc_info=True)
         # If serialization fails, return minimal wallet data
         wallet_data = {
             'id': wallet.id,
@@ -221,9 +213,7 @@ def wallet_transactions(request):
     
     try:
         transactions_data = WalletTransactionSerializer(transactions, many=True).data
-        logger.info(f"Successfully serialized {len(transactions_data)} transactions")
     except Exception as e:
-        logger.error(f"Failed to serialize wallet transactions: {str(e)}", exc_info=True)
         # If serialization fails, return empty list
         transactions_data = []
     
@@ -237,8 +227,6 @@ def wallet_transactions(request):
             'total_transactions': transaction_count
         }
     }
-    
-    logger.info(f"Returning wallet transactions response with {len(transactions_data)} transactions")
     
     return Response(response_data)
 
@@ -1451,9 +1439,6 @@ def download_settlement_sheet(request):
                 total_net_amount += tds_info['net_amount']
                 
             except Exception as e:
-                import logging
-                logger = logging.getLogger(__name__)
-                logger.error(f"Error processing settlement {settlement.id}: {str(e)}", exc_info=True)
                 continue
         
         # Generate filename
@@ -1467,9 +1452,6 @@ def download_settlement_sheet(request):
             return _generate_excel_response(settlement_data, filename, total_net_amount)
     
     except Exception as e:
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.error(f"Error generating settlement sheet: {str(e)}", exc_info=True)
         return Response({
             'error': f'Failed to generate settlement sheet: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -1682,22 +1664,17 @@ def update_settlement_status(request, settlement_id):
     
     # If admin is marking settlement as failed, unmark any transactions that were marked
     if new_status == 'failed' and old_status in ['processing', 'opted_in']:
-        logger = logging.getLogger(__name__)
         try:
             with transaction.atomic():
                 # Unmark transactions that were marked for this settlement
-                unmarked_count = WalletTransaction.objects.filter(
+                WalletTransaction.objects.filter(
                     settlement_request=settlement
                 ).update(
                     settlement_request=None,
                     settled_at=None
                 )
-                
-                if unmarked_count > 0:
-                    logger.info(f"Unmarked {unmarked_count} transactions for failed settlement {settlement_id}")
         except Exception as e:
-            logger.error(f"Failed to unmark transactions for settlement {settlement_id}: {str(e)}", exc_info=True)
-            # Continue with status update even if unmarking fails
+            pass
     
     # Update settlement
     settlement.status = new_status
@@ -1721,9 +1698,7 @@ def update_settlement_status(request, settlement_id):
             from common.tasks import send_settlement_receipt_email_async
             send_settlement_receipt_email_async.delay(settlement.id)
         except Exception as e:
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.error(f'Failed to queue receipt email for settlement {settlement_id}: {str(e)}', exc_info=True)
+            pass
     
     # Log activity
     try:
@@ -1743,9 +1718,7 @@ def update_settlement_status(request, settlement_id):
             }
         )
     except Exception as e:
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.error(f'Failed to log activity: {str(e)}', exc_info=True)
+        pass
     
     return Response({
         'message': 'Settlement status updated successfully',
@@ -1875,9 +1848,7 @@ def bulk_update_settlement_status(request):
                     from common.tasks import send_settlement_receipt_email_async
                     send_settlement_receipt_email_async.delay(settlement.id)
                 except Exception as e:
-                    import logging
-                    logger = logging.getLogger(__name__)
-                    logger.error(f'Failed to queue receipt email for settlement {settlement_id}: {str(e)}', exc_info=True)
+                    pass
             
         except SettlementRequest.DoesNotExist:
             failed_updates.append(f"Settlement {settlement_id} not found")
@@ -1902,9 +1873,7 @@ def bulk_update_settlement_status(request):
             }
         )
     except Exception as e:
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.error(f'Failed to log activity: {str(e)}', exc_info=True)
+        pass
     
     return Response({
         'message': f'Successfully updated {updated_count} settlements',
@@ -2060,7 +2029,7 @@ def list_settlements(request):
                 except:
                     pass
         except Exception as e:
-            logging.error(f"Error fetching designer info for settlement {settlement.id}: {str(e)}")
+            pass
         
         # Format settlement period string
         settlement_period = f"{settlement.settlement_period_start.strftime('%b %Y')}"

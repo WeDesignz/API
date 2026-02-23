@@ -136,13 +136,6 @@ class AdminUserProfile(models.Model):
             # Generate a new Fernet key
             new_key = Fernet.generate_key()
             key_str = new_key.decode()
-            # Log a warning (in production, this should be set in environment)
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.warning(
-                f'ENCRYPTION_KEY not set or invalid. Generated new key: {key_str}. '
-                'Please set ENCRYPTION_KEY in your .env file for production use.'
-            )
             # Update settings for this session (like the demo command does)
             import django.conf
             django.conf.settings.ENCRYPTION_KEY = key_str
@@ -161,13 +154,6 @@ class AdminUserProfile(models.Model):
                     # Generate a new key
                     new_key = Fernet.generate_key()
                     key_str = new_key.decode()
-                    import logging
-                    logger = logging.getLogger(__name__)
-                    logger.warning(
-                        f'ENCRYPTION_KEY has invalid length ({len(encryption_key)}). '
-                        f'Generated new key: {key_str}. '
-                        'Please set ENCRYPTION_KEY in your .env file for production use.'
-                    )
                     # Update settings for this session
                     import django.conf
                     django.conf.settings.ENCRYPTION_KEY = key_str
@@ -181,13 +167,6 @@ class AdminUserProfile(models.Model):
                 # Last resort: generate a new key
                 new_key = Fernet.generate_key()
                 key_str = new_key.decode()
-                import logging
-                logger = logging.getLogger(__name__)
-                logger.error(
-                    f'Failed to use ENCRYPTION_KEY: {e}. '
-                    f'Generated new key: {key_str}. '
-                    'Please set ENCRYPTION_KEY in your .env file for production use.'
-                )
                 # Update settings for this session
                 import django.conf
                 django.conf.settings.ENCRYPTION_KEY = key_str
@@ -205,9 +184,6 @@ class AdminUserProfile(models.Model):
             decrypted_secret = f.decrypt(encrypted_secret)
             return decrypted_secret.decode()
         except Exception as e:
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.error(f'Error decrypting 2FA secret: {e}')
             return None
     
     def generate_qr_code(self):
@@ -469,9 +445,6 @@ class DesignApproval(models.Model):
         Approve design - optimized for performance.
         Returns True on success, False on failure.
         """
-        import logging
-        logger = logging.getLogger(__name__)
-        
         try:
             # Update approval record
             self.action = 'approved'
@@ -485,7 +458,6 @@ class DesignApproval(models.Model):
             
             # Use update_fields for better performance
             self.save(update_fields=['action', 'approved_by_id', 'approved_at', 'admin_notes', 'ip_address', 'user_agent'])
-            logger.debug(f'[approve_design] Approval record saved: {self.id}')
         
             # Update product status - use update() to bypass signals and avoid hanging
             from Catalog.models import Product
@@ -496,12 +468,9 @@ class DesignApproval(models.Model):
                     status='active',
                     rejection_reason=None
                 )
-                logger.debug(f'[approve_design] Product status updated: {self.product_id}, status=active')
             except Product.DoesNotExist:
-                logger.error(f'[approve_design] Product {self.product_id} not found when approving design')
                 return False
             except Exception as e:
-                logger.error(f'[approve_design] Error updating product status: {str(e)}', exc_info=True)
                 return False
             
             # Post to Pinterest (async - don't block approval)
@@ -527,36 +496,28 @@ class DesignApproval(models.Model):
                             base_url = request.build_absolute_uri('/').rstrip('/')
                         
                         post_design_to_pinterest.delay(pinterest_post.id, base_url)
-                        logger.info(f'[approve_design] Queued Pinterest post for product {self.product_id}')
                     else:
-                        logger.debug(f'[approve_design] PinterestPost already exists for product {self.product_id}')
+                        pass
             except Exception as e:
-                # Don't fail approval if Pinterest posting fails
-                logger.warning(f'[approve_design] Failed to queue Pinterest post: {str(e)}', exc_info=True)
+                pass
             
             # Index product PNG images into Qdrant for visual search (async - don't block approval)
             try:
                 from Catalog.tasks import index_product_visual_search
                 index_product_visual_search.delay(self.product_id)
-                logger.info(f'[approve_design] Queued visual search indexing for product {self.product_id}')
             except Exception as e:
-                logger.warning(f'[approve_design] Failed to queue visual search indexing: {str(e)}', exc_info=True)
+                pass
             
             # TODO: Send notification to designer (async - don't block)
             # TODO: Send email notification (async - don't block)
             
-            logger.info(f'[approve_design] Design approved successfully: product_id={self.product_id}')
             return True
             
         except Exception as e:
-            logger.error(f'[approve_design] Exception during approval: {str(e)}', exc_info=True)
             return False
     
     def reject_design(self, approved_by, rejection_reason, admin_notes, request=None):
         """Reject design - optimized for performance"""
-        import logging
-        logger = logging.getLogger(__name__)
-        
         try:
             # Update approval record
             self.action = 'rejected'
@@ -571,7 +532,6 @@ class DesignApproval(models.Model):
             
             # Use update_fields for better performance
             self.save(update_fields=['action', 'approved_by_id', 'approved_at', 'rejection_reason', 'admin_notes', 'ip_address', 'user_agent'])
-            logger.debug(f'[reject_design] Approval record saved: {self.id}')
         
             # Update product status - use update() to bypass signals and avoid hanging
             from Catalog.models import Product
@@ -582,35 +542,25 @@ class DesignApproval(models.Model):
                     status='inactive',
                     rejection_reason=rejection_reason
                 )
-                logger.debug(f'[reject_design] Product status updated: {self.product_id}, status=inactive')
             except Product.DoesNotExist:
-                logger.error(f'[reject_design] Product {self.product_id} not found when rejecting design')
                 return False
             except Exception as e:
-                logger.error(f'[reject_design] Error updating product status: {str(e)}', exc_info=True)
                 return False
             
             # Send email notification to designer (async - don't block)
             try:
                 from common.tasks import send_design_rejection_email_async
                 send_design_rejection_email_async.delay(self.product_id, rejection_reason)
-                logger.info(f'[reject_design] Queued rejection email for product {self.product_id}')
             except Exception as e:
-                # Don't fail rejection if email queuing fails
-                logger.warning(f'[reject_design] Failed to queue rejection email: {str(e)}', exc_info=True)
+                pass
             
-            logger.info(f'[reject_design] Design rejected successfully: product_id={self.product_id}')
             return True
             
         except Exception as e:
-            logger.error(f'[reject_design] Exception during rejection: {str(e)}', exc_info=True)
             return False
     
     def disable_design(self, approved_by, admin_notes, request=None):
         """Disable design - optimized for performance"""
-        import logging
-        logger = logging.getLogger(__name__)
-        
         try:
             # Update approval record
             self.action = 'disabled'
@@ -624,7 +574,6 @@ class DesignApproval(models.Model):
             
             # Use update_fields for better performance
             self.save(update_fields=['action', 'approved_by_id', 'approved_at', 'admin_notes', 'ip_address', 'user_agent'])
-            logger.debug(f'[disable_design] Approval record saved: {self.id}')
         
             # Update product status - use update() to bypass signals and avoid hanging
             from Catalog.models import Product
@@ -634,22 +583,17 @@ class DesignApproval(models.Model):
                 Product.objects.filter(pk=self.product_id).update(
                     status='inactive'
                 )
-                logger.debug(f'[disable_design] Product status updated: {self.product_id}, status=inactive')
             except Product.DoesNotExist:
-                logger.error(f'[disable_design] Product {self.product_id} not found when disabling design')
                 return False
             except Exception as e:
-                logger.error(f'[disable_design] Error updating product status: {str(e)}', exc_info=True)
                 return False
             
             # TODO: Send notification to designer (async - don't block)
             # TODO: Send email notification (async - don't block)
             
-            logger.info(f'[disable_design] Design disabled successfully: product_id={self.product_id}')
             return True
             
         except Exception as e:
-            logger.error(f'[disable_design] Exception during disable: {str(e)}', exc_info=True)
             return False
 
 

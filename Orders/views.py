@@ -1318,10 +1318,6 @@ def download_product_zip(request, product_id):
                                 # Add to zip with sanitized filename
                                 zip_file.writestr(file_name, file_content)
                     except Exception as e:
-                        # Log error but continue with other files
-                        import logging
-                        logger = logging.getLogger(__name__)
-                        logger.error(f'Error adding media {media.id} to zip: {str(e)}')
                         continue
         
         # Prepare response
@@ -1333,9 +1329,6 @@ def download_product_zip(request, product_id):
         return response
         
     except Exception as e:
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.error(f'Error creating zip file for product {product_id}: {str(e)}')
         return Response({
             'error': f'Failed to create zip file: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

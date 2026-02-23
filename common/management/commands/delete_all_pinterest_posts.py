@@ -1,10 +1,7 @@
 from django.core.management.base import BaseCommand
 from common.models import PinterestIntegration, PinterestPost
 from common.pinterest_service import PinterestService
-import logging
 import time
-
-logger = logging.getLogger(__name__)
 
 
 class Command(BaseCommand):
@@ -210,7 +207,6 @@ class Command(BaseCommand):
             
         except Exception as e:
             self.stdout.write(self.style.ERROR(f'❌ Error: {str(e)}'))
-            logger.error(f'Error deleting Pinterest posts: {str(e)}', exc_info=True)
             import traceback
             self.stdout.write(traceback.format_exc())
 

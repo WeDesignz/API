@@ -18,15 +18,12 @@ Usage:
 """
 
 import os
-import logging
 from pathlib import Path
 from django.core.management.base import BaseCommand
 from django.core.files.storage import default_storage
 from django.conf import settings
 from Catalog.models import Product
 from MediaFiles.models import Media
-
-logger = logging.getLogger(__name__)
 
 
 class Command(BaseCommand):
@@ -207,9 +204,7 @@ class Command(BaseCommand):
                                     try:
                                         default_storage.delete(old_relative_path)
                                     except Exception as e:
-                                        logger.warning(
-                                            f'Could not delete old file {old_relative_path}: {str(e)}'
-                                        )
+                                        pass
                                     
                                     stats['renamed'] += 1
                                     if verbose:
@@ -239,10 +234,6 @@ class Command(BaseCommand):
                                     self.stdout.write(
                                         self.style.ERROR(f'      ✗ {error_msg}')
                                     )
-                                logger.error(
-                                    f'Error renaming file {old_filename} to {new_filename}: {error_msg}',
-                                    exc_info=True
-                                )
 
                         except Exception as e:
                             stats['errors'] += 1
@@ -253,10 +244,6 @@ class Command(BaseCommand):
                                 'file': str(file_path),
                                 'error': error_msg
                             })
-                            logger.error(
-                                f'Unexpected error processing file {file_path}: {error_msg}',
-                                exc_info=True
-                            )
 
                 except Product.DoesNotExist:
                     stats['no_product'] += 1
@@ -273,7 +260,6 @@ class Command(BaseCommand):
                         'product_id': product_id,
                         'error': error_msg
                     })
-                    logger.error(error_msg, exc_info=True)
 
         # Print summary
         self.stdout.write('\n' + '=' * 80)
@@ -352,12 +338,8 @@ class Command(BaseCommand):
                 media.save(update_fields=['file'])
                 updated_count += 1
                 if verbose:
-                    logger.info(f'Updated Media {media.id} file reference: {old_path} -> {new_path}')
-            
-            if updated_count > 0:
-                logger.info(f'Updated {updated_count} Media object(s) for file rename: {old_path} -> {new_path}')
+                    pass
             
         except Exception as e:
-            # Log but don't fail - file rename is more important than DB update
-            logger.warning(f'Could not update Media references for {old_path}: {str(e)}')
+            pass
 

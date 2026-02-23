@@ -23,7 +23,6 @@ from .serializers import (
 )
 from CoreAdmin.models import AdminUserProfile, AdminActivityLog
 
-
 @swagger_auto_schema(
     method='get',
     operation_summary="Dashboard Summary",
@@ -57,7 +56,7 @@ def dashboard_summary(request):
     except Exception as e:
         import logging
         logger = logging.getLogger(__name__)
-        logger.error(f'Error in dashboard_summary: {e}')
+
         return Response({
             'error': 'An error occurred while retrieving dashboard summary'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -432,8 +431,7 @@ def dashboard_summary(request):
             # Log error but don't fail the request
             import logging
             logger = logging.getLogger(__name__)
-            logger.error(f'Failed to log activity: {e}')
-        
+
         return Response({
             'message': 'Dashboard summary retrieved successfully',
             'data': summary_data
@@ -442,13 +440,11 @@ def dashboard_summary(request):
         import logging
         import traceback
         logger = logging.getLogger(__name__)
-        logger.error(f'Error in dashboard_summary: {e}')
-        logger.error(traceback.format_exc())
+
         return Response({
             'error': 'An error occurred while retrieving dashboard summary',
             'details': str(e) if settings.DEBUG else None
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 @swagger_auto_schema(
     method='get',
@@ -511,7 +507,7 @@ def revenue_analytics(request):
     except Exception as e:
         import logging
         logger = logging.getLogger(__name__)
-        logger.error(f'Error in revenue_analytics: {e}')
+
         return Response({
             'error': 'An error occurred while retrieving revenue analytics'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -526,7 +522,7 @@ def revenue_analytics(request):
     except Exception as e:
         import logging
         logger = logging.getLogger(__name__)
-        logger.error(f'Error validating revenue_analytics request: {e}')
+
         return Response({
             'error': 'Invalid request parameters'
         }, status=status.HTTP_400_BAD_REQUEST)
@@ -591,8 +587,7 @@ def revenue_analytics(request):
         except Exception as e:
             import logging
             logger = logging.getLogger(__name__)
-            logger.error(f'Failed to log activity: {e}')
-        
+
         return Response({
             'message': 'Revenue analytics retrieved successfully',
             'data': revenue_data
@@ -601,13 +596,11 @@ def revenue_analytics(request):
         import logging
         import traceback
         logger = logging.getLogger(__name__)
-        logger.error(f'Error in revenue_analytics: {e}')
-        logger.error(traceback.format_exc())
+
         return Response({
             'error': 'An error occurred while retrieving revenue analytics',
             'details': str(e) if settings.DEBUG else None
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 @swagger_auto_schema(
     method='get',
@@ -697,8 +690,7 @@ def top_designs_analytics(request):
     except Exception as e:
         import logging
         logger = logging.getLogger(__name__)
-        logger.error(f'Failed to log activity: {e}')
-    
+
     return Response({
         'message': 'Top designs analytics retrieved successfully',
         'data': {
@@ -710,7 +702,6 @@ def top_designs_analytics(request):
             }
         }
     })
-
 
 @swagger_auto_schema(
     method='get',
@@ -767,7 +758,7 @@ def top_designers_analytics(request):
     except Exception as e:
         import logging
         logger = logging.getLogger(__name__)
-        logger.error(f'Error in top_designers_analytics: {e}')
+
         return Response({
             'error': 'An error occurred while retrieving top designers analytics'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -782,7 +773,7 @@ def top_designers_analytics(request):
     except Exception as e:
         import logging
         logger = logging.getLogger(__name__)
-        logger.error(f'Error validating top_designers_analytics request: {e}')
+
         return Response({
             'error': 'Invalid request parameters'
         }, status=status.HTTP_400_BAD_REQUEST)
@@ -832,8 +823,7 @@ def top_designers_analytics(request):
         except Exception as e:
             import logging
             logger = logging.getLogger(__name__)
-            logger.error(f'Failed to log activity: {e}')
-        
+
         return Response({
             'message': 'Top designers analytics retrieved successfully',
             'data': {
@@ -849,13 +839,11 @@ def top_designers_analytics(request):
         import logging
         import traceback
         logger = logging.getLogger(__name__)
-        logger.error(f'Error in top_designers_analytics: {e}')
-        logger.error(traceback.format_exc())
+
         return Response({
             'error': 'An error occurred while retrieving top designers analytics',
             'details': str(e) if settings.DEBUG else None
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 @swagger_auto_schema(
     method='get',
@@ -967,13 +955,11 @@ def user_statistics(request):
     except Exception as e:
         import logging
         logger = logging.getLogger(__name__)
-        logger.error(f'Failed to log activity: {e}')
-    
+
     return Response({
         'message': 'User statistics retrieved successfully',
         'data': user_stats
     })
-
 
 @swagger_auto_schema(
     method='get',
@@ -1082,8 +1068,7 @@ def growth_charts(request):
     except Exception as e:
         import logging
         logger = logging.getLogger(__name__)
-        logger.error(f'Failed to log activity: {e}')
-    
+
     return Response({
         'message': 'Growth charts data retrieved successfully',
         'data': {
@@ -1095,7 +1080,6 @@ def growth_charts(request):
             }
         }
     })
-
 
 @swagger_auto_schema(
     method='post',
@@ -1177,8 +1161,7 @@ def export_report(request):
         except Exception as e:
             import logging
             logger = logging.getLogger(__name__)
-            logger.error(f'Failed to log activity: {e}')
-        
+
         return Response({
             'message': 'Export request submitted successfully',
             'data': {
@@ -1192,7 +1175,6 @@ def export_report(request):
         return Response({
             'error': f'Export request failed: {str(e)}'
         }, status=status.HTTP_400_BAD_REQUEST)
-
 
 @swagger_auto_schema(
     method='get',
@@ -1246,13 +1228,11 @@ def export_status(request, export_id):
     except Exception as e:
         import logging
         logger = logging.getLogger(__name__)
-        logger.error(f'Failed to log activity: {e}')
-    
+
     return Response({
         'message': 'Export status retrieved successfully',
         'data': serializer.data
     })
-
 
 @swagger_auto_schema(
     method='get',
@@ -1505,8 +1485,7 @@ def moderator_daily_report(request, moderator_id):
         except Exception as e:
             import logging
             logger = logging.getLogger(__name__)
-            logger.error(f'Failed to log activity: {e}')
-        
+
         return Response({
             'message': 'Moderator daily report retrieved successfully',
             'data': {
@@ -1554,8 +1533,7 @@ def moderator_daily_report(request, moderator_id):
         import logging
         import traceback
         logger = logging.getLogger(__name__)
-        logger.error(f'Error in moderator_daily_report: {e}')
-        logger.error(traceback.format_exc())
+
         return Response({
             'error': 'An error occurred while retrieving moderator daily report',
             'details': str(e) if settings.DEBUG else None
