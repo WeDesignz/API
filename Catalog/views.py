@@ -96,6 +96,15 @@ def home_feed(request):
         page = int(request.GET.get('page', 1))
         page_size = 20
         
+        # Optional: exclude product IDs (e.g. from user's previous PDFs when "only new designs" is on)
+        exclude_ids = []
+        exclude_param = request.GET.get('exclude_product_ids', '')
+        if exclude_param:
+            try:
+                exclude_ids = [int(x.strip()) for x in exclude_param.split(',') if x.strip()]
+            except (ValueError, TypeError):
+                exclude_ids = []
+        
         # Calculate offset for pagination
         offset = (page - 1) * page_size
         
@@ -104,6 +113,9 @@ def home_feed(request):
             status='active',
             visibility_status='show'
         ).order_by('-created_at')
+        
+        if exclude_ids:
+            products = products.exclude(id__in=exclude_ids)
         
         # Get all active bundles
         bundles = CollectionBundle.objects.filter(status='available')
@@ -945,11 +957,23 @@ def search_and_filter(request):
     date_to = request.GET.get('date_to')
     page = int(request.GET.get('page', 1))
     
+    # Optional: exclude product IDs (e.g. from user's previous PDFs when "only new designs" is on)
+    exclude_ids = []
+    exclude_param = request.GET.get('exclude_product_ids', '')
+    if exclude_param:
+        try:
+            exclude_ids = [int(x.strip()) for x in exclude_param.split(',') if x.strip()]
+        except (ValueError, TypeError):
+            exclude_ids = []
+    
     # Base queryset
     products = Product.objects.filter(
         status='active',
         visibility_status='show'
     )
+    
+    if exclude_ids:
+        products = products.exclude(id__in=exclude_ids)
     
     # Search by title, description, product_number, and studio_design_number
     if query:
@@ -2650,6 +2674,32 @@ def design_analytics(request, design_id):
 
 # ==================== PDF DOWNLOAD FUNCTIONALITY ====================
 
+def _get_user_previous_pdf_product_ids(user, exclude_pdf_id=None):
+    """
+    Get set of product IDs from user's previous PDF downloads (optimized).
+    Used when exclude_designs_from_previous_pdfs=True to filter out designs already in user's PDFs.
+    Single query fetches all PDFs; product IDs extracted from selected_products and included_products.
+    """
+    from common.relations import get_related_ids_for_right
+    pdf_ids = list(get_related_ids_for_right(user, 'User:PDFDownload'))
+    if not pdf_ids:
+        return set()
+    qs = PDFDownload.objects.filter(id__in=pdf_ids)
+    if exclude_pdf_id:
+        qs = qs.exclude(id=exclude_pdf_id)
+    product_ids = set()
+    for row in qs.values('selected_products', 'included_products'):
+        for pid in (row.get('selected_products') or []):
+            if isinstance(pid, (int, float)):
+                product_ids.add(int(pid))
+        for item in (row.get('included_products') or []):
+            if isinstance(item, dict) and 'product_id' in item:
+                product_ids.add(int(item['product_id']))
+            elif isinstance(item, (int, float)):
+                product_ids.add(int(item))
+    return product_ids
+
+
 def _get_user_free_pdf_downloads_this_month(user):
     """Count user's free (non-subscription) PDF downloads in the current calendar month."""
     from common.relations import get_related_ids_for_right
@@ -2697,16 +2747,33 @@ def check_free_download_eligibility(request):
     free_downloads_this_month = _get_user_free_pdf_downloads_this_month(user)
     is_eligible = free_downloads_this_month < limit
 
+    paid_options = BusinessConfig.get_paid_pdf_designs_options()
     return Response({
         'is_eligible': is_eligible,
         'free_downloads_used': free_downloads_this_month,
         'free_pdf_downloads_limit_per_month': limit,
-        'free_pdf_designs_count': settings.PAID_PDF_DESIGNS_OPTIONS[0] if settings.PAID_PDF_DESIGNS_OPTIONS else 50,
+        'free_pdf_designs_count': paid_options[0] if paid_options else 50,
         'message': (
             'You are eligible for a free download' if is_eligible
             else f'You have used {free_downloads_this_month} of {limit} free PDF downloads this month.'
         )
     })
+
+
+@swagger_auto_schema(
+    method='get',
+    operation_summary='Get Previous PDF Design IDs',
+    operation_description='Get product IDs from user\'s previous PDF downloads. Used when exclude_designs_from_previous_pdfs to show count or filter candidates.',
+    responses={200: openapi.Response(description='List of product IDs in previous PDFs')},
+    tags=['API']
+)
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_previous_pdf_design_ids(request):
+    """Get product IDs from user's previous PDF downloads (optimized single query)."""
+    user = request.user
+    ids = _get_user_previous_pdf_product_ids(user)
+    return Response({'product_ids': list(ids), 'count': len(ids)})
 
 
 @swagger_auto_schema(
@@ -2782,9 +2849,9 @@ def create_pdf_download_request(request):
     use_subscription_mock_pdf = data.get('use_subscription_mock_pdf', False)
     
     # Validate total_pages based on download type
-    # Get free design count from first value of PAID_PDF_DESIGNS_OPTIONS
-    free_designs_count = settings.PAID_PDF_DESIGNS_OPTIONS[0] if settings.PAID_PDF_DESIGNS_OPTIONS else 50
-    paid_options = settings.PAID_PDF_DESIGNS_OPTIONS or [50]
+    # Get free design count from first value of paid PDF options (SystemConfig or .env)
+    paid_options = BusinessConfig.get_paid_pdf_designs_options()
+    free_designs_count = paid_options[0] if paid_options else 50
     
     if data['download_type'] == 'free':
         # If user wants to use subscription mock PDF (must use first option only)
@@ -2830,19 +2897,38 @@ def create_pdf_download_request(request):
                     }, status=status.HTTP_400_BAD_REQUEST)
     else:
         # Paid downloads must use one of the configured options
-        if data['total_pages'] not in settings.PAID_PDF_DESIGNS_OPTIONS:
+        if data['total_pages'] not in paid_options:
             return Response({
-                'error': f'Paid PDF downloads must use one of the following design counts: {", ".join(map(str, settings.PAID_PDF_DESIGNS_OPTIONS))}'
+                'error': f'Paid PDF downloads must use one of the following design counts: {", ".join(map(str, paid_options))}'
             }, status=status.HTTP_400_BAD_REQUEST)
     
     try:
+        exclude_previous = data.get('exclude_designs_from_previous_pdfs', False)
+        selected_products = data.get('selected_products', [])
+        total_pages = data['total_pages']
+        selection_type = data.get('selection_type', 'search_results')
+
+        # When exclude_previous: filter out designs from user's previous PDFs
+        if exclude_previous and user:
+            previous_ids = _get_user_previous_pdf_product_ids(user)
+            if previous_ids and selection_type == 'specific' and selected_products:
+                filtered = [p for p in selected_products if int(p) not in previous_ids]
+                if not filtered:
+                    return Response({
+                        'error': 'No new designs available. All selected designs are already in your previous PDFs. Please include previous designs or select different designs.'
+                    }, status=status.HTTP_400_BAD_REQUEST)
+                if len(filtered) < total_pages:
+                    total_pages = len(filtered)
+                selected_products = filtered[:total_pages]
+
         # Create PDF download record
         pdf_download = PDFDownload.objects.create(
             download_type=data['download_type'],
-            total_pages=data['total_pages'],
-            selection_type=data.get('selection_type', 'search_results'),
-            selected_products=data.get('selected_products', []),
+            total_pages=total_pages,
+            selection_type=selection_type,
+            selected_products=selected_products,
             search_filters=data.get('search_filters', {}),
+            exclude_designs_from_previous_pdfs=exclude_previous,
             status='pending',
             products_count=0,
             included_products=[],
@@ -2867,14 +2953,14 @@ def create_pdf_download_request(request):
         else:
             # Calculate pricing based on selection type using configurable values
             if data['download_type'] == 'paid':
-                if data.get('selection_type') == 'specific' and data.get('selected_products'):
+                if pdf_download.selection_type == 'specific' and pdf_download.selected_products:
                     # Specific products selected - use configured price per design
                     pdf_download.price_per_design = settings.PAID_PDF_PRICE_PER_DESIGN_SELECTED
-                    pdf_download.total_amount = len(data['selected_products']) * settings.PAID_PDF_PRICE_PER_DESIGN_SELECTED
+                    pdf_download.total_amount = len(pdf_download.selected_products) * settings.PAID_PDF_PRICE_PER_DESIGN_SELECTED
                 else:
                     # First N products from search - use configured price per design
                     pdf_download.price_per_design = settings.PAID_PDF_PRICE_PER_DESIGN_FIRSTN
-                    pdf_download.total_amount = data['total_pages'] * settings.PAID_PDF_PRICE_PER_DESIGN_FIRSTN
+                    pdf_download.total_amount = pdf_download.total_pages * settings.PAID_PDF_PRICE_PER_DESIGN_FIRSTN
             else:
                 # Regular free download
                 pdf_download.price_per_design = 0.00
@@ -2898,7 +2984,8 @@ def create_pdf_download_request(request):
                 created_by=user
             )
             
-            pdf_download.status = 'processing'
+            # PDF is generated on-demand when user clicks download (not stored permanently)
+            pdf_download.status = 'pending'
             pdf_download.save()
             
             # If using subscription mock PDF, increment counter immediately
@@ -2910,15 +2997,12 @@ def create_pdf_download_request(request):
                     # This shouldn't happen as we checked above, but handle gracefully
                     logger.error(f"Failed to use mock PDF download for subscription {active_subscription.id}: {str(e)}")
             
-            # Trigger PDF generation task
-            generate_pdf_task.delay(pdf_download.id)
-            
             return Response({
                 'message': 'Free PDF download request created successfully',
                 'download_id': pdf_download.id,
                 'order_id': order.id,
-                'status': 'processing',
-                'estimated_completion': '5-10 minutes',
+                'status': 'pending',
+                'estimated_completion': 'PDF will be generated when you click download',
                 'total_pages': pdf_download.total_pages,
                 'selection_type': pdf_download.selection_type,
                 'used_subscription_mock_pdf': use_subscription_mock_pdf,
@@ -3195,17 +3279,15 @@ def process_pdf_payment(request):
         
         # For now, simulate successful payment
         pdf_download.payment_status = 'paid'
-        pdf_download.status = 'processing'
+        # PDF is generated on-demand when user clicks download (not stored permanently)
+        pdf_download.status = 'pending'
         pdf_download.save()
-        
-        # Trigger PDF generation task
-        generate_pdf_task.delay(pdf_download.id)
         
         return Response({
             'message': 'Payment processed successfully',
             'download_id': pdf_download.id,
-            'status': 'processing',
-            'estimated_completion': '5-10 minutes'
+            'status': 'pending',
+            'estimated_completion': 'PDF will be generated when you click download'
         })
         
     except PDFDownload.DoesNotExist:
@@ -3319,6 +3401,32 @@ def download_pdf_file(request, download_id):
                 }, status=status.HTTP_403_FORBIDDEN)
 
         # Check if PDF is still processing
+        if pdf_download.status == 'processing':
+            return Response({
+                'error': 'PDF is still being generated. Please try again in a few moments.',
+                'status': 'processing'
+            }, status=status.HTTP_202_ACCEPTED)
+        
+        # For paid downloads, verify payment is complete
+        if pdf_download.download_type == 'paid' and pdf_download.payment_status != 'paid':
+            return Response({
+                'error': 'Payment is required before downloading this PDF'
+            }, status=status.HTTP_402_PAYMENT_REQUIRED)
+        
+        # If pending or processing, trigger generation (or wait for it)
+        if pdf_download.status == 'pending':
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(f'PDF download {download_id}: status=pending, triggering on-demand generation')
+            pdf_download.status = 'processing'
+            pdf_download.save()
+            generate_pdf_task.delay(download_id)
+            return Response({
+                'error': 'PDF is being generated. Please try again in a few moments.',
+                'status': 'processing',
+                'download_id': download_id
+            }, status=status.HTTP_202_ACCEPTED)
+        
         if pdf_download.status == 'processing':
             return Response({
                 'error': 'PDF is still being generated. Please try again in a few moments.',
@@ -3487,7 +3595,6 @@ def download_pdf_file(request, download_id):
             if pdf_download.status == 'completed':
                 logger.warning(f'PDF file missing for completed download {download_id}. Attempting to regenerate.')
                 try:
-                    from .tasks import generate_pdf_task
                     # Trigger task asynchronously to regenerate the file
                     generate_pdf_task.delay(download_id)
                     return Response({
@@ -3547,9 +3654,10 @@ def get_pdf_config(request):
     Get PDF download configuration (design counts and pricing).
     This endpoint is public and can be accessed without authentication.
     """
+    paid_options = BusinessConfig.get_paid_pdf_designs_options()
     return Response({
-        'free_pdf_designs_count': settings.PAID_PDF_DESIGNS_OPTIONS[0] if settings.PAID_PDF_DESIGNS_OPTIONS else 50,
-        'paid_pdf_designs_options': settings.PAID_PDF_DESIGNS_OPTIONS,
+        'free_pdf_designs_count': paid_options[0] if paid_options else 50,
+        'paid_pdf_designs_options': paid_options,
         'pricing': {
             'first_n_per_design': float(settings.PAID_PDF_PRICE_PER_DESIGN_FIRSTN),
             'selected_per_design': float(settings.PAID_PDF_PRICE_PER_DESIGN_SELECTED)

@@ -260,6 +260,24 @@ def generate_pdf_task(self, pdf_download_id):
             if category_id:
                 products_qs = products_qs.filter(category_id=category_id)
             
+            # When exclude_designs_from_previous_pdfs: exclude designs from user's previous PDFs
+            if getattr(pdf_download, 'exclude_designs_from_previous_pdfs', False):
+                user = pdf_download.get_user()
+                if user:
+                    from common.relations import get_related_ids_for_right
+                    pdf_ids = list(get_related_ids_for_right(user, 'User:PDFDownload'))
+                    if pdf_ids:
+                        exclude_ids = set()
+                        for row in PDFDownload.objects.filter(id__in=pdf_ids).exclude(id=pdf_download_id).values('selected_products', 'included_products'):
+                            for pid in (row.get('selected_products') or []):
+                                if isinstance(pid, (int, float)):
+                                    exclude_ids.add(int(pid))
+                            for item in (row.get('included_products') or []):
+                                if isinstance(item, dict) and 'product_id' in item:
+                                    exclude_ids.add(int(item['product_id']))
+                        if exclude_ids:
+                            products_qs = products_qs.exclude(id__in=exclude_ids)
+            
             products = list(products_qs[:pdf_download.total_pages])
         
         if not products:
@@ -649,6 +667,45 @@ def generate_pdf_task(self, pdf_download_id):
         except:
             pass
         raise self.retry(exc=e, countdown=60 * (self.request.retries + 1))
+
+
+@shared_task(name='Catalog.tasks.cleanup_design_pdf_files')
+def cleanup_design_pdf_files():
+    """
+    Delete design PDF files from disk (PDFDownload only).
+    PDFs are generated on-demand when user clicks download; this task runs every 4 hours
+    to remove old files and free disk space. If user downloads again, PDF is regenerated.
+    Only deletes files under pdfs/ or {user_id}/pdfs/ - never touches invoices or other PDFs.
+    """
+    from django.conf import settings
+    deleted_count = 0
+    error_count = 0
+    media_root = getattr(settings, 'MEDIA_ROOT', None)
+    if not media_root or not os.path.isdir(media_root):
+        logger.warning('[cleanup_design_pdf_files] MEDIA_ROOT not set or not a directory')
+        return {'deleted': 0, 'errors': 0}
+    qs = PDFDownload.objects.filter(pdf_file_path__isnull=False).exclude(pdf_file_path='')
+    for pdf_download in qs:
+        rel_path = pdf_download.pdf_file_path
+        if not rel_path or not rel_path.strip():
+            continue
+        full_path = os.path.join(media_root, rel_path)
+        if not os.path.isabs(rel_path):
+            full_path = os.path.normpath(os.path.join(media_root, rel_path))
+        if not full_path.startswith(os.path.normpath(media_root)):
+            logger.warning(f'[cleanup_design_pdf_files] Skipping path outside MEDIA_ROOT: {rel_path}')
+            continue
+        if not os.path.isfile(full_path):
+            continue
+        try:
+            os.unlink(full_path)
+            deleted_count += 1
+            logger.info(f'[cleanup_design_pdf_files] Deleted {rel_path}')
+        except Exception as e:
+            error_count += 1
+            logger.warning(f'[cleanup_design_pdf_files] Failed to delete {rel_path}: {e}')
+    logger.info(f'[cleanup_design_pdf_files] Deleted {deleted_count} files, {error_count} errors')
+    return {'deleted': deleted_count, 'errors': error_count}
 
 
 # Only index PNG for visual search (per design media storage)
