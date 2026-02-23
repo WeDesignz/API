@@ -9,7 +9,7 @@ from datetime import timedelta
 import requests
 import logging
 
-from .models import PinterestIntegration, InstagramIntegration, InstagramPost
+from .models import PinterestIntegration, PinterestPost, InstagramIntegration, InstagramPost
 
 logger = logging.getLogger(__name__)
 
@@ -2461,4 +2461,142 @@ def instagram_posts_list(request):
             'has_previous': page_obj.has_previous(),
         }
     })
+
+
+# ==================== Pinterest Posts (admin list, retry, bulk) ====================
+
+def _get_product_thumbnail_url(request, product):
+    """Get first image URL for a product for display in Pinterest posts list."""
+    try:
+        media_list = product.get_media()
+        if hasattr(media_list, 'filter'):
+            media_list = list(media_list.filter(media_type='image')[:1])
+        else:
+            media_list = [m for m in (list(media_list) if media_list else []) if getattr(m, 'media_type', None) == 'image'][:1]
+        if not media_list:
+            return None
+        m = media_list[0]
+        if not getattr(m, 'file', None):
+            return None
+        url = m.file.url
+        if request and url and url.startswith('/'):
+            url = request.build_absolute_uri(url)
+        return url
+    except Exception:
+        return None
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def pinterest_posts_list(request):
+    """
+    List Pinterest posts with optional filter: status = success | failed | not_posted.
+    not_posted = pending, retrying, or failed (designs not present on Pinterest).
+    """
+    from django.core.paginator import Paginator
+
+    status_filter = request.GET.get('status')
+    page = int(request.GET.get('page', 1))
+    limit = min(int(request.GET.get('limit', 20)), 100)
+
+    qs = PinterestPost.objects.select_related('product').order_by('-created_at')
+
+    if status_filter == 'not_posted':
+        qs = qs.filter(status__in=['pending', 'retrying', 'failed'])
+    elif status_filter and status_filter != 'all':
+        qs = qs.filter(status=status_filter)
+
+    paginator = Paginator(qs, limit)
+    page_obj = paginator.get_page(page)
+
+    posts_data = []
+    for post in page_obj.object_list:
+        product = post.product
+        posts_data.append({
+            'id': post.id,
+            'product_id': product.id,
+            'product_title': product.title,
+            'product_thumbnail_url': _get_product_thumbnail_url(request, product),
+            'status': post.status,
+            'error_message': post.error_message,
+            'pin_url': post.pin_url,
+            'pins_data': post.pins_data or {},
+            'retry_count': post.retry_count,
+            'created_at': post.created_at.isoformat(),
+            'posted_at': post.posted_at.isoformat() if post.posted_at else None,
+            'last_retry_at': post.last_retry_at.isoformat() if post.last_retry_at else None,
+        })
+
+    return JsonResponse({
+        'data': posts_data,
+        'pagination': {
+            'page': page,
+            'limit': limit,
+            'total': paginator.count,
+            'total_pages': paginator.num_pages,
+            'has_next': page_obj.has_next(),
+            'has_previous': page_obj.has_previous(),
+        },
+    })
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def pinterest_post_retry(request, post_id):
+    """Queue a single Pinterest post for retry."""
+    from .tasks import post_design_to_pinterest
+
+    try:
+        post = PinterestPost.objects.get(id=post_id)
+    except PinterestPost.DoesNotExist:
+        return JsonResponse({'success': False, 'error': 'Pinterest post not found'}, status=404)
+
+    base_url = getattr(settings, 'SITE_DOMAIN', None) or ''
+    if not base_url.startswith('http'):
+        base_url = f'https://{base_url}' if base_url else 'https://wedesignz.com'
+
+    post_design_to_pinterest.delay(post.id, base_url)
+    return JsonResponse({'success': True, 'message': 'Retry queued'})
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def pinterest_posts_bulk_post(request):
+    """
+    Queue all designs that are not yet posted to Pinterest (pending, retrying, or failed).
+    Also creates PinterestPost for approved products that don't have one yet.
+    """
+    from Catalog.models import Product
+    from .tasks import post_design_to_pinterest
+
+    integration = PinterestIntegration.get_instance()
+    if not integration.is_enabled or not integration.is_token_valid() or not integration.board_id:
+        return JsonResponse({
+            'success': False,
+            'error': 'Pinterest is not configured or token is invalid. Configure in Settings first.',
+        }, status=400)
+
+    base_url = getattr(settings, 'SITE_DOMAIN', None) or ''
+    if not base_url.startswith('http'):
+        base_url = f'https://{base_url}' if base_url else 'https://wedesignz.com'
+
+    approved = Product.objects.filter(status='active', visibility_status='show')
+    queued = 0
+    for product in approved:
+        media_files = product.get_media().filter(media_type='image') if hasattr(product.get_media(), 'filter') else []
+        if not (hasattr(media_files, 'exists') and media_files.exists()) and not (isinstance(media_files, (list, tuple)) and media_files):
+            continue
+        try:
+            pinterest_post, created = PinterestPost.objects.get_or_create(
+                product=product,
+                defaults={'status': 'pending'},
+            )
+            if pinterest_post.status == 'success':
+                continue
+            post_design_to_pinterest.delay(pinterest_post.id, base_url)
+            queued += 1
+        except Exception as e:
+            logger.warning('Failed to queue Pinterest post for product %s: %s', product.id, e)
+
+    return JsonResponse({'success': True, 'queued': queued})
 
