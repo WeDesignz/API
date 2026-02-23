@@ -544,8 +544,9 @@ GST_PERCENTAGE = config('GST_PERCENTAGE', default=18.0, cast=float)
 CUSTOM_ORDER_TIME_SLOT_HOURS = config('CUSTOM_ORDER_TIME_SLOT_HOURS', default=1, cast=int)
 MINIMUM_REQUIRED_DESIGNS_ONBOARD = config('MINIMUM_REQUIRED_DESIGNS_ONBOARD', default=50, cast=int)
 
-# PDF Download Configuration
-PAID_PDF_DESIGNS_OPTIONS = [int(x.strip()) for x in config('PAID_PDF_DESIGNS_OPTIONS', default='50,100,200,300,400,500').split(',')]
+# PDF Download Configuration - only 20, 50, 100 allowed (values > 100 are filtered out)
+_raw_pdf_opts = [int(x.strip()) for x in config('PAID_PDF_DESIGNS_OPTIONS', default='20,50,100').split(',')]
+PAID_PDF_DESIGNS_OPTIONS = [x for x in _raw_pdf_opts if x <= 100] or [20, 50, 100]
 # Free PDF downloads use the first value of PAID_PDF_DESIGNS_OPTIONS
 FREE_PDF_DESIGNS_COUNT = PAID_PDF_DESIGNS_OPTIONS[0] if PAID_PDF_DESIGNS_OPTIONS else 50
 

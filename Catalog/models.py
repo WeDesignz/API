@@ -224,6 +224,10 @@ class PDFDownload(models.Model):
     selection_type = models.CharField(max_length=20, choices=SELECTION_TYPE_CHOICES, default='search_results')
     selected_products = models.JSONField(default=list, help_text="List of product IDs for specific selection")
     search_filters = models.JSONField(default=dict, help_text="Search filters applied when generating PDF")
+    exclude_designs_from_previous_pdfs = models.BooleanField(
+        default=False,
+        help_text="When True, exclude designs that appear in user's previous PDFs (only new designs)"
+    )
     
     # Product information - merged from PDFDownloadProduct
     included_products = models.JSONField(default=list, help_text="List of products included in this PDF with page numbers")

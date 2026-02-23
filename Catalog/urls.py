@@ -41,6 +41,7 @@ urlpatterns = [
     # PDF Download functionality
     path('pdf/config/', views.get_pdf_config, name='get_pdf_config'),
     path('pdf/check-eligibility/', views.check_free_download_eligibility, name='check_free_download_eligibility'),
+    path('pdf/previous-design-ids/', views.get_previous_pdf_design_ids, name='get_previous_pdf_design_ids'),
     path('pdf/create-request/', views.create_pdf_download_request, name='create_pdf_download_request'),
     path('pdf/status/<int:download_id>/', views.get_pdf_download_status, name='get_pdf_download_status'),
     path('pdf/downloads/', views.list_user_pdf_downloads, name='list_user_pdf_downloads'),

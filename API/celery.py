@@ -60,6 +60,12 @@ app.conf.beat_schedule = {
         'task': 'common.tasks.expire_processing_settlements',
         'schedule': crontab(hour=2, minute=0),  # Daily at 2:00 AM IST
     },
+    
+    # Delete design PDF files every 4 hours (PDFs are generated on-demand, not stored permanently)
+    'cleanup-design-pdf-files': {
+        'task': 'Catalog.tasks.cleanup_design_pdf_files',
+        'schedule': crontab(minute=0, hour='0,4,8,12,16,20'),  # Every 4 hours at :00
+    },
 }
 
 # Timezone configuration

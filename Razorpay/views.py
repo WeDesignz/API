@@ -1231,9 +1231,10 @@ def capture_pdf_payment(request):
         for pdf_download in pdf_downloads:
             try:
                 pdf_download.payment_status = 'paid'
-                pdf_download.status = 'processing'
+                # PDF is generated on-demand when user clicks download (not stored permanently)
+                pdf_download.status = 'pending'
                 pdf_download.save()
-                logger.info(f'PDF Payment Capture - Updated PDF download {pdf_download.id} status to paid/processing')
+                logger.info(f'PDF Payment Capture - Updated PDF download {pdf_download.id} status to paid/pending')
                 
                 # Create order for mock PDF download
                 from Orders.models import Order
@@ -1256,11 +1257,6 @@ def capture_pdf_payment(request):
                 payment.order = order
                 payment.save()
                 logger.info(f'PDF Payment Capture - Linked RazorpayPayment {payment.id} to Order {order.id}')
-                
-                # Trigger PDF generation task
-                from Catalog.tasks import generate_pdf_task
-                generate_pdf_task.delay(pdf_download.id)
-                logger.info(f'PDF Payment Capture - Triggered PDF generation task for download {pdf_download.id}')
             except Exception as e:
                 logger.error(f'PDF Payment Capture - Error processing PDF download {pdf_download.id}: {str(e)}', exc_info=True)
                 # Continue with other PDF downloads even if one fails

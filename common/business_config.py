@@ -74,6 +74,20 @@ class BusinessConfig:
         if config and hasattr(config, 'free_mock_pdf_downloads_no_plan_per_month') and config.free_mock_pdf_downloads_no_plan_per_month is not None:
             return int(config.free_mock_pdf_downloads_no_plan_per_month)
         return getattr(settings, 'FREE_MOCK_PDF_DOWNLOADS_NO_PLAN_PER_MONTH', 999)
+
+    @staticmethod
+    def get_paid_pdf_designs_options():
+        """Get PDF download design count options (e.g. [20, 50, 100]).
+        First value is used for free PDFs. Only 20, 50, 100 allowed (values > 100 filtered out).
+        Reads from SystemConfig, falls back to .env.
+        """
+        config = BusinessConfig._get_system_config()
+        if config and hasattr(config, 'paid_pdf_designs_options') and config.paid_pdf_designs_options:
+            opts = config.paid_pdf_designs_options
+            if isinstance(opts, list) and len(opts) > 0:
+                filtered = [int(x) for x in opts if str(x).strip() and int(x) <= 100]
+                return filtered if filtered else [20, 50, 100]
+        return getattr(settings, 'PAID_PDF_DESIGNS_OPTIONS', [20, 50, 100])
     
     @staticmethod
     def calculate_commission_amount(amount):
