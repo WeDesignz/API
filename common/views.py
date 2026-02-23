@@ -6,6 +6,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
 from django.utils import timezone
 from datetime import timedelta
+import os
 import requests
 import logging
 
@@ -2466,19 +2467,45 @@ def instagram_posts_list(request):
 # ==================== Pinterest Posts (admin list, retry, bulk) ====================
 
 def _get_product_thumbnail_url(request, product):
-    """Get first image URL for a product for display in Pinterest posts list. Always returns absolute URL."""
+    """Get image URL for a product for display in Pinterest posts list. Priority: MOCKUP avif → MOCKUP jpg → design avif → design jpg. Always returns absolute URL."""
     try:
         media_list = product.get_media()
         if hasattr(media_list, 'filter'):
-            media_list = list(media_list.filter(media_type='image')[:1])
+            media_list = list(media_list.filter(media_type='image'))
         else:
-            media_list = [m for m in (list(media_list) if media_list else []) if getattr(m, 'media_type', None) == 'image'][:1]
+            media_list = [m for m in (list(media_list) if media_list else []) if getattr(m, 'media_type', None) == 'image']
         if not media_list:
             return None
-        m = media_list[0]
-        if not getattr(m, 'file', None):
+
+        mockup_avif = None
+        mockup_jpg = None
+        design_avif = None
+        design_jpg = None
+
+        for m in media_list:
+            if not getattr(m, 'file', None) or not m.file.name:
+                continue
+            file_name = m.file.name.lower()
+            base_name = os.path.splitext(os.path.basename(file_name))[0]
+            is_mockup = 'mockup' in base_name or base_name.endswith('_mockup')
+            is_design_jpg_avif = '_jpg' in base_name or base_name.endswith('_jpg')
+
+            if file_name.endswith('.avif'):
+                if is_mockup:
+                    mockup_avif = m
+                elif is_design_jpg_avif:
+                    design_avif = m
+            elif file_name.endswith('.jpg') or file_name.endswith('.jpeg'):
+                if is_mockup:
+                    mockup_jpg = m
+                else:
+                    design_jpg = m
+
+        chosen = mockup_avif or mockup_jpg or design_avif or design_jpg
+        if not chosen:
             return None
-        url = m.file.url
+
+        url = chosen.file.url
         if not url:
             return None
         if url.startswith('http://') or url.startswith('https://'):
