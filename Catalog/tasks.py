@@ -32,6 +32,7 @@ def process_single_design_upload(
         tag_ids: List of tag IDs to attach
         platform_id: Platform ID for the product
     """
+    logger.info(f"process_single_design_upload: starting for product_id={product_id}")
     try:
         # Get the product
         try:
@@ -179,9 +180,11 @@ def process_single_design_upload(
             except Exception as e:
                 pass
         
+        logger.info(f"process_single_design_upload: completed for product_id={product_id}, processed_files={processed_files}")
         return {'status': 'success', 'processed_files': processed_files}
         
     except Exception as e:
+        logger.info(f"process_single_design_upload: failed for product_id={product_id}, error={e}")
         return {'status': 'failed', 'error': str(e)}
 
 
@@ -190,6 +193,7 @@ def generate_pdf_task(self, pdf_download_id):
     """
     Generate PDF for a PDF download request.
     """
+    logger.info(f"generate_pdf_task: starting for download_id={pdf_download_id}")
     try:
         pdf_download = PDFDownload.objects.get(id=pdf_download_id)
         
@@ -602,6 +606,7 @@ def generate_pdf_task(self, pdf_download_id):
             pdf_download.status = 'failed'
             pdf_download.save()
             raise
+        logger.info(f"generate_pdf_task: completed for download_id={pdf_download_id}")
         return {'status': 'completed', 'download_id': pdf_download_id}
         
     except PDFDownload.DoesNotExist:
@@ -630,6 +635,7 @@ def cleanup_design_pdf_files():
     error_count = 0
     media_root = getattr(settings, 'MEDIA_ROOT', None)
     if not media_root or not os.path.isdir(media_root):
+        logger.info("cleanup_design_pdf_files: MEDIA_ROOT not set or not a directory, skipping")
         return {'deleted': 0, 'errors': 0}
     qs = PDFDownload.objects.filter(pdf_file_path__isnull=False).exclude(pdf_file_path='')
     for pdf_download in qs:
@@ -648,7 +654,9 @@ def cleanup_design_pdf_files():
             deleted_count += 1
         except Exception as e:
             error_count += 1
-    return {'deleted': deleted_count, 'errors': error_count}
+    result = {'deleted': deleted_count, 'errors': error_count}
+    logger.info(f"cleanup_design_pdf_files: {result}")
+    return result
 
 
 # Only index PNG for visual search (per design media storage)
@@ -662,7 +670,7 @@ def _set_huggingface_timeout_for_visual_search(timeout_seconds=300):
         import httpx
         set_client_factory(lambda: httpx.Client(timeout=httpx.Timeout(float(timeout_seconds))))
     except Exception as e:
-        pass
+        logger.warning(f"Could not set Hugging Face timeout: {e}")
 
 
 @shared_task(bind=True, name='Catalog.tasks.index_product_visual_search')

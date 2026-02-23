@@ -196,11 +196,13 @@ def send_promotional_emails(self):
                 promotional_content['template'],
                 promotional_content['context']
             )
-
-            return f"Promotional emails sent to {success_count} users"
+            msg = f"Promotional emails sent to {success_count} users"
+            logger.info(msg)
+            return msg
         else:
-
-            return "No eligible users for promotional emails"
+            msg = "No eligible users for promotional emails"
+            logger.info(msg)
+            return msg
             
     except Exception as e:
 
@@ -236,7 +238,9 @@ def update_subscription_status(self):
                 subscription.status = 'failed'
                 subscription.save()
 
-        return f"Updated {renewed_count} subscription statuses"
+        msg = f"Updated {renewed_count} subscription statuses"
+        logger.info(msg)
+        return msg
         
     except Exception as e:
 
@@ -269,7 +273,9 @@ def send_auto_mandate_notifications(self):
             except Exception as e:
                 pass
 
-        return f"Sent auto-mandate notifications to {notified_count} users"
+        msg = f"Sent auto-mandate notifications to {notified_count} users"
+        logger.info(msg)
+        return msg
         
     except Exception as e:
 
@@ -282,8 +288,9 @@ def cleanup_expired_otps(self):
         expired_otps = OTP.objects.filter(expires_at__lt=timezone.now())
         count = expired_otps.count()
         expired_otps.delete()
-
-        return f"Cleaned up {count} expired OTPs"
+        msg = f"Cleaned up {count} expired OTPs"
+        logger.info(msg)
+        return msg
         
     except Exception as e:
 
@@ -300,8 +307,9 @@ def expire_coupons(self):
         
         count = expired_coupons.count()
         expired_coupons.update(status='expired')
-
-        return f"Expired {count} coupons"
+        msg = f"Expired {count} coupons"
+        logger.info(msg)
+        return msg
         
     except Exception as e:
 
@@ -361,7 +369,9 @@ def weekly_database_backup(self):
         for old_backup in old_backups:
             os.remove(old_backup)
 
-        return f"Weekly backup created: {backup_filename}"
+        msg = f"Weekly backup created: {backup_filename}"
+        logger.info(msg)
+        return msg
         
     except Exception as e:
 
@@ -381,8 +391,9 @@ def mark_inactive_accounts_for_deletion(self):
         # Mark for deletion (you might want to add a field for this)
         count = inactive_users.count()
         # inactive_users.update(marked_for_deletion=True)  # Uncomment if you add this field
-
-        return f"Marked {count} inactive accounts for deletion"
+        msg = f"Marked {count} inactive accounts for deletion"
+        logger.info(msg)
+        return msg
         
     except Exception as e:
 
@@ -401,7 +412,9 @@ def check_custom_order_sla(self, order_id):
         # Check if order is already completed or cancelled
         if order.status in ['completed', 'cancelled']:
 
-            return f"Order {order_id} already {order.status}"
+            msg = f"Order {order_id} already {order.status}"
+            logger.info(msg)
+            return msg
         
         # Check if SLA deadline has passed
         now = timezone.now()
@@ -413,7 +426,9 @@ def check_custom_order_sla(self, order_id):
                 args=[order_id],
                 eta=order.sla_deadline
             )
-            return f"Rescheduled order {order_id} SLA check for {order.sla_deadline}"
+            msg = f"Rescheduled order {order_id} SLA check for {order.sla_deadline}"
+            logger.info(msg)
+            return msg
         
         # Order has exceeded SLA deadline and is not completed
         # Mark as delayed
@@ -433,10 +448,14 @@ def check_custom_order_sla(self, order_id):
             except Exception as e:
                 pass
 
-        return f"Order {order_id} marked as delayed"
+        msg = f"Order {order_id} marked as delayed"
+        logger.info(msg)
+        return msg
         
     except CustomOrderRequest.DoesNotExist:
-        return f"Order {order_id} not found"
+        msg = f"Order {order_id} not found"
+        logger.info(msg)
+        return msg
     except Exception as e:
 
         # Retry once after 5 minutes if there's an error
@@ -468,7 +487,9 @@ def send_subscription_expiry_reminders(self):
             except Exception as e:
                 pass
 
-        return f"Sent expiry reminders to {reminded_count} users"
+        msg = f"Sent expiry reminders to {reminded_count} users"
+        logger.info(msg)
+        return msg
         
     except Exception as e:
 
@@ -497,7 +518,9 @@ def send_bulk_emails(self, user_ids, subject, template, context):
 
                 continue
 
-        return f"Bulk emails sent to {success_count}/{len(users)} users"
+        msg = f"Bulk emails sent to {success_count}/{len(users)} users"
+        logger.info(msg)
+        return msg
         
     except Exception as e:
 
@@ -510,7 +533,9 @@ def generate_reports(self, report_type, date_range):
         # This would generate different types of reports
         # based on the report_type parameter
 
-        return f"Generated {report_type} report for {date_range}"
+        msg = f"Generated {report_type} report for {date_range}"
+        logger.info(msg)
+        return msg
         
     except Exception as e:
 
@@ -563,7 +588,9 @@ def send_settlement_reminders(self):
             except Exception as e:
                 pass
 
-        return f"Sent settlement reminders to {reminded_count} designers"
+        msg = f"Sent settlement reminders to {reminded_count} designers"
+        logger.info(msg)
+        return msg
         
     except Exception as e:
 
@@ -674,7 +701,9 @@ def create_designer_payout_requests(self):
 
                 skipped_count += 1
 
-        return f"Created {created_count} settlement requests, skipped {skipped_count} designers"
+        msg = f"Created {created_count} settlement requests, skipped {skipped_count} designers"
+        logger.info(msg)
+        return msg
         
     except Exception as e:
 
@@ -831,7 +860,9 @@ def process_settlement_payouts(self):
                 settlement_request.save()
                 failed_count += 1
 
-        return f"Processed {processed_count} settlements, {failed_count} failed"
+        msg = f"Processed {processed_count} settlements, {failed_count} failed"
+        logger.info(msg)
+        return msg
         
     except Exception as e:
 
@@ -866,7 +897,9 @@ def send_design_approval_reminders(self):
             except Exception as e:
                 pass
 
-        return f"Sent design approval reminders for {reminded_count} designs"
+        msg = f"Sent design approval reminders for {reminded_count} designs"
+        logger.info(msg)
+        return msg
         
     except Exception as e:
 
@@ -903,7 +936,9 @@ def send_designer_performance_reports(self):
             except Exception as e:
                 pass
 
-        return f"Sent performance reports to {reported_count} designers"
+        msg = f"Sent performance reports to {reported_count} designers"
+        logger.info(msg)
+        return msg
         
     except Exception as e:
 
@@ -934,7 +969,9 @@ def cleanup_expired_settlements(self):
         # count = expired_settlements.count()
         # expired_settlements.update(status='EXPIRED')
 
-        return "Expired settlements cleanup completed"
+        msg = "Expired settlements cleanup completed"
+        logger.info(msg)
+        return msg
         
     except Exception as e:
 
@@ -1048,7 +1085,9 @@ def expire_processing_settlements(self):
                 except:
                     pass
 
-        return f"Expired {expired_count} settlements, refunded {refunded_count} wallets, {error_count} errors"
+        msg = f"Expired {expired_count} settlements, refunded {refunded_count} wallets, {error_count} errors"
+        logger.info(msg)
+        return msg
         
     except Exception as e:
 
@@ -1079,7 +1118,9 @@ def send_order_confirmation_email_async(self, order_id):
         # Send email
         EmailService.send_order_confirmation_email(order.created_by, order, order_items)
 
-        return f"Order confirmation email sent for order {order_id}"
+        msg = f"Order confirmation email sent for order {order_id}"
+        logger.info(msg)
+        return msg
         
     except Order.DoesNotExist:
         return f"Order {order_id} not found"
@@ -1106,7 +1147,9 @@ def send_customer_invoice_email_async(self, invoice_id, order_id):
         # Send email
         EmailService.send_customer_invoice_email(invoice, order, products)
 
-        return f"Customer invoice email sent for invoice {invoice_id}"
+        msg = f"Customer invoice email sent for invoice {invoice_id}"
+        logger.info(msg)
+        return msg
         
     except Invoice.DoesNotExist:
         return f"Invoice {invoice_id} not found"
@@ -1131,7 +1174,9 @@ def send_settlement_receipt_email_async(self, settlement_id):
         # Send email
         EmailService.send_settlement_receipt_email(invoice, settlement)
 
-        return f"Settlement receipt email sent for settlement {settlement_id}"
+        msg = f"Settlement receipt email sent for settlement {settlement_id}"
+        logger.info(msg)
+        return msg
         
     except SettlementRequest.DoesNotExist:
         return f"Settlement {settlement_id} not found"
@@ -1344,7 +1389,9 @@ def send_design_sale_notification_async(self, order_id):
             except Exception as e:
                 pass
 
-        return f"Design sale notifications sent for order {order_id} to {notified_count} designers"
+        msg = f"Design sale notifications sent for order {order_id} to {notified_count} designers"
+        logger.info(msg)
+        return msg
         
     except Order.DoesNotExist:
         return f"Order {order_id} not found"
@@ -1485,7 +1532,9 @@ def send_scheduled_notification(self, campaign_id, title, message, priority, sen
         # Log the result with delivery method details
         emails_will_be_sent = delivery_method in ['email', 'both']
 
-        return f"Notification sent to {len(notification_ids)} recipients"
+        msg = f"Notification sent to {len(notification_ids)} recipients"
+        logger.info(msg)
+        return msg
         
     except Exception as e:
 
@@ -1528,7 +1577,9 @@ def send_notification_email(self, user_type, user_id, notification_id):
         notification.email_sent_at = timezone.now()
         notification.save()
 
-        return f"Email sent to {user.email}"
+        msg = f"Email sent to {user.email}"
+        logger.info(msg)
+        return msg
         
     except Exception as e:
 
@@ -2154,7 +2205,9 @@ def retry_failed_pinterest_posts():
             except Exception as e:
                 pass
 
-        return f"Retried {retried_count} failed Pinterest posts"
+        msg = f"Retried {retried_count} failed Pinterest posts"
+        logger.info(msg)
+        return msg
         
     except Exception as e:
 

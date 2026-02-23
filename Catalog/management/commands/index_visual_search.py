@@ -35,6 +35,7 @@ def _set_huggingface_timeout(timeout_seconds=300):
             return httpx.Client(timeout=httpx.Timeout(float(timeout_seconds)))
         set_client_factory(make_client)
     except Exception as e:
+        logger.warning(f"Could not set Hugging Face timeout: {e}")
 
 def get_visual_search():
     """Import visual_search from API project root."""
