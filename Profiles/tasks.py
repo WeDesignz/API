@@ -27,6 +27,7 @@ def process_design_upload_task(self, task_id, zip_file_path):
         task_id: ID of the DesignProcessingTask record
         zip_file_path: Path to the stored zip file
     """
+    logger.info(f"process_design_upload_task: starting for task_id={task_id}")
     try:
         # Get the task record
         try:
@@ -56,6 +57,7 @@ def process_design_upload_task(self, task_id, zip_file_path):
             uploaded_by_member_id = task.user.id
 
         else:
+            pass
 
         # Use the path from the database record as the source of truth
         # The parameter might be outdated, but the database record is always current
@@ -63,6 +65,7 @@ def process_design_upload_task(self, task_id, zip_file_path):
 
         # If database path differs from parameter, log a warning
         if actual_zip_file_path != zip_file_path:
+            pass
 
         # Read zip file from storage
 
@@ -75,12 +78,14 @@ def process_design_upload_task(self, task_id, zip_file_path):
                     absolute_path = os.path.join(settings.MEDIA_ROOT, actual_zip_file_path)
 
                     if os.path.exists(absolute_path):
-
+                        pass
             except Exception as path_error:
+                pass
 
             # Log available storage information for debugging
 
             if absolute_path:
+                pass
 
             raise FileNotFoundError(
                 f"Zip file not found at path: {actual_zip_file_path}. "
@@ -151,6 +156,7 @@ def process_design_upload_task(self, task_id, zip_file_path):
                         row_count += 1
                         # Log first entry for debugging
                         if row_count == 1:
+                            pass
 
             # Find root folder - handle both 2-part and 3-part paths
             # 2-part: design_folder/file.ext (zip created from inside root folder)
@@ -290,13 +296,14 @@ def process_design_upload_task(self, task_id, zip_file_path):
                                         design_files[file_ext] = file_name
 
                         if mockup_file:
+                            pass
 
                         # Get category and subcategory from metadata (using fixed column positions)
                         category_name = metadata.get('category', '').strip() if metadata.get('category') else ''
                         if not category_name:
                             category_name = 'other'
-
                         else:
+                            pass
 
                         subcategory_name = metadata.get('subcategory', '').strip() if metadata.get('subcategory') else ''
 
@@ -308,7 +315,7 @@ def process_design_upload_task(self, task_id, zip_file_path):
                             parent_category = Category.objects.filter(name=category_name, parent__isnull=True).first()
                             
                             if parent_category:
-
+                                pass
                             else:
                                 # Category doesn't exist, create it
 
@@ -319,7 +326,6 @@ def process_design_upload_task(self, task_id, zip_file_path):
                                 )
 
                         except Exception as e:
-
                             # Fallback: try to get 'other' category or create it
                             try:
                                 parent_category = Category.objects.filter(name='other', parent__isnull=True).first()
@@ -348,7 +354,7 @@ def process_design_upload_task(self, task_id, zip_file_path):
                                 ).first()
                                 
                                 if category:
-
+                                    pass
                                 else:
                                     # Subcategory doesn't exist, create it
 
@@ -515,12 +521,15 @@ def process_design_upload_task(self, task_id, zip_file_path):
                                                 created_by=product_owner
                                             )
                                             if avif_path:
-
-                                                if avif_media_obj:
+                                                pass
+                                            if avif_media_obj:
+                                                pass
 
                                         except Exception as avif_error:
+                                            pass
 
                                 except Exception as e:
+                                    pass
 
                         finally:
                             # Clear product context
@@ -574,12 +583,15 @@ def process_design_upload_task(self, task_id, zip_file_path):
                                             created_by=product_owner
                                         )
                                         if avif_path:
-
-                                            if avif_media_obj:
+                                            pass
+                                        if avif_media_obj:
+                                            pass
 
                                     except Exception as avif_error:
+                                        pass
 
                                 except Exception as e:
+                                    pass
 
                                     # Don't fail the whole process if mockup fails
                             finally:
@@ -618,6 +630,7 @@ def process_design_upload_task(self, task_id, zip_file_path):
                                     )
                                     product.attach_plan(plan, meta={'source': 'bulk_upload'}, created_by=task.user)
                             except Exception as e:
+                                pass
 
                         # SubProduct removed - using Product only
 
@@ -663,6 +676,7 @@ def process_design_upload_task(self, task_id, zip_file_path):
                 task.status = 'completed'
             
             task.save(update_fields=['status', 'processed_designs', 'failed_designs', 'error_message', 'updated_at'])
+            logger.info(f"process_design_upload_task: completed for task_id={task_id}, processed={processed_count}, failed={failed_count}")
 
     except Exception as e:
         import traceback
@@ -675,8 +689,10 @@ def process_design_upload_task(self, task_id, zip_file_path):
             task.error_message = str(e)
             task.save(update_fields=['status', 'error_message', 'updated_at'])
         except DesignProcessingTask.DoesNotExist:
-
+            pass
         except Exception as update_error:
+            pass
 
+        logger.info(f"process_design_upload_task: failed for task_id={task_id}, error={e}")
         raise
 

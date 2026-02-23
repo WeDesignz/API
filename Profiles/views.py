@@ -2088,8 +2088,9 @@ def handle_design_upload(request):
             logger = logging.getLogger(__name__)
 
             if not default_storage.exists(saved_path):
-
+                pass
             else:
+                pass
 
             # Create DesignProcessingTask record
             with transaction.atomic():
@@ -2287,8 +2288,9 @@ def stream_design_processing_progress(request):
             from django.db import OperationalError
             logger = logging.getLogger(__name__)
             if isinstance(e, OperationalError) and 'too many clients' in str(e):
-
+                pass
             else:
+                pass
 
             user = None
     

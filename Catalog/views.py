@@ -3508,7 +3508,8 @@ def download_pdf_file(request, download_id):
                     pdf_download.save()
                     return response
                 except Exception as e:
-            
+                    pass
+
             # If file doesn't exist but status is completed, try to regenerate it
             # This handles cases where the task completed but file wasn't created
             if pdf_download.status == 'completed':

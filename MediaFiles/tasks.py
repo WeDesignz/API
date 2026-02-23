@@ -1,6 +1,9 @@
+import logging
 from celery import shared_task
 from django.core.management import call_command
 from django.core.management.base import CommandError
+
+logger = logging.getLogger(__name__)
 
 
 @shared_task(bind=True, name='MediaFiles.tasks.rename_design_files')
@@ -26,6 +29,7 @@ def rename_design_files_task(
     Returns:
         dict: Task result with status and message
     """
+    logger.info(f"rename_design_files_task: starting user_id={user_id} product_id={product_id} dry_run={dry_run}")
     try:
         # Prepare command arguments
         command_args = []
@@ -52,11 +56,13 @@ def rename_design_files_task(
             call_command('rename_design_files', *command_args)
             output_text = output.getvalue()
             
-            return {
+            result = {
                 'status': 'success',
                 'message': 'Design files renamed successfully',
                 'output': output_text
             }
+            logger.info(f"rename_design_files_task: completed - {result['message']}")
+            return result
         finally:
             sys.stdout = old_stdout
             
