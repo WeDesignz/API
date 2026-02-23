@@ -5,7 +5,6 @@ from Accounts.serializers import UserSerializer
 from MediaFiles.serializers import MediaSerializer
 from common.relations import get_related
 
-
 class CustomOrderRequestSerializer(serializers.ModelSerializer):
     """
     Serializer for CustomOrderRequest model with full CRUD operations.
@@ -126,7 +125,6 @@ class CustomOrderRequestSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Description cannot be empty.")
         return value.strip()
 
-
 class CustomOrderRequestListSerializer(serializers.ModelSerializer):
     """
     Simplified serializer for CustomOrderRequest model used in list views.
@@ -145,7 +143,6 @@ class CustomOrderRequestListSerializer(serializers.ModelSerializer):
         Get count of related media.
         """
         return len(obj.get_media())
-
 
 class CustomOrderRequestCreateSerializer(serializers.ModelSerializer):
     """
@@ -173,7 +170,6 @@ class CustomOrderRequestCreateSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Description cannot be empty.")
         return value.strip()
 
-
 class CustomOrderRequestUpdateSerializer(serializers.ModelSerializer):
     """
     Serializer for updating custom order requests with selective field updates.
@@ -200,7 +196,6 @@ class CustomOrderRequestUpdateSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Description cannot be empty.")
         return value.strip() if value else value
 
-
 class CustomOrderRequestStatusUpdateSerializer(serializers.Serializer):
     """
     Serializer for updating custom order request status.
@@ -215,7 +210,6 @@ class CustomOrderRequestStatusUpdateSerializer(serializers.Serializer):
         # Add business logic for status transitions here
         # For example, prevent moving from 'completed' to 'pending'
         return value
-
 
 class CustomOrderRequestSearchSerializer(serializers.Serializer):
     """
@@ -252,7 +246,6 @@ class CustomOrderRequestSearchSerializer(serializers.Serializer):
         
         return attrs
 
-
 class CustomOrderRequestFilterSerializer(serializers.Serializer):
     """
     Serializer for custom order request filtering functionality.
@@ -284,7 +277,6 @@ class CustomOrderRequestFilterSerializer(serializers.Serializer):
                 raise serializers.ValidationError("Min budget cannot be greater than max budget.")
         return value
 
-
 class CustomOrderRequestStatsSerializer(serializers.Serializer):
     """
     Serializer for custom order request statistics.
@@ -305,7 +297,6 @@ class CustomOrderRequestStatsSerializer(serializers.Serializer):
                 raise serializers.ValidationError("Start date must be before end date.")
         
         return attrs
-
 
 class CustomOrderRequestAnalyticsSerializer(serializers.Serializer):
     """
@@ -330,7 +321,6 @@ class CustomOrderRequestAnalyticsSerializer(serializers.Serializer):
                 raise serializers.ValidationError("Start date must be before end date.")
         
         return attrs
-
 
 class BulkCustomOrderRequestUpdateSerializer(serializers.Serializer):
     """
@@ -360,7 +350,6 @@ class BulkCustomOrderRequestUpdateSerializer(serializers.Serializer):
             if field not in allowed_fields:
                 raise serializers.ValidationError(f"Field '{field}' is not allowed for bulk update.")
         return value
-
 
 class CustomOrderRequestMediaSerializer(serializers.Serializer):
     """
@@ -396,7 +385,6 @@ class CustomOrderRequestMediaSerializer(serializers.Serializer):
             raise serializers.ValidationError("Invalid media IDs.")
         return value
 
-
 class CustomOrderRequestTimelineSerializer(serializers.Serializer):
     """
     Serializer for custom order request timeline/activity tracking.
@@ -412,9 +400,6 @@ class CustomOrderRequestTimelineSerializer(serializers.Serializer):
         except CustomOrderRequest.DoesNotExist:
             raise serializers.ValidationError("Custom order request does not exist.")
         return value
-
-
-
 
 class CustomOrderListSerializer(serializers.ModelSerializer):
     """
@@ -458,7 +443,7 @@ class CustomOrderListSerializer(serializers.ModelSerializer):
         except Exception as e:
             import logging
             logger = logging.getLogger(__name__)
-            logger.warning(f"Error getting order_id for CustomOrderRequest {obj.id}: {e}")
+
         return None
     
     def get_assigned_to(self, obj):
@@ -629,7 +614,6 @@ class CustomOrderListSerializer(serializers.ModelSerializer):
         
         return reference_files
 
-
 class CustomOrderDetailSerializer(serializers.ModelSerializer):
     """
     Serializer for detailed custom order information in admin panel.
@@ -716,9 +700,6 @@ class CustomOrderDetailSerializer(serializers.ModelSerializer):
         """Get refund percentage."""
         return obj.get_refund_percentage()
 
-
-
-
 class CustomOrderActionSerializer(serializers.Serializer):
     """
     Serializer for custom order actions.
@@ -777,7 +758,6 @@ class CustomOrderActionSerializer(serializers.Serializer):
         
         return attrs
 
-
 class CustomOrderFileUploadSerializer(serializers.Serializer):
     """
     Serializer for file upload actions.
@@ -802,7 +782,6 @@ class CustomOrderFileUploadSerializer(serializers.Serializer):
                 raise serializers.ValidationError(f"File {file.name} is too large. Maximum size is 10MB.")
         
         return value
-
 
 class CustomOrderFilterSerializer(serializers.Serializer):
     """
@@ -851,7 +830,6 @@ class CustomOrderFilterSerializer(serializers.Serializer):
         
         return attrs
 
-
 class CustomOrderAnalyticsSerializer(serializers.Serializer):
     """
     Serializer for custom order analytics.
@@ -873,7 +851,6 @@ class CustomOrderAnalyticsSerializer(serializers.Serializer):
                 raise serializers.ValidationError("Start date must be before end date.")
         
         return attrs
-
 
 class CustomOrderNotificationSerializer(serializers.Serializer):
     """
@@ -899,7 +876,6 @@ class CustomOrderNotificationSerializer(serializers.Serializer):
         help_text="List of user IDs to notify (if not provided, notifies all admins)"
     )
 
-
 class CustomOrderSLAStatusSerializer(serializers.Serializer):
     """
     Serializer for SLA status information.
@@ -912,7 +888,6 @@ class CustomOrderSLAStatusSerializer(serializers.Serializer):
     breach_time = serializers.DateTimeField(required=False, allow_null=True)
     assigned_to = serializers.DictField(required=False, allow_null=True)
     priority = serializers.CharField()
-
 
 class CustomOrderRefundSerializer(serializers.Serializer):
     """

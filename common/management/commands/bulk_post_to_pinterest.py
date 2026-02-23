@@ -3,9 +3,6 @@ from django.conf import settings
 from Catalog.models import Product
 from common.models import PinterestPost, PinterestIntegration
 from common.tasks import post_design_to_pinterest
-import logging
-
-logger = logging.getLogger(__name__)
 
 
 class Command(BaseCommand):
@@ -153,7 +150,6 @@ class Command(BaseCommand):
                     
             except Exception as e:
                 error_count += 1
-                logger.error(f'Error queueing Pinterest post for product {product.id}: {str(e)}')
                 self.stdout.write(self.style.WARNING(f'  ⚠️  Error for {product.title}: {str(e)}'))
         
         self.stdout.write('')

@@ -32,7 +32,6 @@ from Wallet.models import Wallet, WalletTransaction
 from Plans.models import Subscription
 from common.business_config import BusinessConfig
 
-
 def extract_gst_and_commission(total_price: Decimal, gst_percentage: Decimal, commission_rate: Decimal) -> Dict[str, Decimal]:
     """
     Extract GST and commission from total price using reverse calculation.
@@ -81,7 +80,6 @@ def extract_gst_and_commission(total_price: Decimal, gst_percentage: Decimal, co
         'commission_amount': commission_amount,
         'amount_after_gst': amount_after_gst,
     }
-
 
 def calculate_order_breakdown(order: Order) -> Dict[str, Any]:
     """
@@ -148,7 +146,6 @@ def calculate_order_breakdown(order: Order) -> Dict[str, Any]:
         'designer_breakdown': designer_breakdown,
     }
 
-
 def _draw_logo_and_company(c: canvas.Canvas, data: Dict[str, Any], page_width: float, top_y: float) -> float:
     """Draw WeDesignz logo and text on the left side of the header."""
     company = data["company_details"]
@@ -181,8 +178,7 @@ def _draw_logo_and_company(c: canvas.Canvas, data: Dict[str, Any], page_width: f
                 c.drawImage(full_path, logo_x, top_y - logo_size, width=logo_width, height=logo_size, preserveAspectRatio=True)
                 logo_drawn = True
         except Exception as e:
-            logger.warning("Could not load logo image '%s': %s", logo_path, e)
-    
+
     # If logo not drawn, draw placeholder
     if not logo_drawn:
         circle_radius = 3 * mm  # Reduced to 3mm
@@ -225,8 +221,7 @@ def _draw_logo_and_company(c: canvas.Canvas, data: Dict[str, Any], page_width: f
                            width=text_logo_width, height=text_logo_size, preserveAspectRatio=True)
                 text_logo_drawn = True
         except Exception as e:
-            logger.warning("Could not load text logo image '%s': %s", text_logo_path, e)
-    
+
     # If text logo not drawn, draw company name as text
     if not text_logo_drawn:
         text_x = logo_x + logo_width + 8 * mm
@@ -235,7 +230,6 @@ def _draw_logo_and_company(c: canvas.Canvas, data: Dict[str, Any], page_width: f
         c.drawString(text_x, top_y - 6 * mm, company.get("company_name", "WeDesignz"))
 
     return top_y - 12 * mm  # Reduced to 12mm for smaller logos
-
 
 def _draw_invoice_meta(c: canvas.Canvas, data: Dict[str, Any], page_width: float, top_y: float) -> float:
     """Draw invoice metadata on the right side of the header."""
@@ -292,7 +286,6 @@ def _draw_invoice_meta(c: canvas.Canvas, data: Dict[str, Any], page_width: float
 
     return top_y - 30 * mm  # Adjusted for 3 rows
 
-
 def _draw_company_contact(c: canvas.Canvas, data: Dict[str, Any], page_width: float, y: float) -> float:
     """Draw company contact info in an attractive footer."""
     company = data["company_details"]
@@ -330,7 +323,6 @@ def _draw_company_contact(c: canvas.Canvas, data: Dict[str, Any], page_width: fl
     c.drawRightString(page_width - right_margin, footer_y - 4 * mm, support_link)
     
     return footer_y - 8 * mm
-
 
 def _draw_billed_and_from_blocks(c: canvas.Canvas, data: Dict[str, Any], page_width: float, start_y: float) -> float:
     """Draw billed to and from blocks with proper text wrapping."""
@@ -425,7 +417,6 @@ def _draw_billed_and_from_blocks(c: canvas.Canvas, data: Dict[str, Any], page_wi
     lowest_y = min(text_y, from_y - 4 * mm)
     return lowest_y - 4 * mm
 
-
 def _wrap_text(text: str, max_width: float, c: canvas.Canvas, font_name: str, font_size: int) -> List[str]:
     """Wrap text to fit within max_width using canvas stringWidth."""
     if not text:
@@ -450,7 +441,6 @@ def _wrap_text(text: str, max_width: float, c: canvas.Canvas, font_name: str, fo
         lines.append(" ".join(current_line))
     
     return lines if lines else [text]
-
 
 def _draw_items_table(c: canvas.Canvas, data: Dict[str, Any], page_width: float, start_y: float) -> float:
     """Draw items table with header row and borders."""
@@ -552,7 +542,6 @@ def _draw_items_table(c: canvas.Canvas, data: Dict[str, Any], page_width: float,
 
     return current_y - 5 * mm
 
-
 def _draw_totals_section(c: canvas.Canvas, data: Dict[str, Any], page_width: float, start_y: float) -> float:
     """Draw totals section on the lower-right side."""
     inv = data["invoice"]
@@ -624,14 +613,12 @@ def _draw_totals_section(c: canvas.Canvas, data: Dict[str, Any], page_width: flo
 
         return box_y - 6 * mm
 
-
 def _draw_thank_you(c: canvas.Canvas, data: Dict[str, Any], page_width: float, y: float) -> float:
     """Draw thank you note centered near the bottom with attractive styling."""
     c.setFont("Helvetica-Bold", 10)
     c.setFillColorRGB(0.22, 0.55, 0.80)
     c.drawCentredString(page_width / 2, y, "Thank you for doing business with us")
     return y - 6 * mm
-
 
 def generate_invoice_pdf(invoice_data: Dict[str, Any], output_path: str) -> None:
     """Generate a PDF invoice."""
@@ -670,7 +657,6 @@ def generate_invoice_pdf(invoice_data: Dict[str, Any], output_path: str) -> None
     c.showPage()
     c.save()
 
-
 def get_company_details() -> Dict[str, Any]:
     """Get WeDesignz company details for invoices."""
     from django.conf import settings
@@ -707,7 +693,6 @@ def get_company_details() -> Dict[str, Any]:
         "company_address_line2": "Bhilwara - 311001",
         "company_support_link": "https://support.wedesignz.com",  # Update with actual support link
     }
-
 
 def get_user_address(user: User) -> Dict[str, str]:
     """Get user address details for invoice including GST number."""
@@ -782,15 +767,13 @@ def get_user_address(user: User) -> Dict[str, str]:
     except Exception as e:
         import logging
         logger = logging.getLogger(__name__)
-        logger.error(f'Error getting designer business address: {str(e)}', exc_info=True)
-    
+
     return {
         "client_company": company_name,
         "client_address_line1": address_line1,
         "client_address_line2": address_line2,
         "client_gst_number": gst_number,
     }
-
 
 def create_customer_invoice(order: Order) -> Invoice:
     """Create and generate customer invoice for the full order amount."""
@@ -884,10 +867,8 @@ def create_customer_invoice(order: Order) -> Invoice:
     except Exception as e:
         import logging
         logger = logging.getLogger(__name__)
-        logger.error(f'Failed to queue customer invoice email: {str(e)}', exc_info=True)
-    
-    return invoice
 
+    return invoice
 
 def create_settlement_receipt(settlement_request: 'SettlementRequest') -> Invoice:
     """
@@ -969,7 +950,6 @@ def create_settlement_receipt(settlement_request: 'SettlementRequest') -> Invoic
     
     return invoice
 
-
 def process_order_invoices(order: Order) -> Dict[str, Any]:
     """
     Main function to process invoices and wallet settlements for an order.
@@ -1012,7 +992,6 @@ def process_order_invoices(order: Order) -> Dict[str, Any]:
         'designer_invoices': [],  # No designer invoices created
         'wallet_transactions': wallet_transactions,
     }
-
 
 def process_monthly_subscription_settlement(
     subscription: Subscription, 
@@ -1187,7 +1166,6 @@ def process_monthly_subscription_settlement(
         'designer_invoices': [],  # No designer invoices created
         'wallet_transactions': [txn.id for txn in wallet_transactions],
     }
-
 
 def process_subscription_settlement(subscription: Subscription) -> Dict[str, Any]:
     """

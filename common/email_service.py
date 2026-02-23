@@ -4,9 +4,6 @@ from django.conf import settings
 from django.contrib.auth.models import User
 from django.utils import timezone
 from datetime import date
-import logging
-
-logger = logging.getLogger(__name__)
 
 
 class EmailService:
@@ -66,10 +63,8 @@ class EmailService:
             msg.attach_alternative(html_content, "text/html")
             msg.send()
             
-            logger.info(f"Welcome email sent to {user.email}")
             return True
         except Exception as e:
-            logger.error(f"Failed to send welcome email to {user.email}: {str(e)}")
             return False
     
     @staticmethod
@@ -96,10 +91,8 @@ class EmailService:
             msg.attach_alternative(html_content, "text/html")
             msg.send()
             
-            logger.info(f"OTP email sent to {user.email}")
             return True
         except Exception as e:
-            logger.error(f"Failed to send OTP email to {user.email}: {str(e)}")
             return False
     
     @staticmethod
@@ -125,10 +118,8 @@ class EmailService:
             msg.attach_alternative(html_content, "text/html")
             msg.send()
             
-            logger.info(f"Password reset email sent to {user.email}")
             return True
         except Exception as e:
-            logger.error(f"Failed to send password reset email to {user.email}: {str(e)}")
             return False
     
     @staticmethod
@@ -137,7 +128,6 @@ class EmailService:
         try:
             # Only send for custom orders (not cart orders - those get invoice emails)
             if order.order_type != 'custom':
-                logger.info(f"Skipping order confirmation email for non-custom order {order.id}")
                 return True
             
             logo_url, text_url = EmailService.get_logo_urls()
@@ -158,10 +148,8 @@ class EmailService:
             msg.attach_alternative(html_content, "text/html")
             msg.send()
             
-            logger.info(f"Custom order confirmation email sent to {user.email}")
             return True
         except Exception as e:
-            logger.error(f"Failed to send order confirmation email to {user.email}: {str(e)}")
             return False
     
     @staticmethod
@@ -186,10 +174,8 @@ class EmailService:
             msg.attach_alternative(html_content, "text/html")
             msg.send()
             
-            logger.info(f"Custom order completion email sent to {user.email}")
             return True
         except Exception as e:
-            logger.error(f"Failed to send custom order completion email to {user.email}: {str(e)}")
             return False
     
     @staticmethod
@@ -213,10 +199,8 @@ class EmailService:
             msg.attach_alternative(html_content, "text/html")
             msg.send()
             
-            logger.info(f"Payment success email sent to {user.email}")
             return True
         except Exception as e:
-            logger.error(f"Failed to send payment success email to {user.email}: {str(e)}")
             return False
     
     @staticmethod
@@ -240,10 +224,8 @@ class EmailService:
             msg.attach_alternative(html_content, "text/html")
             msg.send()
             
-            logger.info(f"Payment failed email sent to {user.email}")
             return True
         except Exception as e:
-            logger.error(f"Failed to send payment failed email to {user.email}: {str(e)}")
             return False
     
     @staticmethod
@@ -271,10 +253,8 @@ class EmailService:
             msg.attach_alternative(html_content, "text/html")
             msg.send()
             
-            logger.info(f"Subscription purchase email sent to {user.email}")
             return True
         except Exception as e:
-            logger.error(f"Failed to send subscription purchase email to {user.email}: {str(e)}")
             return False
     
     @staticmethod
@@ -298,10 +278,8 @@ class EmailService:
             msg.attach_alternative(html_content, "text/html")
             msg.send()
             
-            logger.info(f"Subscription renewal email sent to {user.email}")
             return True
         except Exception as e:
-            logger.error(f"Failed to send subscription renewal email to {user.email}: {str(e)}")
             return False
     
     @staticmethod
@@ -325,10 +303,8 @@ class EmailService:
             msg.attach_alternative(html_content, "text/html")
             msg.send()
             
-            logger.info(f"Wallet transaction email sent to {user.email}")
             return True
         except Exception as e:
-            logger.error(f"Failed to send wallet transaction email to {user.email}: {str(e)}")
             return False
     
     @staticmethod
@@ -347,13 +323,10 @@ class EmailService:
                     msg.send()
                     success_count += 1
                 except Exception as e:
-                    logger.error(f"Failed to send promotional email to {user.email}: {str(e)}")
                     continue
             
-            logger.info(f"Promotional email sent to {success_count}/{len(users)} users")
             return success_count
         except Exception as e:
-            logger.error(f"Failed to send promotional emails: {str(e)}")
             return 0
     
     # ==================== DESIGNER CONSOLE EMAIL METHODS ====================
@@ -380,10 +353,8 @@ class EmailService:
             msg.attach_alternative(html_content, "text/html")
             msg.send()
             
-            logger.info(f"Designer onboarding welcome email sent to {user.email}")
             return True
         except Exception as e:
-            logger.error(f"Failed to send designer onboarding welcome email to {user.email}: {str(e)}")
             return False
     
     @staticmethod
@@ -407,10 +378,8 @@ class EmailService:
             msg.attach_alternative(html_content, "text/html")
             msg.send()
             
-            logger.info(f"Design approval email sent to {user.email}")
             return True
         except Exception as e:
-            logger.error(f"Failed to send design approval email to {user.email}: {str(e)}")
             return False
     
     @staticmethod
@@ -435,10 +404,8 @@ class EmailService:
             msg.attach_alternative(html_content, "text/html")
             msg.send()
             
-            logger.info(f"Design rejection email sent to {user.email}")
             return True
         except Exception as e:
-            logger.error(f"Failed to send design rejection email to {user.email}: {str(e)}")
             return False
     
     @staticmethod
@@ -462,10 +429,8 @@ class EmailService:
             msg.attach_alternative(html_content, "text/html")
             msg.send()
             
-            logger.info(f"Settlement processed email sent to {user.email}")
             return True
         except Exception as e:
-            logger.error(f"Failed to send settlement processed email to {user.email}: {str(e)}")
             return False
     
     @staticmethod
@@ -490,10 +455,8 @@ class EmailService:
             msg.attach_alternative(html_content, "text/html")
             msg.send()
             
-            logger.info(f"Designer performance report email sent to {user.email}")
             return True
         except Exception as e:
-            logger.error(f"Failed to send designer performance report email to {user.email}: {str(e)}")
             return False
     
     # ==================== CUSTOM ORDER COMMENT EMAIL METHODS ====================
@@ -518,10 +481,8 @@ class EmailService:
             msg.attach_alternative(html_content, "text/html")
             msg.send()
             
-            logger.info(f"Customer comment notification sent to admin")
             return True
         except Exception as e:
-            logger.error(f"Failed to send customer comment notification: {str(e)}")
             return False
     
     @staticmethod
@@ -547,10 +508,8 @@ class EmailService:
             msg.attach_alternative(html_content, "text/html")
             msg.send()
             
-            logger.info(f"Admin response notification sent to {comment.custom_order_request.created_by.email}")
             return True
         except Exception as e:
-            logger.error(f"Failed to send admin response notification: {str(e)}")
             return False
     
     @staticmethod
@@ -576,10 +535,8 @@ class EmailService:
             msg.attach_alternative(html_content, "text/html")
             msg.send()
             
-            logger.info(f"System update notification sent to {comment.custom_order_request.created_by.email}")
             return True
         except Exception as e:
-            logger.error(f"Failed to send system update notification: {str(e)}")
             return False
     
     @staticmethod
@@ -691,10 +648,8 @@ WeDesignz Team
             msg.attach_alternative(html_content, "text/html")
             msg.send()
             
-            logger.info(f"Studio member credentials email sent to {user.email}")
             return True
         except Exception as e:
-            logger.error(f"Failed to send studio member credentials email to {user.email}: {str(e)}")
             return False
     
     # ==================== INVOICE EMAIL METHODS ====================
@@ -789,10 +744,8 @@ WeDesignz Team
             
             msg.send()
             
-            logger.info(f"Customer invoice email sent to {invoice.user.email} for invoice {invoice.invoice_number}")
             return True
         except Exception as e:
-            logger.error(f"Failed to send customer invoice email to {invoice.user.email}: {str(e)}", exc_info=True)
             return False
     
     @staticmethod
@@ -884,8 +837,6 @@ WeDesignz Team
             
             msg.send()
             
-            logger.info(f"Settlement receipt email sent to {designer.email} for receipt {invoice.invoice_number}")
             return True
         except Exception as e:
-            logger.error(f"Failed to send settlement receipt email to {designer.email}: {str(e)}", exc_info=True)
             return False

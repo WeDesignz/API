@@ -1,10 +1,7 @@
 import requests
-import logging
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 from .models import InstagramIntegration
-
-logger = logging.getLogger(__name__)
 
 
 class InstagramService:
@@ -57,7 +54,6 @@ class InstagramService:
         # Use the user_id endpoint instead of /me
         # Note: 'username' field is deprecated in Instagram Graph API v2.0+
         if not self.integration.user_id:
-            logger.error("Cannot get user info: user_id not set")
             return None
         
         url = f"{self.base_url}/{self.integration.user_id}"
@@ -80,7 +76,6 @@ class InstagramService:
             # Leave username as is (it might be set from OAuth callback or remain None)
             self.integration.save(update_fields=['user_id'])
             
-            logger.info(f"Instagram user info retrieved: ID {user_data.get('id')}")
             return user_data
             
         except requests.exceptions.RequestException as e:
@@ -89,13 +84,10 @@ class InstagramService:
                 try:
                     error_data = e.response.json()
                     error_msg = error_data.get('error', {}).get('message', str(e))
-                    logger.error(f"Instagram API Error: {error_data}")
                 except:
-                    logger.error(f"Response: {e.response.text}")
                     error_msg = e.response.text[:500]
             
             self.integration.update_error(error_msg)
-            logger.error(f"Failed to get Instagram user info: {error_msg}")
             return None
     
     def create_media_container(self, image_url, caption, is_story=False):
@@ -115,7 +107,6 @@ class InstagramService:
             # Try to get user info first
             user_info = self.get_user_info()
             if not user_info:
-                logger.error("Cannot create media container: user_id not available")
                 return None
         
         url = f"{self.base_url}/{self.integration.user_id}/media"
@@ -129,12 +120,10 @@ class InstagramService:
         if is_story:
             # Instagram Stories API requires media_type='STORIES' and NO caption
             params['media_type'] = 'STORIES'
-            logger.info("Creating story media container (media_type=STORIES, no caption)")
         else:
             # Regular posts can have captions
             if caption:
                 params['caption'] = caption[:2200]  # Instagram limits caption to 2200 chars
-            logger.info(f"Creating post media container with caption: {caption[:50] if caption else 'no caption'}...")
         
         try:
             response = requests.post(url, params=params, timeout=30)
@@ -145,11 +134,9 @@ class InstagramService:
             
             if not container_id:
                 error_msg = "Instagram API did not return a container ID"
-                logger.error(f"Failed to create media container: {error_msg}. Response: {data}")
                 self.integration.update_error(error_msg)
                 return None
             
-            logger.info(f"Instagram media container created: {container_id} (type: {'story' if is_story else 'post'})")
             return {
                 'id': container_id,
                 'status_code': data.get('status_code'),
@@ -162,18 +149,10 @@ class InstagramService:
                 try:
                     error_data = e.response.json()
                     error_msg = error_data.get('error', {}).get('message', str(e))
-                    error_code = error_data.get('error', {}).get('code')
-                    error_type = error_data.get('error', {}).get('type')
-                    logger.error(f"Instagram API Error: {error_data}")
-                    # Log specific error details for stories
-                    if is_story:
-                        logger.error(f"Story creation failed - Error Code: {error_code}, Type: {error_type}, Message: {error_msg}")
                 except:
-                    logger.error(f"Response: {e.response.text}")
                     error_msg = e.response.text[:500]
             
             self.integration.update_error(error_msg)
-            logger.error(f"Failed to create Instagram media container: {error_msg}")
             return None
     
     def publish_media(self, creation_id, is_story=False):
@@ -189,7 +168,6 @@ class InstagramService:
             dict: Post data if successful, None otherwise
         """
         if not self.integration.user_id:
-            logger.error("Cannot publish media: user_id not available")
             return None
         
         url = f"{self.base_url}/{self.integration.user_id}/media_publish"
@@ -209,11 +187,9 @@ class InstagramService:
             # Stories don't have public URLs like posts do
             if is_story:
                 post_url = None  # Stories don't have shareable URLs
-                logger.info(f"Instagram story published: {post_id}")
             else:
                 # Build post URL for regular posts
                 post_url = f"https://www.instagram.com/p/{post_id}/" if post_id else None
-                logger.info(f"Instagram post published: {post_id}")
             
             # Update integration success tracking
             self.integration.update_success()
@@ -230,13 +206,10 @@ class InstagramService:
                 try:
                     error_data = e.response.json()
                     error_msg = error_data.get('error', {}).get('message', str(e))
-                    logger.error(f"Instagram API Error: {error_data}")
                 except:
-                    logger.error(f"Response: {e.response.text}")
                     error_msg = e.response.text[:500]
             
             self.integration.update_error(error_msg)
-            logger.error(f"Failed to publish Instagram {'story' if is_story else 'post'}: {error_msg}")
             return None
     
     def create_and_publish_post(self, image_url, caption, is_story=False):
@@ -264,7 +237,6 @@ class InstagramService:
         if not container_result or not container_result.get('id'):
             # Get the error from integration if available
             error_msg = self.integration.last_error or "Failed to create media container"
-            logger.error(f"create_and_publish_post failed at container creation: {error_msg}")
             return {
                 'success': False,
                 'error': error_msg,
@@ -273,14 +245,12 @@ class InstagramService:
             }
         
         creation_id = container_result['id']
-        logger.info(f"Media container created successfully: {creation_id}")
         
         # Step 1.5: Wait for container to be ready (Instagram needs time to process the image)
         max_wait_time = 60  # Maximum 60 seconds
         wait_interval = 3  # Check every 3 seconds
         max_attempts = max_wait_time // wait_interval  # 20 attempts
         
-        logger.info(f"Waiting for media container {creation_id} to be ready...")
         container_ready = False
         
         for attempt in range(max_attempts):
@@ -288,15 +258,12 @@ class InstagramService:
             
             if status_result:
                 status_code = status_result.get('status_code')
-                logger.debug(f"Container {creation_id} status: {status_code} (attempt {attempt + 1}/{max_attempts})")
                 
                 if status_code == 'FINISHED':
                     container_ready = True
-                    logger.info(f"Media container {creation_id} is ready for publishing")
                     break
                 elif status_code == 'ERROR':
                     error_msg = f"Media container {creation_id} failed processing"
-                    logger.error(error_msg)
                     return {
                         'success': False,
                         'error': error_msg,
@@ -311,7 +278,6 @@ class InstagramService:
         
         if not container_ready:
             error_msg = f"Media container {creation_id} did not become ready within {max_wait_time} seconds"
-            logger.error(error_msg)
             return {
                 'success': False,
                 'error': error_msg,
@@ -323,7 +289,6 @@ class InstagramService:
         publish_result = self.publish_media(creation_id, is_story)
         if not publish_result or not publish_result.get('id'):
             error_msg = self.integration.last_error or "Failed to publish media"
-            logger.error(f"create_and_publish_post failed at publish: {error_msg}")
             return {
                 'success': False,
                 'error': error_msg,
@@ -374,11 +339,9 @@ class InstagramService:
                 try:
                     error_data = e.response.json()
                     error_msg = error_data.get('error', {}).get('message', str(e))
-                    logger.error(f"Instagram API Error: {error_data}")
                 except:
-                    logger.error(f"Response: {e.response.text}")
+                    pass
             
-            logger.error(f"Failed to check Instagram container status: {error_msg}")
             return None
     
     def refresh_access_token(self):
@@ -390,7 +353,6 @@ class InstagramService:
             bool: True if token was refreshed, False otherwise
         """
         if not self.integration.access_token:
-            logger.warning("No access token available for Instagram refresh")
             return False
         
         url = f"{self.base_url}/refresh_access_token"
@@ -414,7 +376,6 @@ class InstagramService:
                 self.integration.token_expires_at = timezone.now() + timedelta(seconds=token_data.get('expires_in', 5184000))
             
             self.integration.save()
-            logger.info("Instagram access token refreshed successfully")
             return True
             
         except requests.exceptions.RequestException as e:
@@ -423,10 +384,8 @@ class InstagramService:
                 try:
                     error_data = e.response.json()
                     error_msg = error_data.get('error', {}).get('message', str(e))
-                    logger.error(f"Instagram API Error: {error_data}")
                 except:
-                    logger.error(f"Response: {e.response.text}")
+                    pass
             
-            logger.error(f"Failed to refresh Instagram token: {error_msg}")
             return False
 

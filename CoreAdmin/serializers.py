@@ -281,10 +281,6 @@ class AdminProfileSerializer(serializers.ModelSerializer):
             if primary_mobile:
                 mobile_number = primary_mobile.mobile_number
         except Exception as e:
-            # Log error for debugging but don't fail the request
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.warning(f"Error fetching mobile number for user {obj.user.id}: {str(e)}")
             pass
         
         # Get profile photo URL if exists

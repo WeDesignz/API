@@ -17,10 +17,8 @@ from .models import RazorpayPayment, RazorpayWebhookEvent
 from .serializers import RazorpayPaymentSerializer, RazorpayWebhookEventSerializer
 from Orders.models import Order, Cart
 
-
 # Initialize Razorpay client
 razorpay_client = razorpay.Client(auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET))
-
 
 def delete_cart_items_for_order(order, user):
     """
@@ -44,8 +42,6 @@ def delete_cart_items_for_order(order, user):
         # Log error but don't fail the payment capture
         import logging
         logger = logging.getLogger(__name__)
-        logger.error(f'Failed to delete cart items for order {order.id}: {str(e)}')
-
 
 @swagger_auto_schema(
     method='post',
@@ -172,7 +168,6 @@ def create_payment_order(request):
             'error': f'Failed to create payment order: {str(e)}'
         }, status=status.HTTP_400_BAD_REQUEST)
 
-
 @swagger_auto_schema(
     method='post',
     operation_summary='Capture Payment',
@@ -238,8 +233,7 @@ def capture_payment(request):
                         # Log error but don't fail payment capture
                         import logging
                         logger = logging.getLogger(__name__)
-                        logger.error(f'Failed to decrement free downloads for order {payment.order.id}: {str(e)}')
-                
+
                 # If this order is for subscription purchase, activate subscription
                 if payment.order.subscription:
                     subscription = payment.order.subscription
@@ -263,8 +257,7 @@ def capture_payment(request):
                         # Log but don't fail the payment capture
                         import logging
                         logger = logging.getLogger(__name__)
-                        logger.warning(f'Failed to delete cart items for order {payment.order.id}: {str(e)}')
-            
+
             return Response({
                 'message': 'Payment already captured',
                 'payment': RazorpayPaymentSerializer(payment).data
@@ -319,8 +312,7 @@ def capture_payment(request):
                     # Log error but don't fail payment capture
                     import logging
                     logger = logging.getLogger(__name__)
-                    logger.error(f'Failed to decrement free downloads for order {payment.order.id}: {str(e)}')
-            
+
             # If this order is for subscription purchase, activate subscription
             if payment.order.subscription:
                 subscription = payment.order.subscription
@@ -344,8 +336,7 @@ def capture_payment(request):
                     # Log but don't fail the payment capture
                     import logging
                     logger = logging.getLogger(__name__)
-                    logger.warning(f'Failed to delete cart items for order {payment.order.id}: {str(cart_error)}')
-        
+
             # Process invoices and wallet settlements for cart orders
             if payment.order.order_type == 'cart' and payment.order.status == 'success':
                 try:
@@ -355,8 +346,7 @@ def capture_payment(request):
                     # Log error but don't fail payment capture
                     import logging
                     logger = logging.getLogger(__name__)
-                    logger.error(f'Failed to process invoices for order {payment.order.id}: {str(invoice_error)}', exc_info=True)
-        
+
         return Response({
             'message': 'Payment captured successfully',
             'payment': RazorpayPaymentSerializer(payment).data
@@ -404,8 +394,7 @@ def capture_payment(request):
                             # Log error but don't fail payment capture
                             import logging
                             logger = logging.getLogger(__name__)
-                            logger.error(f'Failed to decrement free downloads for order {payment.order.id}: {str(e)}')
-                    
+
                     # If this order is for subscription purchase, activate subscription
                     if payment.order.subscription:
                         subscription = payment.order.subscription
@@ -426,8 +415,7 @@ def capture_payment(request):
                             # Log but don't fail the payment capture
                             import logging
                             logger = logging.getLogger(__name__)
-                            logger.warning(f'Failed to delete cart items for order {payment.order.id}: {str(cart_error)}')
-                
+
                 return Response({
                     'message': 'Payment already captured',
                     'payment': RazorpayPaymentSerializer(payment).data
@@ -436,13 +424,12 @@ def capture_payment(request):
                 # Log the error but continue to return the original error
                 import logging
                 logger = logging.getLogger(__name__)
-                logger.error(f'Failed to update payment status after capture error: {str(update_error)}')
+
                 pass
         
         return Response({
             'error': f'Failed to capture payment: {error_message}'
         }, status=status.HTTP_400_BAD_REQUEST)
-
 
 @swagger_auto_schema(
     method='get',
@@ -496,7 +483,6 @@ def payment_status(request, payment_id):
             'error': 'Payment not found'
         }, status=status.HTTP_404_NOT_FOUND)
 
-
 @swagger_auto_schema(
     method='get',
     operation_summary='Payment History',
@@ -530,7 +516,6 @@ def payment_history(request):
         'payments': RazorpayPaymentSerializer(payments, many=True).data,
         'total_payments': payments.count()
     })
-
 
 @swagger_auto_schema(
     method='post',
@@ -616,7 +601,6 @@ def create_refund(request):
             'error': f'Failed to create refund: {str(e)}'
         }, status=status.HTTP_400_BAD_REQUEST)
 
-
 @csrf_exempt
 @swagger_auto_schema(
     method='post',
@@ -701,8 +685,7 @@ def webhook_handler(request):
                                 # Log error but don't fail webhook processing
                                 import logging
                                 logger = logging.getLogger(__name__)
-                                logger.error(f'Failed to decrement free downloads for order {payment.order.id} from webhook: {str(e)}')
-                        
+
                         # If this order is for subscription purchase, activate subscription
                         if payment.order.subscription:
                             subscription = payment.order.subscription
@@ -724,8 +707,7 @@ def webhook_handler(request):
                                 # Log but don't fail the webhook processing
                                 import logging
                                 logger = logging.getLogger(__name__)
-                                logger.warning(f'Failed to delete cart items for order {payment.order.id} from webhook: {str(cart_error)}')
-                        
+
                         # Process invoices and wallet settlements for cart orders
                         if payment.order.order_type == 'cart' and payment.order.status == 'success':
                             try:
@@ -735,8 +717,7 @@ def webhook_handler(request):
                                 # Log error but don't fail webhook processing
                                 import logging
                                 logger = logging.getLogger(__name__)
-                                logger.error(f'Failed to process invoices for order {payment.order.id} from webhook: {str(invoice_error)}', exc_info=True)
-                    
+
                     webhook_event.processed = True
                     webhook_event.save()
                 except RazorpayPayment.DoesNotExist:
@@ -782,7 +763,6 @@ def webhook_handler(request):
     except Exception as e:
         return HttpResponse(f'Error: {str(e)}', status=500)
 
-
 @swagger_auto_schema(
     method='get',
     operation_summary='Webhook Events',
@@ -814,7 +794,6 @@ def webhook_events(request):
         'webhook_events': RazorpayWebhookEventSerializer(events, many=True).data,
         'total_events': events.count()
     })
-
 
 @swagger_auto_schema(
     method='get',
@@ -850,7 +829,6 @@ def payment_methods(request):
         return Response({
             'error': f'Failed to fetch payment methods: {str(e)}'
         }, status=status.HTTP_400_BAD_REQUEST)
-
 
 @swagger_auto_schema(
     method='post',
@@ -931,7 +909,6 @@ def create_subscription_payment(request):
         return Response({
             'error': f'Failed to create subscription payment: {str(e)}'
         }, status=status.HTTP_400_BAD_REQUEST)
-
 
 @swagger_auto_schema(
     method='post',
@@ -1049,7 +1026,6 @@ def create_pdf_payment_order(request):
             'error': f'Failed to create PDF payment order: {str(e)}'
         }, status=status.HTTP_400_BAD_REQUEST)
 
-
 @swagger_auto_schema(
     method='post',
     operation_summary='Capture Pdf Payment',
@@ -1092,12 +1068,10 @@ def capture_pdf_payment(request):
     amount = request.data.get('amount')
     
     # Log received data for debugging
-    logger.info(f'PDF Payment Capture - Received data: payment_id={payment_id}, razorpay_payment_id={razorpay_payment_id}, amount={amount}')
-    logger.info(f'PDF Payment Capture - Request data type: {type(request.data)}, keys: {list(request.data.keys()) if hasattr(request.data, "keys") else "N/A"}')
-    
+
     # Validate required fields
     if payment_id is None or payment_id == '':
-        logger.error(f'PDF Payment Capture - Missing payment_id. Received: {payment_id}')
+
         return Response({
             'error': 'Payment ID is required',
             'received_data': {
@@ -1108,7 +1082,7 @@ def capture_pdf_payment(request):
         }, status=status.HTTP_400_BAD_REQUEST)
     
     if not razorpay_payment_id or razorpay_payment_id == '':
-        logger.error(f'PDF Payment Capture - Missing razorpay_payment_id. Received: {razorpay_payment_id}')
+
         return Response({
             'error': 'Razorpay payment ID is required',
             'received_data': {
@@ -1119,7 +1093,7 @@ def capture_pdf_payment(request):
         }, status=status.HTTP_400_BAD_REQUEST)
     
     if amount is None or amount == '':
-        logger.error(f'PDF Payment Capture - Missing amount. Received: {amount}')
+
         return Response({
             'error': 'Amount is required',
             'received_data': {
@@ -1134,7 +1108,7 @@ def capture_pdf_payment(request):
         try:
             payment_id_int = int(payment_id) if payment_id else None
         except (ValueError, TypeError):
-            logger.error(f'PDF Payment Capture - Invalid payment_id format: {payment_id} (type: {type(payment_id)})')
+
             return Response({
                 'error': f'Invalid payment ID format: {payment_id}',
                 'received_data': {
@@ -1151,7 +1125,7 @@ def capture_pdf_payment(request):
         
         # Check if payment is already captured
         if payment.status == 'captured' and payment.razorpay_payment_id:
-            logger.info(f'PDF Payment Capture - Payment {payment_id_int} is already captured, skipping capture and proceeding with order creation')
+
             # Payment already captured, just proceed with order creation
             capture_successful = True
         else:
@@ -1160,7 +1134,7 @@ def capture_pdf_payment(request):
                 amount_float = float(amount)
                 amount_paise = int(amount_float * 100)
             except (ValueError, TypeError) as e:
-                logger.error(f'PDF Payment Capture - Invalid amount format: {amount} (type: {type(amount)}), error: {str(e)}')
+
                 return Response({
                     'error': f'Invalid amount format: {amount}',
                     'received_data': {
@@ -1177,7 +1151,7 @@ def capture_pdf_payment(request):
                     amount_paise
                 )
                 capture_successful = True
-                logger.info(f'PDF Payment Capture - Successfully captured payment {razorpay_payment_id}')
+
             except Exception as capture_error:
                 error_message = str(capture_error)
                 error_repr = repr(capture_error).lower()
@@ -1195,11 +1169,11 @@ def capture_pdf_payment(request):
                 
                 if is_already_captured:
                     # Payment already captured, update our record and continue
-                    logger.warning(f'PDF Payment Capture - Payment {razorpay_payment_id} was already captured, updating local record')
+
                     capture_successful = True
                 else:
                     # Real error occurred, re-raise
-                    logger.error(f'PDF Payment Capture - Failed to capture payment {razorpay_payment_id}: {error_message}')
+
                     raise capture_error
         
         # Update payment status (whether newly captured or already captured)
@@ -1209,39 +1183,34 @@ def capture_pdf_payment(request):
         
         # Update PDF download status and create order
         pdf_downloads = payment.pdf_downloads.all()
-        logger.info(f'PDF Payment Capture - Found {pdf_downloads.count()} PDF download(s) linked to payment {payment_id_int}')
-        
+
         orders_created = []
         
         if pdf_downloads.count() == 0:
-            logger.warning(f'PDF Payment Capture - No PDF downloads found for payment {payment_id_int}. Payment notes: {payment.notes}')
+
             # Try to find PDF download by download_id from payment notes
             download_id = payment.notes.get('download_id') if payment.notes else None
             if download_id:
                 from Catalog.models import PDFDownload
                 try:
                     pdf_download = PDFDownload.objects.get(id=download_id)
-                    logger.info(f'PDF Payment Capture - Found PDF download {download_id} from payment notes, linking it to payment')
+
                     pdf_download.razorpay_payment = payment
                     pdf_download.save()
                     pdf_downloads = [pdf_download]
                 except PDFDownload.DoesNotExist:
-                    logger.error(f'PDF Payment Capture - PDF download {download_id} from notes does not exist')
-        
+
         for pdf_download in pdf_downloads:
             try:
                 pdf_download.payment_status = 'paid'
                 # PDF is generated on-demand when user clicks download (not stored permanently)
                 pdf_download.status = 'pending'
                 pdf_download.save()
-                logger.info(f'PDF Payment Capture - Updated PDF download {pdf_download.id} status to paid/pending')
-                
+
                 # Create order for mock PDF download
                 from Orders.models import Order
                 product_ids_str = ','.join([str(pid) for pid in pdf_download.selected_products]) if pdf_download.selected_products else ''
-                
-                logger.info(f'PDF Payment Capture - Creating order for PDF download {pdf_download.id} with {len(pdf_download.selected_products) if pdf_download.selected_products else 0} products')
-                
+
                 order = Order.objects.create(
                     order_type='mock_pdf',
                     product_ids=product_ids_str,
@@ -1251,14 +1220,13 @@ def capture_pdf_payment(request):
                     created_by=request.user
                 )
                 orders_created.append(order.id)
-                logger.info(f'PDF Payment Capture - Created order {order.id} for PDF download {pdf_download.id}')
-                
+
                 # Link RazorpayPayment to Order (bidirectional relationship)
                 payment.order = order
                 payment.save()
-                logger.info(f'PDF Payment Capture - Linked RazorpayPayment {payment.id} to Order {order.id}')
+
             except Exception as e:
-                logger.error(f'PDF Payment Capture - Error processing PDF download {pdf_download.id}: {str(e)}', exc_info=True)
+
                 # Continue with other PDF downloads even if one fails
                 continue
         
@@ -1281,7 +1249,6 @@ def capture_pdf_payment(request):
         return Response({
             'error': f'Failed to capture PDF payment: {str(e)}'
         }, status=status.HTTP_400_BAD_REQUEST)
-
 
 @swagger_auto_schema(
     method='get',

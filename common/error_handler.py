@@ -2,12 +2,9 @@
 Error Handler Middleware
 Logs all 500 errors with full details to help debug issues.
 """
-import logging
 import traceback
 from django.http import JsonResponse, Http404
 from django.conf import settings
-
-logger = logging.getLogger(__name__)
 
 
 class ErrorHandlerMiddleware:
@@ -35,19 +32,6 @@ class ErrorHandlerMiddleware:
         error_message = str(exception)
         error_traceback = traceback.format_exc()
         
-        # Log the error with full context
-        logger.error(
-            f"500 Error on {request.method} {request.path}",
-            extra={
-                'request_path': request.path,
-                'request_method': request.method,
-                'user': str(request.user) if hasattr(request, 'user') else 'Anonymous',
-                'error_message': error_message,
-                'error_traceback': error_traceback,
-                'request_data': dict(request.GET) if request.method == 'GET' else dict(request.POST),
-            }
-        )
-        
         # Return JSON response with error details
         if settings.DEBUG:
             return JsonResponse({
@@ -62,5 +46,4 @@ class ErrorHandlerMiddleware:
                 'error': 'Internal Server Error',
                 'message': 'An error occurred while processing your request. Please try again later.'
             }, status=500)
-
 

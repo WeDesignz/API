@@ -6,7 +6,6 @@ from .models import PinterestIntegration
 
 logger = logging.getLogger(__name__)
 
-
 class PinterestService:
     """
     Service to interact with Pinterest API for posting pins.
@@ -91,9 +90,9 @@ class PinterestService:
                 'localhost' not in link.lower() and 
                 '127.0.0.1' not in link):
                 payload["link"] = link
-                logger.debug(f"Adding link to Pinterest pin: {link}")
+
             else:
-                logger.warning(f"Invalid link format for Pinterest (skipping): {link}")
+
                 # Don't add invalid link - Pinterest allows pins without links
         
         try:
@@ -103,9 +102,7 @@ class PinterestService:
             pin_data = response.json()
             pin_id = pin_data.get('id')
             pin_url = pin_data.get('url', '')
-            
-            logger.info(f"Pin created successfully: {pin_id}")
-            
+
             # Update integration success tracking
             self.integration.update_success()
             
@@ -122,8 +119,7 @@ class PinterestService:
             
             # Update integration error tracking
             self.integration.update_error(error_msg)
-            
-            logger.error(f"Pinterest API timeout: {error_msg}")
+
             return {'error': error_msg, 'type': 'timeout', 'status_code': status_code}
             
         except requests.exceptions.ConnectionError as e:
@@ -132,8 +128,7 @@ class PinterestService:
             
             # Update integration error tracking
             self.integration.update_error(error_msg)
-            
-            logger.error(f"Pinterest API connection error: {error_msg}")
+
             return {'error': error_msg, 'type': 'connection_error', 'status_code': status_code}
             
         except requests.exceptions.HTTPError as e:
@@ -162,13 +157,11 @@ class PinterestService:
                         error_msg = f"Rate limit exceeded (429): {error_msg}. Too many requests to Pinterest API."
                     elif status_code >= 500:
                         error_msg = f"Pinterest server error ({status_code}): {error_msg}. Pinterest API is experiencing issues."
-                    
-                    logger.error(f"Pinterest API HTTP Error ({status_code}): {error_data}")
+
                 except:
                     response_text = e.response.text[:500] if e.response.text else "No error details"
                     error_msg = f"HTTP {status_code}: {response_text}"
-                    logger.error(f"Pinterest API Error Response: {response_text}")
-            
+
             # Build comprehensive error message
             full_error_msg = error_msg
             if status_code:
@@ -185,8 +178,7 @@ class PinterestService:
             
             # Update integration error tracking
             self.integration.update_error(full_error_msg)
-            
-            logger.error(f"Failed to create Pinterest pin: {full_error_msg}")
+
             return {'error': full_error_msg, 'type': 'http_error', 'status_code': status_code, 'details': error_details}
             
         except requests.exceptions.RequestException as e:
@@ -195,8 +187,7 @@ class PinterestService:
             
             # Update integration error tracking
             self.integration.update_error(error_msg)
-            
-            logger.error(f"Pinterest API request error: {error_msg}", exc_info=True)
+
             return {'error': error_msg, 'type': 'request_error'}
             
         except Exception as e:
@@ -205,8 +196,7 @@ class PinterestService:
             
             # Update integration error tracking
             self.integration.update_error(error_msg)
-            
-            logger.error(f"Unexpected error creating Pinterest pin: {error_msg}", exc_info=True)
+
             return {'error': error_msg, 'type': 'unexpected_error'}
     
     def get_boards(self):
@@ -238,12 +228,11 @@ class PinterestService:
                 try:
                     error_data = e.response.json()
                     error_msg = error_data.get('message', error_data.get('error_description', str(e)))
-                    logger.error(f"Pinterest API Error: {error_data}")
+
                 except:
-                    logger.error(f"Response: {e.response.text}")
-            
+
             self.integration.update_error(error_msg)
-            logger.error(f"Failed to get Pinterest boards: {error_msg}")
+
             return None
     
     @classmethod
@@ -279,11 +268,9 @@ class PinterestService:
                 try:
                     error_data = e.response.json()
                     error_msg = error_data.get('message', error_data.get('error_description', str(e)))
-                    logger.error(f"Pinterest API Error: {error_data}")
+
                 except:
-                    logger.error(f"Response: {e.response.text}")
-            
-            logger.error(f"Failed to get Pinterest boards: {error_msg}")
+
             return None
     
     @classmethod
@@ -319,8 +306,7 @@ class PinterestService:
             response.raise_for_status()
             
             board_data = response.json()
-            logger.info(f"Pinterest board created successfully: {board_data.get('id')}")
-            
+
             return board_data
             
         except requests.exceptions.RequestException as e:
@@ -329,11 +315,9 @@ class PinterestService:
                 try:
                     error_data = e.response.json()
                     error_msg = error_data.get('message', error_data.get('error_description', str(e)))
-                    logger.error(f"Pinterest API Error: {error_data}")
+
                 except:
-                    logger.error(f"Response: {e.response.text}")
-            
-            logger.error(f"Failed to create Pinterest board: {error_msg}")
+
             return None
     
     @classmethod
@@ -367,7 +351,7 @@ class PinterestService:
             payload["privacy"] = privacy
         
         if not payload:
-            logger.warning("No fields to update for Pinterest board")
+
             return None
         
         try:
@@ -375,8 +359,7 @@ class PinterestService:
             response.raise_for_status()
             
             board_data = response.json()
-            logger.info(f"Pinterest board updated successfully: {board_data.get('id')}")
-            
+
             return board_data
             
         except requests.exceptions.RequestException as e:
@@ -385,11 +368,9 @@ class PinterestService:
                 try:
                     error_data = e.response.json()
                     error_msg = error_data.get('message', error_data.get('error_description', str(e)))
-                    logger.error(f"Pinterest API Error: {error_data}")
+
                 except:
-                    logger.error(f"Response: {e.response.text}")
-            
-            logger.error(f"Failed to update Pinterest board: {error_msg}")
+
             return None
     
     @classmethod
@@ -413,8 +394,7 @@ class PinterestService:
         try:
             response = requests.delete(url, headers=headers, timeout=30)
             response.raise_for_status()
-            
-            logger.info(f"Pinterest board deleted successfully: {board_id}")
+
             return True
             
         except requests.exceptions.RequestException as e:
@@ -423,11 +403,9 @@ class PinterestService:
                 try:
                     error_data = e.response.json()
                     error_msg = error_data.get('message', error_data.get('error_description', str(e)))
-                    logger.error(f"Pinterest API Error: {error_data}")
+
                 except:
-                    logger.error(f"Response: {e.response.text}")
-            
-            logger.error(f"Failed to delete Pinterest board: {error_msg}")
+
             return False
     
     def get_pins(self, board_id=None, page_size=25):
@@ -475,8 +453,7 @@ class PinterestService:
                 bookmark = data.get('bookmark')
                 if not bookmark or len(pins) == 0:
                     break
-            
-            logger.info(f"Retrieved {len(all_pins)} pins from board {board_id}")
+
             return all_pins
             
         except requests.exceptions.RequestException as e:
@@ -485,12 +462,11 @@ class PinterestService:
                 try:
                     error_data = e.response.json()
                     error_msg = error_data.get('message', error_data.get('error_description', str(e)))
-                    logger.error(f"Pinterest API Error: {error_data}")
+
                 except:
-                    logger.error(f"Response: {e.response.text}")
-            
+
             self.integration.update_error(error_msg)
-            logger.error(f"Failed to get Pinterest pins: {error_msg}")
+
             return None
     
     def delete_pin(self, pin_id):
@@ -512,8 +488,7 @@ class PinterestService:
         try:
             response = requests.delete(url, headers=headers, timeout=30)
             response.raise_for_status()
-            
-            logger.info(f"Pinterest pin deleted successfully: {pin_id}")
+
             return True
             
         except requests.exceptions.RequestException as e:
@@ -522,12 +497,11 @@ class PinterestService:
                 try:
                     error_data = e.response.json()
                     error_msg = error_data.get('message', error_data.get('error_description', str(e)))
-                    logger.error(f"Pinterest API Error: {error_data}")
+
                 except:
-                    logger.error(f"Response: {e.response.text}")
-            
+
             self.integration.update_error(error_msg)
-            logger.error(f"Failed to delete Pinterest pin {pin_id}: {error_msg}")
+
             return False
     
     @classmethod
@@ -579,11 +553,9 @@ class PinterestService:
                 try:
                     error_data = e.response.json()
                     error_msg = error_data.get('message', error_data.get('error_description', str(e)))
-                    logger.error(f"Pinterest API Error: {error_data}")
+
                 except:
-                    logger.error(f"Response: {e.response.text}")
-            
-            logger.error(f"Failed to get Pinterest pins: {error_msg}")
+
             return None
     
     @classmethod
@@ -607,8 +579,7 @@ class PinterestService:
         try:
             response = requests.delete(url, headers=headers, timeout=30)
             response.raise_for_status()
-            
-            logger.info(f"Pinterest pin deleted successfully: {pin_id}")
+
             return True
             
         except requests.exceptions.RequestException as e:
@@ -617,11 +588,9 @@ class PinterestService:
                 try:
                     error_data = e.response.json()
                     error_msg = error_data.get('message', error_data.get('error_description', str(e)))
-                    logger.error(f"Pinterest API Error: {error_data}")
+
                 except:
-                    logger.error(f"Response: {e.response.text}")
-            
-            logger.error(f"Failed to delete Pinterest pin {pin_id}: {error_msg}")
+
             return False
     
     def refresh_access_token(self):
@@ -634,7 +603,7 @@ class PinterestService:
             bool: True if token was refreshed, False otherwise
         """
         if not self.integration.refresh_token:
-            logger.warning("No refresh token available for Pinterest")
+
             return False
         
         # Pinterest token refresh endpoint (verify with current API docs)
@@ -665,10 +634,10 @@ class PinterestService:
                 self.integration.token_expires_at = timezone.now() + timedelta(seconds=token_data.get('expires_in', 3600))
             
             self.integration.save()
-            logger.info("Pinterest access token refreshed successfully")
+
             return True
             
         except requests.exceptions.RequestException as e:
-            logger.error(f"Failed to refresh Pinterest token: {str(e)}")
+
             return False
 

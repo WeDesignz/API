@@ -320,11 +320,6 @@ def designer_notifications(request):
         
         return Response(notifications_data)
     except Exception as e:
-        import logging
-        import traceback
-        logger = logging.getLogger(__name__)
-        logger.error(f'Error in designer_notifications: {e}')
-        logger.error(traceback.format_exc())
         return Response({
             'error': 'An error occurred while retrieving notifications',
             'details': str(e) if settings.DEBUG else None
@@ -361,9 +356,6 @@ def notification_statistics(request):
         
         return Response(stats_data)
     except Exception as e:
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.error(f'Error in notification_statistics: {e}')
         return Response({
             'error': 'An error occurred while retrieving statistics',
             'details': str(e) if settings.DEBUG else None
@@ -422,9 +414,6 @@ def mark_notification_read(request, notification_id):
             'message': 'Notification marked as read'
         })
     except Exception as e:
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.error(f'Error in mark_notification_read: {e}')
         return Response({
             'error': 'An error occurred while marking notification as read',
             'details': str(e) if settings.DEBUG else None
@@ -481,9 +470,6 @@ def mark_all_notifications_read(request):
             'count': count
         })
     except Exception as e:
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.error(f'Error in mark_all_notifications_read: {e}')
         return Response({
             'error': 'An error occurred while marking all notifications as read',
             'details': str(e) if settings.DEBUG else None
@@ -524,9 +510,6 @@ def notification_count(request):
             'unread_count': unread_count
         })
     except Exception as e:
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.error(f'Error in notification_count: {e}')
         return Response({
             'error': 'An error occurred while retrieving notification count',
             'details': str(e) if settings.DEBUG else None,
@@ -974,10 +957,7 @@ def faqs_list(request):
     """
     if request.method == 'GET':
         from django.db.models import Q
-        import logging
         import json
-        
-        logger = logging.getLogger(__name__)
         
         # IMPORTANT: Check ALL FAQs first (including inactive) for display_locations
         # We'll filter by is_active AFTER location filtering
@@ -991,8 +971,6 @@ def faqs_list(request):
             all_faqs_data = list(all_faqs_in_db.values('id', 'display_locations', 'is_active'))
             faq_ids = []
             
-            logger.info(f"Filtering FAQs for location: {location}. Total FAQs in DB: {len(all_faqs_data)}")
-            
             for faq_data in all_faqs_data:
                 faq_id = faq_data['id']
                 display_locs = faq_data['display_locations']
@@ -1000,7 +978,6 @@ def faqs_list(request):
                 
                 # Handle different data types
                 if display_locs is None:
-                    logger.debug(f"FAQ {faq_id} has None display_locations")
                     continue
                 
                 # Convert to list if it's a string
@@ -1008,25 +985,19 @@ def faqs_list(request):
                     try:
                         display_locs = json.loads(display_locs)
                     except:
-                        logger.warning(f"FAQ {faq_id} has invalid display_locations format: {display_locs}")
                         continue
                 
                 if isinstance(display_locs, list):
                     # Check if location is in the list or 'all' is in the list
                     if location in display_locs or 'all' in display_locs:
                         faq_ids.append(faq_id)
-                        logger.info(f"FAQ {faq_id} matched location {location}. display_locations: {display_locs}, is_active: {is_active}")
-                else:
-                    logger.warning(f"FAQ {faq_id} has unexpected display_locations type: {type(display_locs)}, value: {display_locs}")
             
-            logger.info(f"Found {len(faq_ids)} FAQs matching location {location}: {faq_ids}")
             
             if faq_ids:
                 # Recreate queryset with filtered IDs
                 faqs = FAQ.objects.filter(id__in=faq_ids)
             else:
                 # If no matches, return empty queryset
-                logger.warning(f"No FAQs found for location: {location}")
                 faqs = FAQ.objects.none()
         else:
             # No location filter, use all FAQs
@@ -1046,7 +1017,6 @@ def faqs_list(request):
             faqs = faqs.order_by('sort_order', 'id')
         
         serializer = FAQListSerializer(faqs, many=True)
-        logger.info(f"Returning {len(serializer.data)} FAQs")
         return Response(serializer.data, status=status.HTTP_200_OK)
     
     elif request.method == 'POST':

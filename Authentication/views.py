@@ -23,11 +23,9 @@ from .serializers import (
     EmailListSerializer, CustomerNotificationSerializer
 )
 
-
 def generate_otp():
     """Generate a 6-digit OTP"""
     return ''.join(random.choices(string.digits, k=6))
-
 
 def send_otp_email(email, otp, purpose):
     """Send OTP via email (non-blocking)"""
@@ -54,9 +52,7 @@ def send_otp_email(email, otp, purpose):
         try:
             # Use NO_REPLY_EMAIL for OTP messages
             from_email = settings.NO_REPLY_EMAIL
-            logger.info(f"Attempting to send OTP email to {email} from {from_email}")
-            logger.info(f"SMTP Config - Host: {settings.EMAIL_HOST}, Port: {settings.EMAIL_PORT}, SSL: {getattr(settings, 'EMAIL_USE_SSL', False)}, TLS: {settings.EMAIL_USE_TLS}, User: {settings.EMAIL_HOST_USER}")
-            
+
             send_mail(
                 subject=subject,
                 message=message,
@@ -64,19 +60,16 @@ def send_otp_email(email, otp, purpose):
                 recipient_list=[email],
                 fail_silently=False,
             )
-            logger.info(f"OTP email sent successfully to {email}")
+
         except Exception as e:
             error_trace = traceback.format_exc()
-            logger.error(f"Failed to send OTP email to {email}: {str(e)}")
-            logger.error(f"Error traceback: {error_trace}")
-    
+
     # Start email sending in background thread to prevent request timeout
     thread = threading.Thread(target=send_email_async, daemon=True)
     thread.start()
     
     # Return True immediately - email is being sent in background
     return True
-
 
 def send_otp_sms(mobile_number, otp, purpose):
     """Send OTP via WhatsApp"""
@@ -93,9 +86,8 @@ def send_otp_sms(mobile_number, otp, purpose):
         )
         return success
     except Exception as e:
-        logger.error(f"Failed to send OTP via WhatsApp: {str(e)}")
-        return False
 
+        return False
 
 @swagger_auto_schema(
     method='post',
@@ -232,7 +224,6 @@ def signup(request):
     
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-
 @swagger_auto_schema(
     method='post',
     operation_summary="User Login",
@@ -325,7 +316,6 @@ def login(request):
     
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-
 @swagger_auto_schema(
     method='post',
     operation_summary="User Logout",
@@ -373,7 +363,6 @@ def logout(request):
         return Response({
             'error': 'Invalid token'
         }, status=status.HTTP_400_BAD_REQUEST)
-
 
 @swagger_auto_schema(
     method='post',
@@ -469,7 +458,6 @@ def verify_email(request):
         }, status=status.HTTP_200_OK)
     
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
 
 @swagger_auto_schema(
     method='post',
@@ -582,7 +570,6 @@ def request_password_reset(request):
         }, status=status.HTTP_200_OK)
     
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
 
 @swagger_auto_schema(
     method='post',
@@ -714,7 +701,6 @@ def verify_password_reset_otp(request):
         'verified': True
     }, status=status.HTTP_200_OK)
 
-
 @swagger_auto_schema(
     method='post',
     operation_summary="Confirm Password Reset",
@@ -790,7 +776,6 @@ def confirm_password_reset(request):
         }, status=status.HTTP_200_OK)
     
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
 
 @swagger_auto_schema(
     method='post',
@@ -928,11 +913,10 @@ def add_mobile_number(request):
         import traceback
         import logging
         logger = logging.getLogger(__name__)
-        logger.error(f"Error adding mobile number: {str(e)}\n{traceback.format_exc()}")
+
         return Response({
             'error': f'An error occurred while adding mobile number: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 @swagger_auto_schema(
     method='post',
@@ -995,7 +979,6 @@ def verify_mobile_number(request):
         }, status=status.HTTP_200_OK)
     
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
 
 @swagger_auto_schema(
     method='delete',
@@ -1065,7 +1048,6 @@ def delete_mobile_number(request, mobile_id):
     return Response({
         'message': 'Mobile number deleted successfully'
     }, status=status.HTTP_200_OK)
-
 
 @swagger_auto_schema(
     method='put',
@@ -1145,11 +1127,10 @@ def update_mobile_number(request, mobile_id):
         import traceback
         import logging
         logger = logging.getLogger(__name__)
-        logger.error(f"Error updating mobile number: {str(e)}\n{traceback.format_exc()}")
+
         return Response({
             'error': f'An error occurred while updating mobile number: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 @swagger_auto_schema(
     method='post',
@@ -1281,7 +1262,6 @@ def resend_otp(request):
     
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-
 @swagger_auto_schema(
     method='get',
     operation_summary="Get User Profile",
@@ -1350,7 +1330,6 @@ def user_profile(request):
         pass
     
     return Response(data, status=status.HTTP_200_OK)
-
 
 @swagger_auto_schema(
     method='put',
@@ -1465,7 +1444,6 @@ def update_profile(request):
     
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-
 @swagger_auto_schema(
     method='post',
     operation_summary="Upload Profile Photo",
@@ -1577,7 +1555,6 @@ def upload_profile_photo(request):
             'error': f'Failed to upload profile photo: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-
 @swagger_auto_schema(
     method='post',
     operation_summary="Change Password",
@@ -1645,7 +1622,6 @@ def change_password(request):
     
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-
 @swagger_auto_schema(
     method='post',
     operation_summary="Refresh Token",
@@ -1699,7 +1675,6 @@ def refresh_token(request):
         return Response({
             'error': 'Invalid refresh token'
         }, status=status.HTTP_400_BAD_REQUEST)
-
 
 # Email Management Endpoints
 @swagger_auto_schema(
@@ -1790,7 +1765,6 @@ def add_email_address(request):
     
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-
 @swagger_auto_schema(
     method='get',
     operation_summary="List Email Addresses",
@@ -1835,7 +1809,6 @@ def list_email_addresses(request):
     return Response({
         'emails': serializer.data
     }, status=status.HTTP_200_OK)
-
 
 @swagger_auto_schema(
     method='put',
@@ -1926,12 +1899,11 @@ def update_email_address(request, email_id):
         import traceback
         import logging
         logger = logging.getLogger(__name__)
-        logger.error(f"Error updating email address: {str(e)}\n{traceback.format_exc()}")
+
         return Response({
             'error': f'An error occurred while updating email address: {str(e)}',
             'detail': traceback.format_exc() if settings.DEBUG else None
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 @swagger_auto_schema(
     method='delete',
@@ -1996,7 +1968,6 @@ def delete_email_address(request, email_id):
         'message': 'Email address deleted successfully'
     }, status=status.HTTP_200_OK)
 
-
 @swagger_auto_schema(
     method='post',
     operation_summary="Verify Email Address",
@@ -2058,7 +2029,6 @@ def verify_email_address(request):
         }, status=status.HTTP_200_OK)
     
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
 
 # ==================== CUSTOMER NOTIFICATIONS ====================
 
@@ -2131,34 +2101,30 @@ def customer_notifications(request):
         
         # SECURITY: Always filter by the authenticated user's ID to ensure users can only see their own notifications
         user_id = request.user.id
-        logger.info(f"🔔 [NOTIFICATIONS] 🔍 Querying for user ID: {user_id}, Email: {request.user.email}, Username: {request.user.username}")
-        
+
         # Query by customer_id - SECURITY: Only return notifications for the logged-in user
         notifications = CustomerNotification.objects.filter(customer_id=user_id)
         
         # Additional security check: Verify user is authenticated
         if not request.user.is_authenticated:
-            logger.error(f"🚨 [NOTIFICATIONS] ⚠️ SECURITY: Unauthenticated request!")
+
             return Response({
                 'error': 'Authentication required'
             }, status=status.HTTP_401_UNAUTHORIZED)
         
         # Log initial query result
         total_before_filters = notifications.count()
-        logger.info(f"🔔 [NOTIFICATIONS] ✅ Found: {total_before_filters} notifications for user ID {request.user.id}")
-        
+
         # Debug: Log notification details to verify customer_id matches
         if total_before_filters > 0:
             notification_details = list(notifications.values('id', 'customer_id', 'title')[:10])
-            logger.info(f"🔔 [NOTIFICATIONS] 📋 Notification details (first 10): {notification_details}")
-            
+
             # Verify each notification belongs to the current user
             for notif_detail in notification_details:
                 if notif_detail['customer_id'] != request.user.id:
-                    logger.error(f"🚨 [NOTIFICATIONS] ⚠️ SECURITY ISSUE: Notification {notif_detail['id']} has customer_id={notif_detail['customer_id']} but query was for user_id={request.user.id}")
+
                 else:
-                    logger.info(f"🔔 [NOTIFICATIONS] ✓ Notification {notif_detail['id']} correctly belongs to user {request.user.id}")
-        
+
         # Apply status filter
         if status_filter == 'unread':
             notifications = notifications.filter(is_read=False)
@@ -2181,35 +2147,27 @@ def customer_notifications(request):
         
         # Log serialized data count and details
         serialized_count = len(serializer.data)
-        logger.info(f"🔔 [SERIALIZE] Serialized {serialized_count} notifications for response")
-        
+
         if serialized_count > 0:
             first_notif = serializer.data[0]
-            logger.info(f"🔔 [SERIALIZE] First notification - ID: {first_notif.get('id')}, Title: {first_notif.get('title')}, Customer ID: {first_notif.get('customer_id')}, Customer Name: {first_notif.get('customer_name')}, Request User ID: {request.user.id}, Request User Email: {request.user.email}")
-            
+
             # Check if customer_id matches logged-in user
             if first_notif.get('customer_id') != request.user.id:
-                logger.error(f"🚨 [SERIALIZE] ⚠️ SECURITY ISSUE: Notification customer_id={first_notif.get('customer_id')} does NOT match logged-in user_id={request.user.id}")
-            
+
             # Log all notifications customer IDs
             all_customer_ids = [n.get('customer_id') for n in serializer.data]
-            logger.info(f"🔔 [SERIALIZE] All customer IDs in response: {set(all_customer_ids)}")
-            
+
             # Log full first notification for debugging
             import json
-            logger.info(f"🔔 [SERIALIZE] First notification full data: {json.dumps(first_notif, default=str)}")
+
         else:
-            logger.warning(f"🔔 [SERIALIZE] No notifications to serialize! Query returned {page_obj.object_list.count()} objects")
-            
+
             # Debug: Check what the queryset contains
             all_notifications = list(notifications.values('id', 'customer_id', 'title', 'is_read')[:5])
-            logger.info(f"🔔 [DEBUG] Sample notifications from queryset: {all_notifications}")
-        
+
         # Get unread count - simple direct query
         unread_count = CustomerNotification.objects.filter(customer_id=request.user.id, is_read=False).count()
-        
-        logger.info(f"🔔 Unread count: {unread_count}")
-        
+
         return Response({
             'notifications': serializer.data,
             'unread_count': unread_count,
@@ -2225,13 +2183,11 @@ def customer_notifications(request):
         import logging
         import traceback
         logger = logging.getLogger(__name__)
-        logger.error(f'Error in customer_notifications: {e}')
-        logger.error(traceback.format_exc())
+
         return Response({
             'error': 'An error occurred while retrieving notifications',
             'details': str(e) if settings.DEBUG else None
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 @swagger_auto_schema(
     method='get',
@@ -2256,21 +2212,18 @@ def customer_notification_count(request):
         
         # Get unread count - simple direct query by customer_id
         unread_count = CustomerNotification.objects.filter(customer_id=request.user.id, is_read=False).count()
-        
-        logger.info(f"🔔 [NOTIFICATION COUNT] User: {request.user.id} | Unread count: {unread_count}")
-        
+
         return Response({
             'unread_count': unread_count
         })
     except Exception as e:
         import logging
         logger = logging.getLogger(__name__)
-        logger.error(f'Error in customer_notification_count: {e}')
+
         return Response({
             'error': 'An error occurred while retrieving notification count',
             'details': str(e) if settings.DEBUG else None
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 @swagger_auto_schema(
     method='post',
@@ -2310,12 +2263,11 @@ def mark_customer_notification_read(request, notification_id):
     except Exception as e:
         import logging
         logger = logging.getLogger(__name__)
-        logger.error(f'Error in mark_customer_notification_read: {e}')
+
         return Response({
             'error': 'An error occurred while marking notification as read',
             'details': str(e) if settings.DEBUG else None
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 @swagger_auto_schema(
     method='post',
@@ -2351,7 +2303,7 @@ def mark_all_customer_notifications_read(request):
     except Exception as e:
         import logging
         logger = logging.getLogger(__name__)
-        logger.error(f'Error in mark_all_customer_notifications_read: {e}')
+
         return Response({
             'error': 'An error occurred while marking all notifications as read',
             'details': str(e) if settings.DEBUG else None

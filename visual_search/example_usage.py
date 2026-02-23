@@ -8,7 +8,6 @@ in a Django application or standalone Python script.
 from PIL import Image
 from visual_search import search_image, train_images
 
-
 def example_search():
     """Example: Search for similar images."""
     # Load an image
@@ -16,17 +15,14 @@ def example_search():
     
     # Search for similar images
     product_ids, extracted_image = search_image(image, num_results=20)
-    
-    print(f"Found {len(product_ids)} similar products:")
+
     for product_id in product_ids:
-        print(f"  - Product ID: {product_id}")
-    
+
     # extracted_image is a PIL Image object of the extracted garment region
     # You can save it or convert to base64 for API responses
     extracted_image.save("extracted_region.jpg")
     
     return product_ids, extracted_image
-
 
 def example_training():
     """Example: Train/index multiple images."""
@@ -55,10 +51,8 @@ def example_training():
     # Check results
     for result in results:
         status = "✓" if result['isIndexed'] else "✗"
-        print(f"{status} ProductId: {result['ProductId']}, Indexed: {result['isIndexed']}")
-    
-    return results
 
+    return results
 
 def example_django_view():
     """
@@ -164,14 +158,5 @@ def example_django_view():
     
     return search_api, train_api
 
-
 if __name__ == "__main__":
-    print("Visual Search Package - Example Usage")
-    print("=" * 50)
-    print("\n1. Example Search:")
-    print("   product_ids, extracted_image = example_search()")
-    print("\n2. Example Training:")
-    print("   results = example_training()")
-    print("\n3. Django Integration:")
-    print("   See example_django_view() function for Django view templates")
 

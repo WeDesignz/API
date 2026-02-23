@@ -13,7 +13,6 @@ _context_lock = threading.Lock()
 
 # Keep default storage - no custom storage needed
 
-
 def get_media_upload_path(instance, filename):
     """
     Callable upload_to function for Media model.
@@ -169,7 +168,6 @@ def get_media_upload_path(instance, filename):
     except: pass
     # #endregion
     return result
-
 
 class Media(models.Model):
     MEDIA_TYPE_CHOICES = [
@@ -335,11 +333,9 @@ class Media(models.Model):
                 # Log the error but continue with model deletion
                 # This prevents file deletion errors from blocking model deletion
                 logger = logging.getLogger(__name__)
-                logger.warning(f"Failed to delete media file {self.file.name}: {str(e)}")
-        
+
         # Call the parent delete method to delete the model instance
         super().delete(*args, **kwargs)
-
 
 class Relation(models.Model):
     RELATION_TYPE_CHOICES = [

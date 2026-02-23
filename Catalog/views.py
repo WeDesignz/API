@@ -323,9 +323,7 @@ def hero_section_designs(request):
         
         if len(ordered_products) < len(product_ids):
             missing_ids = set(product_ids) - {p.id for p in ordered_products}
-            logger.warning(f'Hero section: {len(missing_ids)} products not found or not active: {missing_ids}')
         
-        logger.info(f'Hero section: Found {len(ordered_products)} products out of {len(product_ids)} requested')
         
         designs = []
         
@@ -338,17 +336,14 @@ def hero_section_designs(request):
             try:
                 media = product.get_media()
             except Exception as e:
-                logger.error(f'Error getting media for product {product.id}: {e}')
                 media = None
             
             if media:
                 try:
                     media_list = list(media)
                 except Exception as e:
-                    logger.error(f'Error converting media to list for product {product.id}: {e}')
                     media_list = []
                 
-                logger.info(f'Product {product.id} has {len(media_list)} media files')
                 
                 # Prefer design images (JPG/PNG, non-mockup), then fallback to mockup
                 for m in media_list:
@@ -411,7 +406,6 @@ def hero_section_designs(request):
                         try:
                             test_url = m.file.url
                             selected_media = m
-                            logger.info(f'Product {product.id}: Found design image {m.pk}')
                             break
                         except:
                             pass
@@ -420,7 +414,6 @@ def hero_section_designs(request):
                         try:
                             test_url = m.file.url
                             mockup_media = m
-                            logger.debug(f'Product {product.id}: Storing mockup media {m.pk} as fallback')
                         except:
                             pass
                     # Store first valid image as last fallback
@@ -428,7 +421,6 @@ def hero_section_designs(request):
                         try:
                             test_url = m.file.url
                             fallback_media = m
-                            logger.debug(f'Product {product.id}: Storing image media {m.pk} as last fallback')
                         except:
                             pass
                 
@@ -442,14 +434,12 @@ def hero_section_designs(request):
                         if request and url.startswith('/'):
                             url = request.build_absolute_uri(url)
                         image_url = url
-                        logger.info(f'Product {product.id}: Selected image URL: {url}')
                     except Exception as e:
-                        logger.error(f'Error getting image URL for product {product.id}: {e}')
                         pass
                 else:
-                    logger.warning(f'Product {product.id}: No valid image media found')
+                    pass
             else:
-                logger.warning(f'Product {product.id}: No media files found')
+                pass
             
             # Get creator info
             creator = product.created_by
@@ -469,22 +459,10 @@ def hero_section_designs(request):
             'count': len(designs)
         }
         
-        # Log the response for debugging
-        logger.info(f'Hero section response: {len(designs)} designs')
-        for design in designs:
-            logger.info(f'  - Design {design["id"]}: title="{design["title"]}", image={"SET" if design["image"] else "NULL"}')
-            if design["image"]:
-                logger.info(f'    Image URL: {design["image"]}')
-        
         # Cache for 1 hour
         cache.set(cache_key, response_data, 3600)
         return Response(response_data)
     except Exception as e:
-        import logging
-        import traceback
-        logger = logging.getLogger(__name__)
-        logger.error(f'Error in hero_section_designs: {str(e)}')
-        logger.error(f'Traceback: {traceback.format_exc()}')
         return Response({
             'designs': [],
             'error': str(e),
@@ -718,7 +696,6 @@ def featured_designs(request):
         
         if len(ordered_products) < len(product_ids):
             missing_ids = set(product_ids) - {p.id for p in ordered_products}
-            logger.warning(f'Featured designs: {len(missing_ids)} products not found or not active: {missing_ids}')
         
         designs = []
         
@@ -731,14 +708,12 @@ def featured_designs(request):
             try:
                 media = product.get_media()
             except Exception as e:
-                logger.error(f'Error getting media for product {product.id}: {e}')
                 media = None
             
             if media:
                 try:
                     media_list = list(media)
                 except Exception as e:
-                    logger.error(f'Error converting media to list for product {product.id}: {e}')
                     media_list = []
                 
                 # Prefer design images (JPG/PNG, non-mockup), then fallback to mockup
@@ -856,9 +831,6 @@ def featured_designs(request):
         return Response(response_data)
     except Exception as e:
         import traceback
-        logger = logging.getLogger(__name__)
-        logger.error(f'Error in featured_designs: {str(e)}')
-        logger.error(f'Traceback: {traceback.format_exc()}')
         return Response({
             'designs': [],
             'error': str(e),
@@ -1513,12 +1485,11 @@ def upload_design(request):
             uploaded_by_member_id = request.user.id  # Track the member who uploaded
             # Set created_by to studio owner (not the member) - ownership belongs to studio owner
             product_owner = studio.created_by
-            logger.info(f'User is studio member, associating design with studio: {studio.name} (ID: {studio.id}), owner: {product_owner.id}, uploaded by member: {uploaded_by_member_id}')
         else:
             # Check if user owns a studio
             studio = Studio.objects.filter(created_by=request.user).first()
             if studio:
-                logger.info(f'User owns studio, associating design with studio: {studio.name} (ID: {studio.id})')
+                pass
             # For studio owners or individual designers, created_by is themselves
             product_owner = request.user
         
@@ -1528,7 +1499,6 @@ def upload_design(request):
             from common.studio_name_generator import generate_design_numbers
             design_numbers = generate_design_numbers(studio.wedesignz_auto_name)
             studio_design_number = design_numbers['studio_number']
-            logger.info(f'Generated studio design number: {studio_design_number}')
         
         # Build product_metadata to track uploader if member uploaded
         product_metadata = {}
@@ -1539,7 +1509,6 @@ def upload_design(request):
         # Temporarily disable the pre_save signal to avoid Studio query overhead
         # Since we're already setting product_number, the signal would skip anyway,
         # but disabling it entirely is more efficient
-        logger.info('Creating product in database...')
         from django.db.models.signals import pre_save
         from Catalog.models import generate_design_numbers_signal
         
@@ -1561,7 +1530,6 @@ def upload_design(request):
                     created_by=product_owner,  # Studio owner if member uploaded, else request.user
                     product_metadata=product_metadata if product_metadata else {}  # Store member ID if uploaded by member
                 )
-                logger.info(f'Product created with ID: {product.id}, owner: {product.created_by.id}, uploaded_by_member: {uploaded_by_member_id}')
                 # Note: Studio association is handled via studio_design_number
                 # Designs can be queried by studio using the design number prefix
             finally:
@@ -1570,7 +1538,6 @@ def upload_design(request):
             
             # Create Category:Product relation
             attach_relation('Category:Product', category, product, created_by=request.user)
-            logger.info('Category:Product relation created')
             
             # Attach tags - establish relation between tags and product
             tag_ids = request.data.getlist('tags') if hasattr(request.data, 'getlist') else (
@@ -1578,14 +1545,13 @@ def upload_design(request):
                 [request.data.get('tags')] if request.data.get('tags') else []
             )
             
-            logger.info(f'Attaching {len(tag_ids)} tags...')
             for tag_id in tag_ids:
                 try:
                     tag = Tags.objects.get(id=tag_id)
                     # attach_tag() already creates the relation, no need to call attach_relation again
                     product.attach_tag(tag, created_by=request.user)
                 except Tags.DoesNotExist:
-                    logger.warning(f'Tag with ID {tag_id} not found')
+                    pass
         
         # Save files synchronously (must be done before response to avoid file handle issues)
         # Then queue Celery task asynchronously
@@ -1594,13 +1560,11 @@ def upload_design(request):
         timestamp = int(time.time())
         saved_files_data = []
         
-        logger.info(f'Saving {len(design_files)} files to temp location...')
         for idx, file in enumerate(design_files):
             try:
                 file_name = f"{timestamp}_{file.name}"
                 relative_path = f'{request.user.id}/temp/{file_name}'
                 
-                logger.info(f'Saving file {idx+1}/{len(design_files)}: {file.name} ({file.size} bytes)')
                 # Use default_storage.save() which handles file writing efficiently
                 # This is faster and more reliable than manual file writing
                 saved_path = default_storage.save(relative_path, file)
@@ -1610,14 +1574,12 @@ def upload_design(request):
                     'name': file.name,
                     'size': file.size
                 })
-                logger.info(f'File {idx+1} saved successfully to {saved_path}')
             except Exception as e:
-                logger.error(f'Error saving file {file.name}: {str(e)}', exc_info=True)
+                pass
                 # Continue with other files even if one fails
         
         # Process files synchronously to ensure they're attached immediately
         # This ensures media files are available right after upload
-        logger.info('Processing files synchronously to ensure immediate availability...')
         try:
             from Catalog.tasks import process_single_design_upload
             # Call the task function using apply() for synchronous execution
@@ -1628,27 +1590,22 @@ def upload_design(request):
             if task_result.successful():
                 result_data = task_result.result
                 processed_count = result_data.get('processed_files', 0) if isinstance(result_data, dict) else 0
-                logger.info(f'Files processed successfully: {processed_count} files attached to product {product.id}')
             else:
-                logger.warning(f'Task completed but may have had issues: {task_result.result}')
+                pass
         except Exception as sync_error:
-            logger.error(f'Failed to process files synchronously: {str(sync_error)}', exc_info=True)
             # Try async as fallback
             try:
-                logger.warning('Falling back to async processing...')
                 result = process_single_design_upload.delay(
-                product_id=product.id,
-                design_files_data=saved_files_data,
-                tag_ids=tag_ids,
-                platform_id=platform_id
-            )
-                logger.info(f'Celery task queued as fallback with task_id: {result.id}')
+                        product_id=product.id,
+                    design_files_data=saved_files_data,
+                    tag_ids=tag_ids,
+                    platform_id=platform_id
+                )
             except Exception as async_error:
-                logger.error(f'Failed to queue async task: {str(async_error)}', exc_info=True)
+                pass
                 # Don't fail the request - files are saved, can be processed later manually
         
         # Return success response
-        logger.info(f'Returning success response for product {product.id}')
         return Response({
             'message': 'Design uploaded successfully',
             'product_id': product.id,
@@ -1657,7 +1614,6 @@ def upload_design(request):
         }, status=status.HTTP_201_CREATED)
             
     except Exception as e:
-        logger.error(f'Upload design error: {str(e)}', exc_info=True)
         return Response({
             'error': f'Failed to upload design: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -1995,11 +1951,6 @@ def upload_designs_bulk(request):
             saved_path = default_storage.save(zip_file_path, zip_file)
             
             # Verify the file was saved correctly
-            logger.info(f"Saved zip file - requested path: {zip_file_path}, saved path: {saved_path}")
-            if not default_storage.exists(saved_path):
-                logger.error(f"WARNING: File was saved but cannot be verified at path: {saved_path}")
-            else:
-                logger.info(f"Verified: File exists at saved path: {saved_path}")
             
             # Create DesignProcessingTask record
             with transaction.atomic():
@@ -2026,8 +1977,6 @@ def upload_designs_bulk(request):
         except Exception as e:
             import traceback
             error_traceback = traceback.format_exc()
-            logger.error(f"Error saving zip file: {str(e)}")
-            logger.error(error_traceback)
             return Response({
                 'error': f'Failed to save zip file: {str(e)}',
                 'traceback': error_traceback if settings.DEBUG else None
@@ -2040,8 +1989,6 @@ def upload_designs_bulk(request):
     except Exception as e:
         import traceback
         error_traceback = traceback.format_exc()
-        logger.error(f"Error in upload_designs_bulk: {str(e)}")
-        logger.error(error_traceback)
         return Response({
             'error': f'Failed to process zip file: {str(e)}',
             'traceback': error_traceback if settings.DEBUG else None
@@ -2157,7 +2104,6 @@ def my_designs(request):
                     if design.product_metadata.get('uploaded_by_member_id') == request.user.id:
                         design_ids.append(design.id)
             designs = Product.objects.filter(id__in=design_ids) if design_ids else Product.objects.none()
-            logger.info(f'Studio member {request.user.id}: Found {len(design_ids)} designs')
         else:
             # Individual designer: Show only their own designs
             designs = Product.objects.filter(created_by=request.user).exclude(status='deleted')
@@ -2201,8 +2147,6 @@ def my_designs(request):
         })
     except Exception as e:
         import logging
-        logger = logging.getLogger(__name__)
-        logger.error(f'Error in my_designs endpoint for user {request.user.id}: {str(e)}', exc_info=True)
         return Response({
             'error': 'Failed to fetch designs',
             'detail': str(e) if settings.DEBUG else 'An error occurred while fetching your designs'
@@ -2379,7 +2323,6 @@ def design_detail(request, design_id):
                                 expected_path_prefix = f'{request.user.id}/designs/{design.id}/'
                                 if not media_obj.file.name.startswith(expected_path_prefix):
                                     error_msg = f'Media file saved to wrong location! Expected: {expected_path_prefix}*, Got: {media_obj.file.name}'
-                                    logger.error(error_msg)
                                     # #region agent log
                                     try:
                                         with open(log_path, 'a') as f:
@@ -2992,10 +2935,9 @@ def create_pdf_download_request(request):
             if use_subscription_mock_pdf and active_subscription:
                 try:
                     active_subscription.use_mock_pdf_download()
-                    logger.info(f"Used mock PDF download for subscription {active_subscription.id}. Remaining: {active_subscription.get_remaining_mock_pdf_downloads()}")
                 except ValueError as e:
                     # This shouldn't happen as we checked above, but handle gracefully
-                    logger.error(f"Failed to use mock PDF download for subscription {active_subscription.id}: {str(e)}")
+                    pass
             
             return Response({
                 'message': 'Free PDF download request created successfully',
@@ -3416,8 +3358,6 @@ def download_pdf_file(request, download_id):
         # If pending or processing, trigger generation (or wait for it)
         if pdf_download.status == 'pending':
             import logging
-            logger = logging.getLogger(__name__)
-            logger.info(f'PDF download {download_id}: status=pending, triggering on-demand generation')
             pdf_download.status = 'processing'
             pdf_download.save()
             generate_pdf_task.delay(download_id)
@@ -3441,10 +3381,6 @@ def download_pdf_file(request, download_id):
         if not pdf_download.pdf_file_path:
             # If file path is not set but status is completed, try to regenerate it
             # This handles cases where the task completed but file path wasn't saved
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.warning(f'PDF download {download_id} has no file path but status is completed. Attempting to locate file.')
-            
             # Try to find the file - check both new and old locations
             from django.http import FileResponse
             import os
@@ -3488,32 +3424,22 @@ def download_pdf_file(request, download_id):
         # Implement file download logic
         from django.http import FileResponse
         import os
-        import logging
-        logger = logging.getLogger(__name__)
         
         file_path = os.path.join(settings.MEDIA_ROOT, pdf_download.pdf_file_path)
-        logger.info(f'Attempting to download PDF from: {file_path}')
-        logger.info(f'MEDIA_ROOT: {settings.MEDIA_ROOT}')
-        logger.info(f'pdf_file_path from DB: {pdf_download.pdf_file_path}')
-        logger.info(f'Full file path: {file_path}')
-        logger.info(f'File exists check: {os.path.exists(file_path)}')
         
         if os.path.exists(file_path):
             try:
                 # Generate filename using customer name if available
                 import re
                 customer_name = pdf_download.customer_name or ''
-                logger.info(f'Download request for PDF {download_id}: customer_name="{customer_name}"')
                 if customer_name:
                     # Sanitize customer name for filename (remove special characters, keep spaces)
                     sanitized_name = re.sub(r'[^a-zA-Z0-9\s-]', '', customer_name)
                     sanitized_name = re.sub(r'\s+', ' ', sanitized_name.strip())  # Keep spaces, just trim
                     sanitized_name = sanitized_name[:50]  # Limit length
                     filename = f'{sanitized_name}.pdf'  # Remove _mock_pdf suffix
-                    logger.info(f'Generated filename from customer name: "{filename}"')
                 else:
                     filename = f'designs_{download_id}.pdf'
-                    logger.info(f'No customer name found, using default filename: "{filename}"')
                 
                 response = FileResponse(
                     open(file_path, 'rb'),
@@ -3528,16 +3454,12 @@ def download_pdf_file(request, download_id):
                 response['Content-Disposition'] = f'attachment; filename="{filename}"; filename*=UTF-8\'\'{encoded_filename}'
                 # Also set a custom header that's easier to access (will be exposed via CORS)
                 response['X-Filename'] = filename
-                logger.info(f'Setting Content-Disposition header: {response["Content-Disposition"]}')
-                logger.info(f'Setting X-Filename header: {filename}')
                 return response
             except Exception as e:
-                logger.error(f'Error opening PDF file: {str(e)}', exc_info=True)
                 return Response({
                     'error': f'Error reading PDF file: {str(e)}'
                 }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         else:
-            logger.error(f'PDF file not found at path: {file_path}')
             # Try alternative paths (check new location first, then old location)
             user = pdf_download.get_user()
             alt_path = None
@@ -3577,8 +3499,6 @@ def download_pdf_file(request, download_id):
                     response['Content-Disposition'] = f'attachment; filename="{filename}"; filename*=UTF-8\'\'{encoded_filename}'
                     # Also set a custom header that's easier to access (will be exposed via CORS)
                     response['X-Filename'] = filename
-                    logger.info(f'Setting Content-Disposition header (alt path): {response["Content-Disposition"]}')
-                    logger.info(f'Setting X-Filename header (alt path): {filename}')
                     # Update database with correct path based on location found
                     user = pdf_download.get_user()
                     if user and alt_path.startswith(os.path.join(settings.MEDIA_ROOT, str(user.id))):
@@ -3588,12 +3508,10 @@ def download_pdf_file(request, download_id):
                     pdf_download.save()
                     return response
                 except Exception as e:
-                    logger.error(f'Error opening PDF file from alt path: {str(e)}', exc_info=True)
             
             # If file doesn't exist but status is completed, try to regenerate it
             # This handles cases where the task completed but file wasn't created
             if pdf_download.status == 'completed':
-                logger.warning(f'PDF file missing for completed download {download_id}. Attempting to regenerate.')
                 try:
                     # Trigger task asynchronously to regenerate the file
                     generate_pdf_task.delay(download_id)
@@ -3603,7 +3521,6 @@ def download_pdf_file(request, download_id):
                         'download_id': download_id
                     }, status=status.HTTP_202_ACCEPTED)
                 except Exception as e:
-                    logger.error(f'Error triggering PDF regeneration: {str(e)}', exc_info=True)
                     return Response({
                         'error': 'PDF file not found and regeneration failed. Please contact support.',
                         'details': str(e)
@@ -3621,9 +3538,6 @@ def download_pdf_file(request, download_id):
             'error': 'PDF download not found'
         }, status=status.HTTP_404_NOT_FOUND)
     except Exception as e:
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.error(f'Error downloading PDF {download_id}: {str(e)}', exc_info=True)
         return Response({
             'error': f'An error occurred while downloading the PDF: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -4028,16 +3942,13 @@ def lens_search(request):
             # Convert to RGB if needed (handles RGBA, P, etc.)
             img = img.convert('RGB')
         except Exception as e:
-            logger.error(f"Error opening image: {e}")
             return Response({
                 'error': 'Invalid image file. Please upload a valid image',
                 'success': False
             }, status=status.HTTP_400_BAD_REQUEST)
         
         # Search using visual search
-        logger.info(f"Starting lens search for image: {image_file.name}, num_results: {num_results}")
         product_ids, extracted_image = search_image(img, num_results=num_results)
-        logger.info(f"Lens search returned {len(product_ids)} product IDs: {product_ids[:5]}...")
         
         if not product_ids:
             return Response({
@@ -4063,7 +3974,6 @@ def lens_search(request):
             if pid in product_dict
         ]
         
-        logger.info(f"Found {len(ordered_products)} active products from {len(product_ids)} matched IDs")
         
         # Convert extracted image to base64 for preview
         extracted_image_base64 = None
@@ -4074,7 +3984,7 @@ def lens_search(request):
                 extracted_image_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
                 extracted_image_base64 = f'data:image/png;base64,{extracted_image_base64}'
             except Exception as e:
-                logger.warning(f"Could not encode extracted image: {e}")
+                pass
         
         return Response({
             'success': True,
@@ -4089,7 +3999,6 @@ def lens_search(request):
         })
         
     except ValueError as e:
-        logger.error(f"Invalid parameter in lens search: {e}")
         return Response({
             'error': f'Invalid parameter: {str(e)}',
             'success': False
@@ -4226,7 +4135,6 @@ def lens_search_by_product(request):
                 img = img.convert('RGB')
                 break
             except Exception as e:
-                logger.warning("Skip PNG open failed product %s %s: %s", product_id, path, e)
                 continue
 
         if img is None:
@@ -4265,7 +4173,7 @@ def lens_search_by_product(request):
                 extracted_image_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
                 extracted_image_base64 = f'data:image/png;base64,{extracted_image_base64}'
             except Exception as e:
-                logger.warning("Could not encode extracted image: %s", e)
+                pass
 
         return Response({
             'success': True,

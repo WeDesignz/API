@@ -1273,9 +1273,6 @@ class CustomerNotificationSerializer(serializers.ModelSerializer):
                     return 'Unknown'
             return 'Unknown'
         except Exception as e:
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.error(f'Error getting customer name: {e}')
             return 'Unknown'
     
     def get_notification_type_display(self, obj):

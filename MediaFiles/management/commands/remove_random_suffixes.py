@@ -20,14 +20,11 @@ Usage:
 
 import os
 import re
-import logging
 from django.core.management.base import BaseCommand
 from django.core.files.storage import default_storage
 from django.conf import settings
 from Catalog.models import Product
 from MediaFiles.models import Media, Relation
-
-logger = logging.getLogger(__name__)
 
 
 class Command(BaseCommand):
@@ -153,7 +150,7 @@ class Command(BaseCommand):
                             try:
                                 default_storage.delete(current_path)
                             except Exception as e:
-                                logger.warning(f'Could not delete suffixed file {current_path}: {str(e)}')
+                                pass
                         
                         # Delete this Media object (duplicate)
                         try:
@@ -170,7 +167,6 @@ class Command(BaseCommand):
                             })
                             if verbose:
                                 self.stdout.write(self.style.ERROR(f'    ✗ {error_msg}'))
-                            logger.error(f'Error deleting duplicate media {media_id}: {error_msg}', exc_info=True)
                     else:
                         # No other Media points to target - update this Media to point to it
                         if verbose:
@@ -206,7 +202,7 @@ class Command(BaseCommand):
                                 if verbose:
                                     self.stdout.write(self.style.SUCCESS(f'    ✓ Deleted {filename} and updated Media to point to {new_filename}'))
                             except Exception as e:
-                                logger.warning(f'Could not delete suffixed file {current_path}: {str(e)}')
+                                pass
                                 # Media is already updated, so count as success
                                 stats['renamed'] += 1
                                 if verbose:
@@ -222,7 +218,6 @@ class Command(BaseCommand):
                             })
                             if verbose:
                                 self.stdout.write(self.style.ERROR(f'    ✗ {error_msg}'))
-                            logger.error(f'Error updating media {media_id}: {error_msg}', exc_info=True)
                     
                     continue
 
@@ -258,7 +253,7 @@ class Command(BaseCommand):
                     try:
                         default_storage.delete(current_path)
                     except Exception as e:
-                        logger.warning(f'Could not delete old file {current_path}: {str(e)}')
+                        pass
                     
                     stats['renamed'] += 1
                     if verbose:
@@ -275,7 +270,6 @@ class Command(BaseCommand):
                     })
                     if verbose:
                         self.stdout.write(self.style.ERROR(f'    ✗ {error_msg}'))
-                    logger.error(f'Error renaming media {media_id}: {error_msg}', exc_info=True)
 
             except Media.DoesNotExist:
                 stats['skipped'] += 1
@@ -288,7 +282,6 @@ class Command(BaseCommand):
                     'media_id': media_id,
                     'error': error_msg
                 })
-                logger.error(f'Unexpected error processing media {media_id}: {error_msg}', exc_info=True)
 
         # Print summary
         self.stdout.write('\n' + '=' * 80)

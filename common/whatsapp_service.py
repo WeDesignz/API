@@ -1,8 +1,5 @@
 import requests
-import logging
 from django.conf import settings
-
-logger = logging.getLogger(__name__)
 
 
 class WhatsAppService:
@@ -58,7 +55,6 @@ class WhatsAppService:
             access_token = WhatsAppService.get_access_token()
             
             if not phone_number_id or not access_token:
-                logger.error("WhatsApp credentials not configured")
                 return False
             
             # Format phone number
@@ -89,18 +85,13 @@ class WhatsAppService:
             response = requests.post(url, json=payload, headers=headers, timeout=10)
             
             if response.status_code == 200:
-                result = response.json()
-                logger.info(f"WhatsApp message sent successfully to {phone_number}. Message ID: {result.get('messages', [{}])[0].get('id', 'N/A')}")
                 return True
             else:
-                logger.error(f"WhatsApp API error: {response.status_code} - {response.text}")
                 return False
                 
         except requests.exceptions.RequestException as e:
-            logger.error(f"Failed to send WhatsApp message to {phone_number}: {str(e)}")
             return False
         except Exception as e:
-            logger.error(f"Unexpected error sending WhatsApp message: {str(e)}")
             return False
     
     @staticmethod
@@ -136,7 +127,6 @@ class WhatsAppService:
             )
             
         except Exception as e:
-            logger.error(f"Failed to send OTP via WhatsApp to {phone_number}: {str(e)}")
             return False
     
     @staticmethod
@@ -160,7 +150,6 @@ class WhatsAppService:
             access_token = WhatsAppService.get_access_token()
             
             if not phone_number_id or not access_token:
-                logger.error("WhatsApp credentials not configured")
                 return False
             
             formatted_number = WhatsAppService.format_phone_number(phone_number)
@@ -226,13 +215,10 @@ class WhatsAppService:
             response = requests.post(url, json=payload, headers=headers, timeout=10)
             
             if response.status_code == 200:
-                logger.info(f"WhatsApp template message sent to {phone_number}")
                 return True
             else:
-                logger.error(f"WhatsApp template API error: {response.status_code} - {response.text}")
                 return False
                 
         except Exception as e:
-            logger.error(f"Failed to send WhatsApp template message: {str(e)}")
             return False
 

@@ -10,9 +10,6 @@ import string
 from django.db import transaction
 from django.core.cache import cache
 from typing import Optional, List
-import logging
-
-logger = logging.getLogger(__name__)
 
 # Define consonants and vowels for pronounceable names
 CONSONANTS = ["b", "c", "d", "f", "g", "h", "j", "k", "l", "m", "n", "p", "r", "s", "t", "v", "z"]
@@ -99,7 +96,6 @@ class StudioNameGenerator:
                 exists = Studio.objects.filter(wedesignz_auto_name=name).exists()
                 return not exists
         except Exception as e:
-            logger.error(f"Error checking name uniqueness: {str(e)}")
             return False
     
     def generate_unique_studio_name(self, strategy: str = "pronounceable") -> Optional[str]:
@@ -138,16 +134,13 @@ class StudioNameGenerator:
                 attempts += 1
                 
             except Exception as e:
-                logger.error(f"Error generating studio name: {str(e)}")
                 attempts += 1
                 continue
         
         # Fallback to numeric strategy if all else fails
         if strategy != "numeric":
-            logger.warning(f"Falling back to numeric strategy after {attempts} attempts")
             return self.generate_unique_studio_name("numeric")
         
-        logger.error("Failed to generate unique studio name after maximum attempts")
         return None
     
     def generate_multiple_names(self, count: int = 10, strategy: str = "pronounceable") -> List[str]:

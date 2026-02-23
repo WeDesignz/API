@@ -28,10 +28,9 @@ def check_avif_support():
             pillow_avif.register_avif_opener()
         except ImportError:
             # Plugin not installed
-            logger.debug("pillow-avif-plugin not found")
+
         except Exception as e:
-            logger.debug(f"Error registering pillow-avif-plugin: {e}")
-        
+
         # Try to save a test image to see if AVIF works
         # This is the most reliable way to check
         test_img = Image.new('RGB', (1, 1), color='red')
@@ -41,11 +40,11 @@ def check_avif_support():
             return True
     except (KeyError, ValueError, OSError) as e:
         # AVIF format is not supported
-        logger.debug(f"AVIF test failed: {e}")
+
         return False
     except Exception as e:
         # Other error - likely missing system libraries
-        logger.debug(f"AVIF check error: {e}")
+
         return False
 
 # Cache the AVIF support check
@@ -57,7 +56,7 @@ def is_avif_supported():
     if _avif_supported is None:
         _avif_supported = check_avif_support()
         if not _avif_supported:
-            logger.warning("AVIF format is not supported. Please install pillow-avif-plugin or libavif libraries.")
+
     return _avif_supported
 
 def convert_to_avif(input_path, output_dir, base_name, is_mockup=False):
@@ -75,7 +74,7 @@ def convert_to_avif(input_path, output_dir, base_name, is_mockup=False):
     """
     # Check if AVIF is supported
     if not is_avif_supported():
-        logger.error("AVIF format is not supported. Please install pillow-avif-plugin: pip install pillow-avif-plugin")
+
         return None
     
     try:
@@ -145,16 +144,14 @@ def convert_to_avif(input_path, output_dir, base_name, is_mockup=False):
                 avif_size = len(avif_content) / 1024  # Size in KB
                 
                 if is_mockup:
-                    logger.info(f"  MOCKUP: AVIF={avif_size:.1f}KB saved to {saved_path}")
+
                 else:
-                    logger.info(f"  AVIF conversion: {avif_size:.1f}KB saved to {saved_path}")
 
                 return saved_path
                 
     except Exception as e:
-        logger.error(f"Error converting {input_path} to AVIF: {e}", exc_info=True)
-        return None
 
+        return None
 
 def convert_avif_to_jpeg(avif_file_path, quality=85):
     """
@@ -170,12 +167,12 @@ def convert_avif_to_jpeg(avif_file_path, quality=85):
     try:
         # Check if AVIF support is available
         if not is_avif_supported():
-            logger.error("Cannot convert AVIF to JPEG: AVIF support not available")
+
             return None, None
         
         # Check if file exists
         if not default_storage.exists(avif_file_path):
-            logger.error(f"AVIF file not found: {avif_file_path}")
+
             return None, None
         
         # Read AVIF file from storage to temporary location
@@ -224,9 +221,7 @@ def convert_avif_to_jpeg(avif_file_path, quality=85):
                 media_url += '/'
             
             jpeg_url = f"{media_domain}{media_url}{saved_jpeg_path}"
-            
-            logger.info(f"Converted AVIF to JPEG: {avif_file_path} -> {saved_jpeg_path} ({len(jpeg_content)/1024:.1f}KB)")
-            
+
             return saved_jpeg_path, jpeg_url
             
         finally:
@@ -239,9 +234,8 @@ def convert_avif_to_jpeg(avif_file_path, quality=85):
                         pass
                         
     except Exception as e:
-        logger.error(f"Error converting AVIF to JPEG: {e}", exc_info=True)
-        return None, None
 
+        return None, None
 
 def create_avif_from_media_file(media_file_path, product_number, is_mockup=False, product=None, created_by=None):
     """
@@ -283,7 +277,7 @@ def create_avif_from_media_file(media_file_path, product_number, is_mockup=False
         
         # Open file from storage
         if not default_storage.exists(media_file_path):
-            logger.warning(f"Media file not found for AVIF conversion: {media_file_path}")
+
             return None, None
         
         # Read file to temporary location for PIL processing
@@ -318,7 +312,7 @@ def create_avif_from_media_file(media_file_path, product_number, is_mockup=False
                     creator = created_by or (product.created_by if hasattr(product, 'created_by') else None)
                     
                     if not creator:
-                        logger.warning(f"Cannot create Media object for AVIF: no created_by user available")
+
                     else:
                         # The AVIF file is already saved at avif_path (in the product's design folder: {user_id}/designs/{product_id}/)
                         # We need to create a Media object that references this existing file without Django trying to save it again
@@ -366,21 +360,19 @@ def create_avif_from_media_file(media_file_path, product_number, is_mockup=False
                             if dummy_file_path and default_storage.exists(dummy_file_path):
                                 try:
                                     default_storage.delete(dummy_file_path)
-                                    logger.debug(f'Deleted temporary dummy file: {dummy_file_path}')
+
                                 except Exception as e:
-                                    logger.warning(f'Could not delete temporary dummy file {dummy_file_path}: {e}')
-                            
+
                             # Verify the AVIF file exists at the correct location
                             if not default_storage.exists(avif_path):
-                                logger.error(f'AVIF file not found at expected path: {avif_path}')
+
                             else:
-                                logger.debug(f'AVIF file confirmed at correct location: {avif_path}')
-                            
+
                             # Validate AVIF file location - ensure it's in the correct product design folder
                             expected_path_prefix = f'{creator.id}/designs/{product.id}/'
                             if not avif_path.startswith(expected_path_prefix):
                                 error_msg = f'AVIF file saved to wrong location! Expected: {expected_path_prefix}*, Got: {avif_path}'
-                                logger.error(error_msg)
+
                                 # #region agent log
                                 try:
                                     with open(log_path, 'a') as f:
@@ -396,11 +388,11 @@ def create_avif_from_media_file(media_file_path, product_number, is_mockup=False
                                 'source': 'avif_conversion'
                             }
                             product.attach_media(media_obj, meta=avif_metadata, created_by=creator)
-                            logger.info(f'Created and linked AVIF Media object {media_obj.id} for product {product.id} at {media_obj.file.name}')
+
                         finally:
                             Media.clear_product_context()
                 except Exception as e:
-                    logger.error(f"Error creating Media object for AVIF file: {e}", exc_info=True)
+
                     # Don't fail the whole operation if linking fails
             
             return avif_path, media_obj
@@ -410,6 +402,6 @@ def create_avif_from_media_file(media_file_path, product_number, is_mockup=False
                 os.unlink(temp_input_path)
                 
     except Exception as e:
-        logger.error(f"Error creating AVIF from media file {media_file_path}: {e}", exc_info=True)
+
         return None, None
 

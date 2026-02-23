@@ -59,7 +59,6 @@ from Authentication.user_relations import get_user_wallets
 from common.relations import get_related
 from Catalog.models import PDFDownload
 
-
 @swagger_auto_schema(
     method='post',
     operation_summary="Admin Login (Step 1)",
@@ -208,7 +207,6 @@ def admin_login(request):
         'errors': serializer.errors
     }, status=status.HTTP_400_BAD_REQUEST)
 
-
 @swagger_auto_schema(
     method='get',
     operation_summary="Admin 2FA Setup",
@@ -255,7 +253,6 @@ def admin_2fa_setup(request):
     )
     
     return Response(data, status=status.HTTP_200_OK)
-
 
 @swagger_auto_schema(
     method='post',
@@ -362,7 +359,6 @@ def admin_2fa_verify(request):
     
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-
 @swagger_auto_schema(
     method='post',
     operation_summary="Enable 2FA",
@@ -424,7 +420,6 @@ def admin_2fa_enable(request):
     
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-
 @swagger_auto_schema(
     method='post',
     operation_summary="Disable 2FA",
@@ -480,7 +475,6 @@ def admin_2fa_disable(request):
         }, status=status.HTTP_200_OK)
     
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
 
 @swagger_auto_schema(
     method='post',
@@ -543,7 +537,6 @@ def admin_logout(request):
         }, status=status.HTTP_200_OK)
     
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
 
 @swagger_auto_schema(
     method='get',
@@ -659,7 +652,6 @@ def admin_profile(request):
             'error': 'Validation failed',
             'details': error_messages if error_messages else ['Please check your input and try again.']
         }, status=status.HTTP_400_BAD_REQUEST)
-
 
 @swagger_auto_schema(
     method='post',
@@ -817,7 +809,6 @@ def admin_upload_profile_photo(request):
                 'details': error_message
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-
 @swagger_auto_schema(
     method='get',
     operation_summary="Admin Activity Logs",
@@ -878,7 +869,6 @@ def admin_activity_logs(request):
     serializer = AdminActivityLogSerializer(paginated_logs, many=True)
     return paginator.get_paginated_response(serializer.data)
 
-
 @swagger_auto_schema(
     method='get',
     operation_summary="Admin Sessions",
@@ -904,7 +894,6 @@ def admin_sessions(request):
     serializer = AdminSessionSerializer(sessions, many=True)
     
     return Response(serializer.data, status=status.HTTP_200_OK)
-
 
 @swagger_auto_schema(
     method='post',
@@ -993,7 +982,6 @@ def admin_change_password(request):
             'error': 'An error occurred while changing password. Please try again.',
             'details': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 # Designer Management Views
 
@@ -1119,10 +1107,8 @@ def designers_list(request):
     except Exception as e:
         import logging
         logger = logging.getLogger(__name__)
-        logger.error(f'Failed to log activity: {e}')
-    
-    return paginator.get_paginated_response(serializer.data)
 
+    return paginator.get_paginated_response(serializer.data)
 
 @swagger_auto_schema(
     method='get',
@@ -1173,7 +1159,6 @@ def designer_detail(request, designer_id):
     )
     
     return Response(serializer.data, status=status.HTTP_200_OK)
-
 
 @swagger_auto_schema(
     method='put',
@@ -1260,7 +1245,6 @@ def designer_update_status(request, designer_id):
         'designer': DesignerDetailSerializer(designer).data
     }, status=status.HTTP_200_OK)
 
-
 @swagger_auto_schema(
     method='get',
     operation_summary="Designer Wallet",
@@ -1331,7 +1315,6 @@ def designer_wallet(request, designer_id):
     )
     
     return Response(serializer.data, status=status.HTTP_200_OK)
-
 
 @swagger_auto_schema(
     method='get',
@@ -1417,7 +1400,6 @@ def designer_transactions(request, designer_id):
     
     return paginator.get_paginated_response(serializer.data)
 
-
 @swagger_auto_schema(
     method='get',
     operation_summary="Designer Withdrawals",
@@ -1501,7 +1483,6 @@ def designer_withdrawals(request, designer_id):
     )
     
     return paginator.get_paginated_response(serializer.data)
-
 
 @swagger_auto_schema(
     method='put',
@@ -1590,7 +1571,6 @@ def update_withdrawal_status(request, withdrawal_id):
         'withdrawal': DesignerWithdrawalSerializer(withdrawal).data
     }, status=status.HTTP_200_OK)
 
-
 @swagger_auto_schema(
     method='get',
     operation_summary="Designer Analytics",
@@ -1658,21 +1638,18 @@ def designer_analytics(request):
         except Exception as e:
             import logging
             logger = logging.getLogger(__name__)
-            logger.error(f'Failed to log activity: {e}')
-        
+
         return Response(stats_data, status=status.HTTP_200_OK)
         
     except Exception as e:
         import logging
         import traceback
         logger = logging.getLogger(__name__)
-        logger.error(f'Error in designer_analytics: {e}')
-        logger.error(traceback.format_exc())
+
         return Response({
             'error': 'An error occurred while retrieving designer analytics',
             'detail': str(e) if settings.DEBUG else None
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 @swagger_auto_schema(
     method='post',
@@ -1786,7 +1763,6 @@ def bulk_update_designer_status(request):
         'failed_updates': failed_updates
     }, status=status.HTTP_200_OK)
 
-
 # Enhanced Designer Management Views
 
 @swagger_auto_schema(
@@ -1884,7 +1860,6 @@ def designer_onboarding_list(request):
     )
     
     return paginator.get_paginated_response(serializer.data)
-
 
 @swagger_auto_schema(
     method='get',
@@ -2166,21 +2141,18 @@ def designer_onboarding_detail(request, designer_id):
         except Exception as e:
             import logging
             logger = logging.getLogger(__name__)
-            logger.error(f'Failed to log activity: {e}')
-        
+
         return Response(response_data, status=status.HTTP_200_OK)
         
     except Exception as e:
         import logging
         import traceback
         logger = logging.getLogger(__name__)
-        logger.error(f'Error in designer_onboarding_detail: {e}')
-        logger.error(traceback.format_exc())
+
         return Response({
             'error': 'An error occurred while retrieving onboarding details',
             'detail': str(e) if settings.DEBUG else None
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 @swagger_auto_schema(
     method='post',
@@ -2296,8 +2268,7 @@ def verify_designer_onboarding(request, designer_id):
             
             # Log the action
             if updated_count > 0:
-                logger.info(f'[verify_designer_onboarding] Hid {updated_count} designs from rejected designer {designer_id}')
-        
+
         message = f"Designer rejected: {rejection_reason}"
     else:
         # Legacy verification types (superadmin, moderator) - no longer used
@@ -2324,7 +2295,6 @@ def verify_designer_onboarding(request, designer_id):
         'message': message,
         'designer': DesignerDetailSerializer(designer).data
     }, status=status.HTTP_200_OK)
-
 
 @swagger_auto_schema(
     method='post',
@@ -2437,7 +2407,6 @@ def designer_account_action(request, designer_id):
         'suspension': DesignerAccountSuspensionSerializer(suspension).data
     }, status=status.HTTP_200_OK)
 
-
 @swagger_auto_schema(
     method='get',
     operation_summary="Designer Wallet Summary",
@@ -2518,7 +2487,6 @@ def designer_wallet_summary(request, designer_id):
         },
         'wallet_summary': wallet_summary
     }, status=status.HTTP_200_OK)
-
 
 # Customer Management Views
 
@@ -2654,10 +2622,8 @@ def customers_list(request):
     except Exception as e:
         import logging
         logger = logging.getLogger(__name__)
-        logger.error(f'Failed to log activity: {e}')
-    
-    return paginator.get_paginated_response(serializer.data)
 
+    return paginator.get_paginated_response(serializer.data)
 
 @swagger_auto_schema(
     method='get',
@@ -2702,7 +2668,6 @@ def customer_detail(request, customer_id):
     )
     
     return Response(serializer.data, status=status.HTTP_200_OK)
-
 
 @swagger_auto_schema(
     method='get',
@@ -2860,7 +2825,6 @@ def customer_history(request, customer_id):
     
     return Response(history_data, status=status.HTTP_200_OK)
 
-
 @swagger_auto_schema(
     method='post',
     operation_summary="Customer Account Action",
@@ -2983,7 +2947,6 @@ def customer_account_action(request, customer_id):
         }
     }, status=status.HTTP_200_OK)
 
-
 @swagger_auto_schema(
     method='get',
     operation_summary="Customer Analytics",
@@ -3095,10 +3058,8 @@ def customer_analytics(request):
     except Exception as e:
         import logging
         logger = logging.getLogger(__name__)
-        logger.error(f'Failed to log activity: {e}')
-    
-    return Response(analytics_data, status=status.HTTP_200_OK)
 
+    return Response(analytics_data, status=status.HTTP_200_OK)
 
 # ==================== DESIGN MANAGEMENT VIEWS ====================
 
@@ -3202,7 +3163,7 @@ def designs_list(request):
     except Exception as e:
         import logging
         logger = logging.getLogger(__name__)
-        logger.error(f'Error in designs_list - admin profile check: {e}', exc_info=True)
+
         return Response({
             'error': 'An error occurred while checking admin profile',
             'detail': str(e)
@@ -3216,7 +3177,7 @@ def designs_list(request):
     except Exception as e:
         import logging
         logger = logging.getLogger(__name__)
-        logger.error(f'Error in designs_list - importing models: {e}', exc_info=True)
+
         return Response({
             'error': 'An error occurred while loading designs',
             'detail': str(e)
@@ -3348,7 +3309,7 @@ def designs_list(request):
     except Exception as e:
         import logging
         logger = logging.getLogger(__name__)
-        logger.error(f'Serializer error: {e}', exc_info=True)
+
         return Response({
             'error': 'Failed to serialize designs',
             'detail': str(e)
@@ -3380,8 +3341,7 @@ def designs_list(request):
     except Exception as e:
         import logging
         logger = logging.getLogger(__name__)
-        logger.error(f'Failed to log activity: {e}')
-    
+
     try:
         return Response({
             'message': 'Designs retrieved successfully',
@@ -3396,12 +3356,11 @@ def designs_list(request):
     except Exception as e:
         import logging
         logger = logging.getLogger(__name__)
-        logger.error(f'Error in designs_list - final response: {e}', exc_info=True)
+
         return Response({
             'error': 'An error occurred while preparing the response',
             'detail': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 @swagger_auto_schema(
     method='get',
@@ -3452,13 +3411,11 @@ def design_detail(request, design_id):
     except Exception as e:
         import logging
         logger = logging.getLogger(__name__)
-        logger.error(f'Failed to log activity: {e}')
-    
+
     return Response({
         'message': 'Design details retrieved successfully',
         'data': serializer.data
     })
-
 
 @swagger_auto_schema(
     method='post',
@@ -3482,21 +3439,19 @@ def design_action(request, design_id):
     """
     import logging
     logger = logging.getLogger(__name__)
-    
-    logger.info(f'[design_action] Starting design action request: design_id={design_id}, user={request.user.username}, action={request.data.get("action")}')
-    
+
     # Step 1: Validate admin profile
     try:
         admin_profile = AdminUserProfile.objects.get(user=request.user)
-        logger.debug(f'[design_action] Admin profile found: {admin_profile.id}')
+
     except AdminUserProfile.DoesNotExist:
-        logger.warning(f'[design_action] Admin profile not found for user: {request.user.username}')
+
         return Response({
             'error': 'Admin profile required',
             'detail': 'Admin profile required'
         }, status=status.HTTP_403_FORBIDDEN)
     except Exception as e:
-        logger.error(f'[design_action] Error getting admin profile: {str(e)}', exc_info=True)
+
         return Response({
             'error': 'Internal server error',
             'detail': 'Failed to verify admin profile'
@@ -3507,14 +3462,14 @@ def design_action(request, design_id):
         from Catalog.models import Product
         # First check if design exists (without locking)
         if not Product.objects.filter(id=design_id).exists():
-            logger.warning(f'[design_action] Design not found: design_id={design_id}')
+
             return Response({
                 'error': 'Design not found',
                 'detail': 'Design not found'
             }, status=status.HTTP_404_NOT_FOUND)
-        logger.debug(f'[design_action] Design exists: design_id={design_id}')
+
     except Exception as e:
-        logger.error(f'[design_action] Error checking design existence: {str(e)}', exc_info=True)
+
         return Response({
             'error': 'Internal server error',
             'detail': 'Failed to verify design'
@@ -3523,7 +3478,7 @@ def design_action(request, design_id):
     # Step 3: Validate request data
     serializer = DesignActionSerializer(data=request.data)
     if not serializer.is_valid():
-        logger.warning(f'[design_action] Invalid serializer data: {serializer.errors}')
+
         return Response({
             'error': 'Invalid data',
             'detail': 'Invalid request data',
@@ -3534,9 +3489,7 @@ def design_action(request, design_id):
     rejection_reason = serializer.validated_data.get('rejection_reason', '')
     reason = serializer.validated_data.get('reason', '')  # For flag action
     admin_notes = serializer.validated_data.get('admin_notes', '')
-    
-    logger.info(f'[design_action] Processing action: {action}, design_id={design_id}')
-    
+
     # Step 4: Process action within transaction (with locking)
     from .models import DesignApproval
     from common.relations import get_related, attach_relation
@@ -3550,9 +3503,9 @@ def design_action(request, design_id):
             # Get design with lock inside transaction
             try:
                 design = Product.objects.select_for_update().get(id=design_id)
-                logger.debug(f'[design_action] Design locked: {design.id}, title={design.title}, current_status={design.status}')
+
             except Product.DoesNotExist:
-                logger.error(f'[design_action] Design not found after transaction start: design_id={design_id}')
+
                 return Response({
                     'error': 'Design not found',
                     'detail': 'Design not found'
@@ -3560,7 +3513,7 @@ def design_action(request, design_id):
             
             # Handle flag actions separately (they don't use DesignApproval)
             if action == 'flag':
-                logger.debug(f'[design_action] Processing flag action')
+
                 # Store flag information in product_metadata
                 if not design.product_metadata:
                     design.product_metadata = {}
@@ -3577,10 +3530,9 @@ def design_action(request, design_id):
                 )
                 success = True
                 message = "Design flagged successfully and hidden from feed"
-                logger.info(f'[design_action] Design flagged and hidden from feed: design_id={design_id}')
-            
+
             elif action == 'resolve_flag':
-                logger.debug(f'[design_action] Processing resolve_flag action')
+
                 # Get previous visibility_status before clearing flag (default to 'show' if not stored)
                 previous_visibility = 'show'
                 if design.product_metadata:
@@ -3597,86 +3549,81 @@ def design_action(request, design_id):
                 )
                 success = True
                 message = "Flag resolved successfully and design restored to feed"
-                logger.info(f'[design_action] Flag resolved and design restored to feed: design_id={design_id}, visibility={previous_visibility}')
-            
+
             else:
                 # Get or create design approval record for approve/reject/disable actions
-                logger.debug(f'[design_action] Processing {action} action')
-                
+
                 # Try to get existing approval record directly by product_id (faster than get_related)
                 approval = None
                 try:
                     approval = DesignApproval.objects.filter(product_id=design.pk).first()
                     if approval:
-                        logger.debug(f'[design_action] Using existing approval record: {approval.id}')
+
                 except Exception as e:
-                    logger.warning(f'[design_action] Error getting approval: {str(e)}')
-                
+
                 # Create new approval if not found
                 if not approval:
-                    logger.debug(f'[design_action] Creating new approval record')
+
                     try:
                         approval = DesignApproval.objects.create(
                             product_id=design.pk,
                             action='pending'
                         )
-                        logger.debug(f'[design_action] Created new approval record: {approval.id}')
-                        
+
                         # Try to attach relation (non-blocking - skip if it fails)
                         try:
                             attach_relation('Product:DesignApproval', design, approval, created_by=request.user)
                         except Exception as rel_error:
-                            logger.warning(f'[design_action] Failed to attach relation (non-critical): {str(rel_error)}')
+
                             # Continue anyway - the approval record exists
                     except Exception as e:
-                        logger.error(f'[design_action] Error creating approval: {str(e)}', exc_info=True)
+
                         raise
                 
                 # Execute the action
                 if action == 'approve':
-                    logger.debug(f'[design_action] Calling approve_design method')
+
                     try:
                         success = approval.approve_design(request.user, admin_notes, request)
                         message = "Design approved successfully"
                         if success:
-                            logger.info(f'[design_action] Design approved successfully: design_id={design_id}')
+
                         else:
-                            logger.error(f'[design_action] approve_design returned False: design_id={design_id}')
+
                             error_detail = "Failed to approve design - check logs for details"
                     except Exception as e:
-                        logger.error(f'[design_action] Exception in approve_design: {str(e)}', exc_info=True)
+
                         raise
                         
                 elif action == 'reject':
-                    logger.debug(f'[design_action] Calling reject_design method')
+
                     success = approval.reject_design(request.user, rejection_reason, admin_notes, request)
                     message = "Design rejected successfully"
                     if success:
-                        logger.info(f'[design_action] Design rejected successfully: design_id={design_id}')
+
                     else:
-                        logger.error(f'[design_action] reject_design returned False: design_id={design_id}')
+
                         error_detail = "Failed to reject design - check logs for details"
                         
                 elif action == 'disable':
-                    logger.debug(f'[design_action] Calling disable_design method')
+
                     success = approval.disable_design(request.user, admin_notes, request)
                     message = "Design disabled successfully"
                     if success:
-                        logger.info(f'[design_action] Design disabled successfully: design_id={design_id}')
+
                     else:
-                        logger.error(f'[design_action] disable_design returned False: design_id={design_id}')
+
                         error_detail = "Failed to disable design - check logs for details"
                 else:
-                    logger.warning(f'[design_action] Unknown action: {action}')
+
                     error_detail = f"Unknown action: {action}"
             
             # Refresh design from database to get updated status
             if success:
                 design.refresh_from_db()
-                logger.debug(f'[design_action] Design refreshed, new status: {design.status}')
-                
+
     except Exception as e:
-        logger.error(f'[design_action] Exception during action processing: {str(e)}', exc_info=True)
+
         return Response({
             'error': 'Internal server error',
             'detail': f'Failed to process action: {str(e)}'
@@ -3693,19 +3640,16 @@ def design_action(request, design_id):
                 'status': design.status
             }
         }
-        
-        logger.info(f'[design_action] Request completed successfully: design_id={design_id}, action={action}')
-        
+
         # Return response immediately - activity logging will be handled by middleware if needed
         # Skip manual logging here to ensure fast response
         return Response(response_data, status=status.HTTP_200_OK)
     else:
-        logger.error(f'[design_action] Action failed: design_id={design_id}, action={action}, error={error_detail}')
+
         return Response({
             'error': 'Failed to perform action',
             'detail': error_detail or 'Failed to perform action'
         }, status=status.HTTP_400_BAD_REQUEST)
-
 
 @swagger_auto_schema(
     method='get',
@@ -3760,7 +3704,6 @@ def categories_list(request):
         'message': 'Categories retrieved successfully',
         'data': serializer.data
     })
-
 
 @swagger_auto_schema(
     method='post',
@@ -3834,7 +3777,6 @@ def create_category(request):
             'error': 'Invalid data',
             'details': serializer.errors
         }, status=status.HTTP_400_BAD_REQUEST)
-
 
 @swagger_auto_schema(
     method='put',
@@ -3933,7 +3875,6 @@ def update_category(request, category_id):
             'details': serializer.errors
         }, status=status.HTTP_400_BAD_REQUEST)
 
-
 @swagger_auto_schema(
     method='delete',
     operation_summary="Delete Category",
@@ -4015,7 +3956,6 @@ def delete_category(request, category_id):
         }
     }, status=status.HTTP_200_OK)
 
-
 @swagger_auto_schema(
     method='get',
     operation_summary="Tags List",
@@ -4057,7 +3997,6 @@ def tags_list(request):
         'message': 'Tags retrieved successfully',
         'data': serializer.data
     })
-
 
 @swagger_auto_schema(
     method='get',
@@ -4163,7 +4102,6 @@ def copyright_reports_list(request):
         }
     })
 
-
 @swagger_auto_schema(
     method='post',
     operation_summary="Copyright Report Action",
@@ -4249,7 +4187,6 @@ def copyright_report_action(request, report_id):
         return Response({
             'error': 'Failed to perform action'
         }, status=status.HTTP_400_BAD_REQUEST)
-
 
 @swagger_auto_schema(
     method='get',
@@ -4443,8 +4380,7 @@ def design_analytics(request):
     except Exception as e:
         import logging
         logger = logging.getLogger(__name__)
-        logger.error(f'Failed to log activity: {e}')
-    
+
     return Response({
         'message': 'Design analytics retrieved successfully',
         'data': analytics_page,
@@ -4455,7 +4391,6 @@ def design_analytics(request):
             'total_pages': (total_count + page_size - 1) // page_size
         }
     })
-
 
 @swagger_auto_schema(
     method='get',
@@ -4511,19 +4446,17 @@ def design_stats(request):
         except Exception as e:
             import logging
             logger = logging.getLogger(__name__)
-            logger.error(f'Failed to log activity: {e}')
-        
+
         return Response(stats_data, status=status.HTTP_200_OK)
         
     except Exception as e:
         import logging
         logger = logging.getLogger(__name__)
-        logger.error(f'Error in design_stats: {e}', exc_info=True)
+
         return Response({
             'error': 'An error occurred while retrieving design statistics',
             'detail': str(e) if settings.DEBUG else None
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 # ==================== TRANSACTION MANAGEMENT VIEWS ====================
 
@@ -4734,7 +4667,6 @@ def transactions_list(request):
         }
     })
 
-
 @swagger_auto_schema(
     method='get',
     operation_summary="Transaction Detail",
@@ -4785,7 +4717,6 @@ def transaction_detail(request, transaction_id):
         'message': 'Transaction details retrieved successfully',
         'data': serializer.data
     })
-
 
 @swagger_auto_schema(
     method='post',
@@ -4872,7 +4803,6 @@ def initiate_refund(request):
             'status': refund.status
         }
     }, status=status.HTTP_201_CREATED)
-
 
 @swagger_auto_schema(
     method='get',
@@ -5042,7 +4972,6 @@ def refunds_list(request):
             'total_pages': (total_count + page_size - 1) // page_size
         }
     })
-
 
 @swagger_auto_schema(
     method='get',
@@ -5236,7 +5165,6 @@ def orders_list(request):
         }
     })
 
-
 @swagger_auto_schema(
     method='get',
     operation_summary="Order Detail",
@@ -5286,7 +5214,6 @@ def order_detail(request, order_id):
         'message': 'Order details retrieved successfully',
         'data': serializer.data
     })
-
 
 @swagger_auto_schema(
     method='post',
@@ -5364,7 +5291,6 @@ def update_order_status(request, order_id):
             'new_status': new_status
         }
     })
-
 
 @swagger_auto_schema(
     method='get',
@@ -5516,7 +5442,6 @@ def financial_reports(request):
         'report_id': report.id
     })
 
-
 # ==================== CUSTOM ORDER MANAGEMENT VIEWS ====================
 
 @swagger_auto_schema(
@@ -5611,19 +5536,15 @@ def custom_orders_list(request):
     
     # Get all custom orders with prefetched order relation for order_id
     orders = CustomOrderRequest.objects.select_related('order').all()
-    logger.info(f'[custom_orders_list] Initial queryset count: {orders.count()}')
-    
+
     # Apply filters
     # Only pass filter-related params to the serializer, not pagination params
     filter_params = {k: v for k, v in request.GET.items() if k not in ['page', 'page_size', 'limit', 'sort_by', 'sort_order']}
     filter_serializer = CustomOrderFilterSerializer(data=filter_params)
-    logger.info(f'[custom_orders_list] Request GET params: {dict(request.GET)}')
-    logger.info(f'[custom_orders_list] Filter params (excluding pagination): {filter_params}')
-    logger.info(f'[custom_orders_list] Filter serializer valid: {filter_serializer.is_valid()}, errors: {filter_serializer.errors if not filter_serializer.is_valid() else None}')
+
     if filter_serializer.is_valid():
         filters = filter_serializer.validated_data
-        logger.info(f'[custom_orders_list] Applied filters: {filters}')
-        
+
         if filters.get('status'):
             orders = orders.filter(status=filters['status'])
         
@@ -5660,7 +5581,7 @@ def custom_orders_list(request):
     # SLA status filtering (post-processing)
     sla_status_filter = request.GET.get('sla_status')
     if sla_status_filter:
-        logger.info(f'[custom_orders_list] Applying SLA status filter: {sla_status_filter}')
+
         # Convert queryset to list before filtering
         orders_list = list(orders)
         filtered_orders = []
@@ -5668,10 +5589,9 @@ def custom_orders_list(request):
             if order.get_sla_status() == sla_status_filter:
                 filtered_orders.append(order)
         orders = filtered_orders
-        logger.info(f'[custom_orders_list] After SLA filter: {len(orders)} orders')
+
     else:
-        logger.info(f'[custom_orders_list] No SLA filter, queryset count: {orders.count() if not isinstance(orders, list) else len(orders)}')
-    
+
     # Sorting
     sort_by = request.GET.get('sort_by', 'created_at')
     sort_order = request.GET.get('sort_order', 'desc')
@@ -5710,8 +5630,7 @@ def custom_orders_list(request):
         'orders_page_type': 'list' if isinstance(orders_page, list) else 'queryset',
         'orders_page_count': len(orders_page) if isinstance(orders_page, list) else (orders_page.count() if hasattr(orders_page, 'count') else 'unknown'),
     }
-    logger.info(f'Custom orders query: {debug_info}')
-    
+
     # Convert queryset to list if needed for serialization
     if not isinstance(orders_page, list):
         orders_page = list(orders_page)
@@ -5720,13 +5639,12 @@ def custom_orders_list(request):
     
     # Additional debug: check if serializer data is empty
     if len(serializer.data) == 0 and total_count > 0:
-        logger.warning(f'Serializer returned empty data but total_count={total_count}. Orders_page length: {len(orders_page)}')
+
     elif len(serializer.data) == 0 and total_count == 0:
-        logger.warning(f'Both serializer data and total_count are 0. Initial queryset was empty or filtered out completely.')
+
         # Debug: check what happened to the queryset
         initial_count = CustomOrderRequest.objects.all().count()
-        logger.warning(f'Debug: Total CustomOrderRequest objects in DB: {initial_count}')
-    
+
     # Log activity
     status_filter = request.GET.get('status', '')
     AdminActivityLog.log_activity(
@@ -5752,8 +5670,7 @@ def custom_orders_list(request):
             'orders_page_count': len(orders_page) if isinstance(orders_page, list) else (orders_page.count() if hasattr(orders_page, 'count') else 'unknown'),
             'serializer_data_count': len(serializer.data),
         }
-        logger.warning(f'[custom_orders_list] Debug info: {debug_info}')
-    
+
     response_data = {
         'message': 'Custom orders retrieved successfully',
         'data': serializer.data,
@@ -5770,7 +5687,6 @@ def custom_orders_list(request):
         response_data['_debug'] = debug_info
     
     return Response(response_data)
-
 
 @swagger_auto_schema(
     method='get',
@@ -5822,7 +5738,6 @@ def custom_order_detail(request, order_id):
         'message': 'Custom order details retrieved successfully',
         'data': serializer.data
     })
-
 
 @swagger_auto_schema(
     method='post',
@@ -5955,7 +5870,6 @@ def custom_order_action(request, order_id):
             'error': f'Action failed: {str(e)}'
         }, status=status.HTTP_400_BAD_REQUEST)
 
-
 @swagger_auto_schema(
     method='post',
     operation_summary="Update Custom Order Status",
@@ -6048,7 +5962,6 @@ def update_custom_order_status(request, order_id):
             'new_status': new_status
         }
     })
-
 
 @swagger_auto_schema(
     method='post',
@@ -6163,7 +6076,6 @@ def custom_order_upload_files(request, order_id):
         return Response({
             'error': f'File upload failed: {str(e)}'
         }, status=status.HTTP_400_BAD_REQUEST)
-
 
 @swagger_auto_schema(
     method='get',
@@ -6319,7 +6231,6 @@ def custom_order_analytics(request):
         }
     })
 
-
 # ==================== SUBSCRIPTION PLANS MANAGEMENT VIEWS ====================
 
 @swagger_auto_schema(
@@ -6456,7 +6367,7 @@ def subscription_plans_list(request):
                     else:
                         plans = plans.filter(subscriptions__isnull=True)
                 except Exception as e:
-                    logger.warning(f'Error filtering by subscriptions: {str(e)}')
+
                     # If subscriptions relationship doesn't exist, skip this filter
         
         if request.GET.get('search'):
@@ -6516,8 +6427,7 @@ def subscription_plans_list(request):
                 }
             )
         except Exception as log_error:
-            logger.error(f'Error logging activity: {str(log_error)}', exc_info=True)
-        
+
         return Response({
             'message': 'Subscription plans retrieved successfully',
             'data': serializer.data,
@@ -6529,11 +6439,10 @@ def subscription_plans_list(request):
             }
         })
     except Exception as e:
-        logger.error(f'Error in subscription_plans_list: {str(e)}', exc_info=True)
+
         return Response({
             'error': f'Failed to retrieve subscription plans: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 @swagger_auto_schema(
     method='get',
@@ -6585,13 +6494,11 @@ def subscription_plan_detail(request, plan_id):
     except Exception as log_error:
         import logging
         logger = logging.getLogger(__name__)
-        logger.error(f'Error logging activity: {str(log_error)}', exc_info=True)
-    
+
     return Response({
         'message': 'Subscription plan details retrieved successfully',
         'data': serializer.data
     })
-
 
 @swagger_auto_schema(
     method='post',
@@ -6655,7 +6562,7 @@ def create_subscription_plan(request):
     # Otherwise, validate normally
     serializer = SubscriptionPlanCreateSerializer(data=request.data)
     if not serializer.is_valid():
-        logger.warning(f'Invalid subscription plan data: {serializer.errors}')
+
         return Response({
             'error': 'Invalid data',
             'details': serializer.errors
@@ -6665,8 +6572,7 @@ def create_subscription_plan(request):
         if existing_inactive_plan:
             # Update and reactivate the existing inactive plan
             # This ensures only one active plan exists with same name and duration
-            logger.info(f'Reactivating and updating inactive plan {existing_inactive_plan.id} instead of creating new one')
-            
+
             # Update all fields from the serializer
             for key, value in serializer.validated_data.items():
                 if key != 'created_by_id':  # Don't update created_by
@@ -6686,16 +6592,15 @@ def create_subscription_plan(request):
             existing_inactive_plan.updated_by = request.user
             existing_inactive_plan.save()
             plan = existing_inactive_plan
-            
-            logger.info(f'Plan {plan.id} reactivated and updated successfully')
+
         else:
             # Create new plan (no existing plan with same name and duration)
             try:
                 plan = serializer.save(created_by=request.user)
-                logger.info(f'New plan {plan.id} created successfully')
+
             except IntegrityError as e:
                 # Handle case where unique constraint is violated (shouldn't happen due to validation, but just in case)
-                logger.error(f'Integrity error creating plan: {str(e)}')
+
                 return Response({
                     'error': 'A plan with this name and duration already exists',
                     'details': {'non_field_errors': ['A plan with this name and duration combination already exists.']}
@@ -6727,8 +6632,7 @@ def create_subscription_plan(request):
                 }
             )
         except Exception as log_error:
-            logger.error(f'Error logging activity: {str(log_error)}', exc_info=True)
-        
+
         # Return appropriate message based on whether plan was created or reactivated
         return Response({
             'message': (
@@ -6750,7 +6654,6 @@ def create_subscription_plan(request):
         return Response({
             'error': f'Plan creation failed: {str(e)}'
         }, status=status.HTTP_400_BAD_REQUEST)
-
 
 @swagger_auto_schema(
     method='put',
@@ -6840,8 +6743,7 @@ def update_subscription_plan(request, plan_id):
         except Exception as log_error:
             import logging
             logger = logging.getLogger(__name__)
-            logger.error(f'Error logging activity: {str(log_error)}', exc_info=True)
-        
+
         return Response({
             'message': 'Subscription plan updated successfully',
             'data': {
@@ -6857,7 +6759,6 @@ def update_subscription_plan(request, plan_id):
         return Response({
             'error': f'Plan update failed: {str(e)}'
         }, status=status.HTTP_400_BAD_REQUEST)
-
 
 @swagger_auto_schema(
     method='post',
@@ -6913,7 +6814,7 @@ def deactivate_subscription_plan(request, plan_id):
     request_data = request.data if request.data else {}
     serializer = SubscriptionPlanDeactivateSerializer(data=request_data)
     if not serializer.is_valid():
-        logger.warning(f'Invalid deletion data: {serializer.errors}, request.data: {request.data}')
+
         return Response({
             'error': 'Invalid data',
             'details': serializer.errors
@@ -6938,8 +6839,7 @@ def deactivate_subscription_plan(request, plan_id):
             # Send notifications to customers with active subscriptions
             active_subscriptions = plan.subscriptions.filter(status='active')
             # notification_service.notify_plan_deletion(plan, active_subscriptions)
-            logger.warning(f'Deleting plan {plan_id} with {active_subscriptions_count} active subscriptions')
-        
+
         # Log activity before deletion
         try:
             AdminActivityLog.log_activity(
@@ -6961,13 +6861,10 @@ def deactivate_subscription_plan(request, plan_id):
                 }
             )
         except Exception as log_error:
-            logger.error(f'Error logging activity: {str(log_error)}', exc_info=True)
-        
+
         # Delete the plan (this will CASCADE delete all related subscriptions)
         plan.delete()
-        
-        logger.info(f'Plan {plan_id} ({plan_name}) deleted successfully')
-        
+
         return Response({
             'message': 'Subscription plan deleted successfully',
             'data': {
@@ -6979,11 +6876,10 @@ def deactivate_subscription_plan(request, plan_id):
         }, status=status.HTTP_200_OK)
         
     except Exception as e:
-        logger.error(f'Error deleting plan: {str(e)}', exc_info=True)
+
         return Response({
             'error': f'Plan deletion failed: {str(e)}'
         }, status=status.HTTP_400_BAD_REQUEST)
-
 
 @swagger_auto_schema(
     method='get',
@@ -7126,8 +7022,7 @@ def subscription_plans_analytics(request):
     except Exception as log_error:
         import logging
         logger = logging.getLogger(__name__)
-        logger.error(f'Error logging activity: {str(log_error)}', exc_info=True)
-    
+
     return Response({
         'message': 'Subscription plans analytics retrieved successfully',
         'data': {
@@ -7143,7 +7038,6 @@ def subscription_plans_analytics(request):
             'group_data': group_data
         }
     })
-
 
 # ==================== BUSINESS CONFIG ENDPOINTS ====================
 
@@ -7188,7 +7082,6 @@ def business_config(request):
             'minimum_required_designs_onboard': BusinessConfig.get_minimum_required_designs_onboard(),
         }
     }, status=status.HTTP_200_OK)
-
 
 @swagger_auto_schema(
     method='get',
@@ -7237,7 +7130,6 @@ def get_landing_page_data(request):
             'error': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-
 @swagger_auto_schema(
     method='get',
     operation_summary='Get System Config',
@@ -7275,7 +7167,6 @@ def get_system_config(request):
         return Response({
             'error': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 @swagger_auto_schema(
     method='put',
@@ -7366,7 +7257,7 @@ def update_system_config(request):
         except Exception as e:
             import logging
             logger = logging.getLogger(__name__)
-            logger.warning(f'Error clearing cache: {e}')
+
             pass
         
         return Response({
@@ -7389,7 +7280,6 @@ def update_system_config(request):
         return Response({
             'error': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 @swagger_auto_schema(
     method='post',
@@ -7446,8 +7336,7 @@ def create_notification(request):
     # Log delivery method for debugging
     import logging
     logger = logging.getLogger(__name__)
-    logger.info(f"📬 Notification creation - Delivery method: {delivery_method}, Send to designers: {send_to_designers}, Send to customers: {send_to_customers}")
-    
+
     if send_type == 'scheduled':
         if not scheduled_at:
             return Response({
@@ -7589,9 +7478,7 @@ def create_notification(request):
                 designers_count=designers_count,
                 customers_count=customers_count
             )
-            
-            logger.info(f"✅ Created {len(notification_ids)} in-app notifications (delivery_method: {delivery_method}, emails_sent: {'yes' if delivery_method in ['email', 'both'] else 'no'})")
-            
+
             return Response({
                 'success': True,
                 'message': f'Notification sent to {len(notification_ids)} recipients',
@@ -7612,12 +7499,11 @@ def create_notification(request):
         except Exception as e:
             import logging
             logger = logging.getLogger(__name__)
-            logger.error(f"Error creating notification: {str(e)}", exc_info=True)
+
             return Response({
                 'success': False,
                 'error': f'Failed to create notification: {str(e)}'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 @swagger_auto_schema(
     method='get',
@@ -7702,12 +7588,11 @@ def list_notification_campaigns(request):
     except Exception as e:
         import logging
         logger = logging.getLogger(__name__)
-        logger.error(f"Error listing notification campaigns: {str(e)}", exc_info=True)
+
         return Response({
             'success': False,
             'error': f'Failed to list notification campaigns: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 # ============================================================================
 # Admin User Management Endpoints (Super Admin Only)
@@ -7805,12 +7690,11 @@ def admin_users_list(request):
     except Exception as e:
         import logging
         logger = logging.getLogger(__name__)
-        logger.error(f"Error listing admin users: {str(e)}", exc_info=True)
+
         return Response({
             'success': False,
             'error': f'Failed to list admin users: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 @swagger_auto_schema(
     method='post',
@@ -7884,12 +7768,11 @@ def admin_user_create(request):
     except Exception as e:
         import logging
         logger = logging.getLogger(__name__)
-        logger.error(f"Error creating admin user: {str(e)}", exc_info=True)
+
         return Response({
             'success': False,
             'error': f'Failed to create admin user: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 @swagger_auto_schema(
     method='get',
@@ -8039,12 +7922,11 @@ def admin_user_detail(request, user_id):
     except Exception as e:
         import logging
         logger = logging.getLogger(__name__)
-        logger.error(f"Error managing admin user: {str(e)}", exc_info=True)
+
         return Response({
             'success': False,
             'error': f'Failed to manage admin user: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 @swagger_auto_schema(
     method='post',
@@ -8124,12 +8006,11 @@ def admin_user_reset_password(request, user_id):
     except Exception as e:
         import logging
         logger = logging.getLogger(__name__)
-        logger.error(f"Error resetting admin password: {str(e)}", exc_info=True)
+
         return Response({
             'success': False,
             'error': f'Failed to reset password: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 @swagger_auto_schema(
     method='post',
@@ -8248,12 +8129,11 @@ def admin_user_create_profile(request):
     except Exception as e:
         import logging
         logger = logging.getLogger(__name__)
-        logger.error(f"Error creating AdminUserProfile: {str(e)}", exc_info=True)
+
         return Response({
             'success': False,
             'error': f'Failed to create AdminUserProfile: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 # Permission Groups Management Views
 
@@ -8308,12 +8188,11 @@ def permission_groups_list(request):
     except Exception as e:
         import logging
         logger = logging.getLogger(__name__)
-        logger.error(f"Error listing permission groups: {str(e)}", exc_info=True)
+
         return Response({
             'success': False,
             'error': f'Failed to list permission groups: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 @swagger_auto_schema(
     method='post',
@@ -8381,12 +8260,11 @@ def permission_group_create(request):
     except Exception as e:
         import logging
         logger = logging.getLogger(__name__)
-        logger.error(f"Error creating permission group: {str(e)}", exc_info=True)
+
         return Response({
             'success': False,
             'error': f'Failed to create permission group: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 @swagger_auto_schema(
     method='get',
@@ -8524,12 +8402,11 @@ def permission_group_detail(request, group_id):
     except Exception as e:
         import logging
         logger = logging.getLogger(__name__)
-        logger.error(f"Error managing permission group: {str(e)}", exc_info=True)
+
         return Response({
             'success': False,
             'error': f'Failed to manage permission group: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 @swagger_auto_schema(
     method='get',
@@ -8600,7 +8477,6 @@ def mock_pdf_reports_list(request):
         'current_page': page,
     })
 
-
 @swagger_auto_schema(
     method='get',
     operation_summary='Download Mock PDF file (admin)',
@@ -8662,5 +8538,5 @@ def mock_pdf_download_file(request, download_id):
         return response
     except Exception as e:
         logger = logging.getLogger(__name__)
-        logger.error(f"Error serving admin PDF download {download_id}: {str(e)}", exc_info=True)
+
         return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

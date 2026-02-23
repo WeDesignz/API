@@ -12,7 +12,6 @@ from .models import (
     AdminNotification, AdminNotificationCampaign, SystemConfig
 )
 
-
 @admin.register(AdminUserProfile)
 class AdminUserProfileAdmin(admin.ModelAdmin):
     list_display = [
@@ -42,7 +41,6 @@ class AdminUserProfileAdmin(admin.ModelAdmin):
     
     def get_queryset(self, request):
         return super().get_queryset(request).select_related('user')
-
 
 @admin.register(AdminActivityLog)
 class AdminActivityLogAdmin(admin.ModelAdmin):
@@ -85,7 +83,6 @@ class AdminActivityLogAdmin(admin.ModelAdmin):
     def has_delete_permission(self, request, obj=None):
         return request.user.is_superuser  # Only superusers can delete logs
 
-
 @admin.register(AdminSession)
 class AdminSessionAdmin(admin.ModelAdmin):
     list_display = [
@@ -121,7 +118,6 @@ class AdminSessionAdmin(admin.ModelAdmin):
     
     def has_add_permission(self, request):
         return False  # Sessions are created programmatically
-
 
 @admin.register(DesignerNotification)
 class DesignerNotificationAdmin(admin.ModelAdmin):
@@ -180,13 +176,12 @@ class DesignerNotificationAdmin(admin.ModelAdmin):
         except Exception as e:
             import logging
             logger = logging.getLogger(__name__)
-            logger.error(f'Error getting designer name in admin: {e}')
+
             return f'Error: {str(e)}'
     designer_name.short_description = 'Designer'
     
     def get_queryset(self, request):
         return super().get_queryset(request)
-
 
 @admin.register(CustomerNotification)
 class CustomerNotificationAdmin(admin.ModelAdmin):
@@ -245,13 +240,12 @@ class CustomerNotificationAdmin(admin.ModelAdmin):
         except Exception as e:
             import logging
             logger = logging.getLogger(__name__)
-            logger.error(f'Error getting customer name in admin: {e}')
+
             return f'Error: {str(e)}'
     customer_name.short_description = 'Customer'
     
     def get_queryset(self, request):
         return super().get_queryset(request)
-
 
 @admin.register(AdminNotification)
 class AdminNotificationAdmin(admin.ModelAdmin):
@@ -309,13 +303,12 @@ class AdminNotificationAdmin(admin.ModelAdmin):
         except Exception as e:
             import logging
             logger = logging.getLogger(__name__)
-            logger.error(f'Error getting admin name in admin: {e}')
+
             return f'Error: {str(e)}'
     admin_name.short_description = 'Admin'
     
     def get_queryset(self, request):
         return super().get_queryset(request)
-
 
 @admin.register(SystemConfig)
 class SystemConfigAdmin(admin.ModelAdmin):
@@ -408,7 +401,6 @@ class SystemConfigAdmin(admin.ModelAdmin):
             return redirect(f'/admin/CoreAdmin/systemconfig/{config.pk}/change/')
         return super().changelist_view(request, extra_context)
 
-
 @admin.register(AdminPermissionGroup)
 class AdminPermissionGroupAdmin(admin.ModelAdmin):
     """
@@ -440,7 +432,6 @@ class AdminPermissionGroupAdmin(admin.ModelAdmin):
         """Display number of permissions in this group"""
         return obj.get_permission_count()
     permission_count.short_description = 'Permission Count'
-
 
 @admin.register(DesignApproval)
 class DesignApprovalAdmin(admin.ModelAdmin):
@@ -485,7 +476,6 @@ class DesignApprovalAdmin(admin.ModelAdmin):
         return '-'
     approved_by_display.short_description = 'Approved By'
 
-
 @admin.register(DesignAnalytics)
 class DesignAnalyticsAdmin(admin.ModelAdmin):
     """
@@ -515,7 +505,6 @@ class DesignAnalyticsAdmin(admin.ModelAdmin):
             'classes': ('collapse',)
         }),
     )
-
 
 @admin.register(CopyrightReport)
 class CopyrightReportAdmin(admin.ModelAdmin):
@@ -573,7 +562,6 @@ class CopyrightReportAdmin(admin.ModelAdmin):
         return '-'
     resolved_by_display.short_description = 'Resolved By'
 
-
 @admin.register(Refund)
 class RefundAdmin(admin.ModelAdmin):
     """
@@ -622,7 +610,6 @@ class RefundAdmin(admin.ModelAdmin):
         return '-'
     processed_by_display.short_description = 'Processed By'
 
-
 @admin.register(RefundLog)
 class RefundLogAdmin(admin.ModelAdmin):
     """
@@ -661,7 +648,6 @@ class RefundLogAdmin(admin.ModelAdmin):
                 return f'User ID {obj.admin_user_id} (Not Found)'
         return '-'
     admin_user_display.short_description = 'Admin User'
-
 
 @admin.register(FinancialReport)
 class FinancialReportAdmin(admin.ModelAdmin):
@@ -705,7 +691,6 @@ class FinancialReportAdmin(admin.ModelAdmin):
         }),
     )
 
-
 # DesignerOnboardingStatus model is deprecated - using DesignerProfile.status instead
 # @admin.register(DesignerOnboardingStatus)
 # class DesignerOnboardingStatusAdmin(admin.ModelAdmin):
@@ -714,7 +699,6 @@ class FinancialReportAdmin(admin.ModelAdmin):
 #     DEPRECATED: This model is no longer used. Use DesignerProfile.status instead.
 #     """
 #     pass
-
 
 @admin.register(DesignerAccountSuspension)
 class DesignerAccountSuspensionAdmin(admin.ModelAdmin):
@@ -762,7 +746,6 @@ class DesignerAccountSuspensionAdmin(admin.ModelAdmin):
                 return f'User ID {obj.suspended_by_id} (Not Found)'
         return '-'
     suspended_by_display.short_description = 'Suspended By'
-
 
 @admin.register(CustomerAccountStatus)
 class CustomerAccountStatusAdmin(admin.ModelAdmin):
@@ -812,7 +795,6 @@ class CustomerAccountStatusAdmin(admin.ModelAdmin):
         return '-'
     deactivated_by_display.short_description = 'Deactivated By'
 
-
 @admin.register(CustomerViewHistory)
 class CustomerViewHistoryAdmin(admin.ModelAdmin):
     """
@@ -840,7 +822,6 @@ class CustomerViewHistoryAdmin(admin.ModelAdmin):
         }),
     )
 
-
 @admin.register(CustomerDownloadHistory)
 class CustomerDownloadHistoryAdmin(admin.ModelAdmin):
     """
@@ -867,7 +848,6 @@ class CustomerDownloadHistoryAdmin(admin.ModelAdmin):
             'classes': ('collapse',)
         }),
     )
-
 
 @admin.register(AdminNotificationCampaign)
 class AdminNotificationCampaignAdmin(admin.ModelAdmin):

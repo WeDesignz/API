@@ -26,7 +26,6 @@ logger = logging.getLogger(__name__)
 # Only index PNG design images (per media storage: designs use .png)
 IMAGE_EXTENSIONS = ('.png',)
 
-
 def _set_huggingface_timeout(timeout_seconds=300):
     """Set longer HTTP timeout for Hugging Face Hub to avoid ReadTimeout when loading models."""
     try:
@@ -36,8 +35,6 @@ def _set_huggingface_timeout(timeout_seconds=300):
             return httpx.Client(timeout=httpx.Timeout(float(timeout_seconds)))
         set_client_factory(make_client)
     except Exception as e:
-        logger.warning("Could not set Hugging Face client timeout: %s", e)
-
 
 def get_visual_search():
     """Import visual_search from API project root."""
@@ -46,7 +43,6 @@ def get_visual_search():
         sys.path.insert(0, api_root)
     from visual_search import train_images
     return train_images
-
 
 class Command(BaseCommand):
     help = 'Index product images into Qdrant for visual search (batch-wise)'

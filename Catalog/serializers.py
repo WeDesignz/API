@@ -47,12 +47,6 @@ class CategorySerializer(serializers.ModelSerializer):
                 return result if result is not None else []
             return []
         except Exception as e:
-            # Log error but return empty array
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.error(f"Error getting subcategories for category {obj.id if obj else 'unknown'}: {str(e)}")
-            import traceback
-            logger.error(traceback.format_exc())
             return []
     
     def get_products_count(self, obj):
@@ -443,9 +437,6 @@ class ProductSerializer(serializers.ModelSerializer):
                         'created_at': m.created_at.isoformat() if hasattr(m, 'created_at') and m.created_at else None
                     })
                 except Exception as e:
-                    import logging
-                    logger = logging.getLogger(__name__)
-                    logger.warning(f'Error accessing media file {getattr(m, "id", "unknown")}: {e}')
                     continue
             
             # Sort media: AVIF mockup first, then AVIF JPG/PNG, then mockup, then jpg/png, then others
@@ -1167,9 +1158,6 @@ class DesignListSerializer(serializers.ModelSerializer):
                 return len(media)
             return 0
         except Exception as e:
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.error(f'Error getting media count for product {getattr(obj, "id", "unknown")}: {e}')
             return 0
     
     def get_media_files(self, obj):
@@ -1282,10 +1270,6 @@ class DesignListSerializer(serializers.ModelSerializer):
                         'created_at': m.created_at.isoformat() if hasattr(m, 'created_at') and m.created_at else None
                     })
                 except Exception as e:
-                    # Skip this media file if there's an error accessing it
-                    import logging
-                    logger = logging.getLogger(__name__)
-                    logger.warning(f'Error accessing media file {getattr(m, "id", "unknown")}: {e}')
                     continue
             
             # Sort media: AVIF mockup first, then AVIF JPG/PNG, then mockup, then jpg/png, then others
@@ -1299,9 +1283,6 @@ class DesignListSerializer(serializers.ModelSerializer):
             
             return result
         except Exception as e:
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.error(f'Error getting media files for product {obj.id}: {e}', exc_info=True)
             return []
     
     def get_total_views(self, obj):
@@ -1867,12 +1848,6 @@ class CategorySerializer(serializers.ModelSerializer):
                 return result if result is not None else []
             return []
         except Exception as e:
-            # Log error but return empty array
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.error(f"Error getting subcategories for category {obj.id if obj else 'unknown'}: {str(e)}")
-            import traceback
-            logger.error(traceback.format_exc())
             return []
     
     def get_subcategories_count(self, obj):
