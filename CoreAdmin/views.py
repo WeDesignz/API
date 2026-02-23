@@ -7251,6 +7251,10 @@ def get_system_config(request):
     try:
         from CoreAdmin.models import SystemConfig
         config = SystemConfig.get_config()
+        from common.business_config import BusinessConfig
+        paid_pdf_opts = getattr(config, 'paid_pdf_designs_options', None)
+        if not paid_pdf_opts:
+            paid_pdf_opts = BusinessConfig.get_paid_pdf_designs_options()
         return Response({
             'commission_rate': config.commission_rate,
             'gst_percentage': config.gst_percentage,
@@ -7259,6 +7263,7 @@ def get_system_config(request):
             'custom_order_time_slot_hours': config.custom_order_time_slot_hours,
             'minimum_required_designs': config.minimum_required_designs,
             'free_mock_pdf_downloads_no_plan_per_month': getattr(config, 'free_mock_pdf_downloads_no_plan_per_month', 999),
+            'paid_pdf_designs_options': paid_pdf_opts if paid_pdf_opts else [],
             'maintenance_mode': config.maintenance_mode,
             'hero_section_designs': config.hero_section_designs or [],
             'featured_designs': config.featured_designs or [],
@@ -7305,6 +7310,14 @@ def update_system_config(request):
             config.minimum_required_designs = int(request.data['minimum_required_designs'])
         if 'free_mock_pdf_downloads_no_plan_per_month' in request.data:
             config.free_mock_pdf_downloads_no_plan_per_month = int(request.data['free_mock_pdf_downloads_no_plan_per_month'])
+        if 'paid_pdf_designs_options' in request.data:
+            opts = request.data['paid_pdf_designs_options']
+            if isinstance(opts, list):
+                # Only allow 20, 50, 100 - filter out values > 100
+                filtered = [int(x) for x in opts if str(x).strip() and int(x) <= 100]
+                config.paid_pdf_designs_options = filtered if filtered else [20, 50, 100]
+            else:
+                config.paid_pdf_designs_options = []
         if 'maintenance_mode' in request.data:
             config.maintenance_mode = bool(request.data['maintenance_mode'])
         if 'hero_section_designs' in request.data:

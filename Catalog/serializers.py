@@ -921,7 +921,7 @@ class PDFDownloadRequestSerializer(serializers.Serializer):
     Serializer for PDF download request with search filters.
     """
     download_type = serializers.ChoiceField(choices=PDFDownload.DOWNLOAD_TYPE_CHOICES)
-    total_pages = serializers.IntegerField(min_value=1, max_value=500)
+    total_pages = serializers.IntegerField(min_value=1, max_value=100)
     selection_type = serializers.ChoiceField(choices=PDFDownload.SELECTION_TYPE_CHOICES, default='search_results')
     selected_products = serializers.ListField(
         child=serializers.IntegerField(),
@@ -929,6 +929,11 @@ class PDFDownloadRequestSerializer(serializers.Serializer):
         allow_empty=True
     )
     search_filters = serializers.DictField(required=False, default=dict)
+    exclude_designs_from_previous_pdfs = serializers.BooleanField(
+        required=False,
+        default=False,
+        help_text="When True, exclude designs from user's previous PDFs (only new designs)"
+    )
     use_subscription_mock_pdf = serializers.BooleanField(
         required=False,
         default=False,
@@ -1005,8 +1010,15 @@ class PDFDownloadRequestSerializer(serializers.Serializer):
             if existing_products != len(selected_products):
                 raise serializers.ValidationError("One or more selected products are not available.")
             
-            # For specific selection, total_pages should match number of selected products
-            if total_pages != len(selected_products):
+            # For specific selection: total_pages must match, or when exclude_previous allow >= total_pages (candidates)
+            exclude_previous = attrs.get('exclude_designs_from_previous_pdfs') or self.initial_data.get('exclude_designs_from_previous_pdfs', False)
+            if exclude_previous:
+                if len(selected_products) < total_pages:
+                    raise serializers.ValidationError(
+                        f"When excluding previous designs, provide at least {total_pages} candidate designs "
+                        "(more if some may be filtered out)."
+                    )
+            elif total_pages != len(selected_products):
                 raise serializers.ValidationError("Total pages must match the number of selected products.")
         
         # For search results, validate search filters are provided (empty dict is allowed - means "all products")

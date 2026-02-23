@@ -1923,6 +1923,11 @@ class SystemConfig(models.Model):
         default=999,
         help_text="Free mock PDF downloads per month for users without a plan (use high value e.g. 999 for unlimited)"
     )
+    paid_pdf_designs_options = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="PDF download design count options (e.g. [20, 50, 100]). First value is used for free PDFs. Managed via .env PAID_PDF_DESIGNS_OPTIONS or Admin panel."
+    )
     maintenance_mode = models.BooleanField(default=False)
     
     # Landing page settings - Different sections need different designs
