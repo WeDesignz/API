@@ -2466,7 +2466,7 @@ def instagram_posts_list(request):
 # ==================== Pinterest Posts (admin list, retry, bulk) ====================
 
 def _get_product_thumbnail_url(request, product):
-    """Get first image URL for a product for display in Pinterest posts list."""
+    """Get first image URL for a product for display in Pinterest posts list. Always returns absolute URL."""
     try:
         media_list = product.get_media()
         if hasattr(media_list, 'filter'):
@@ -2479,9 +2479,18 @@ def _get_product_thumbnail_url(request, product):
         if not getattr(m, 'file', None):
             return None
         url = m.file.url
-        if request and url and url.startswith('/'):
-            url = request.build_absolute_uri(url)
-        return url
+        if not url:
+            return None
+        if url.startswith('http://') or url.startswith('https://'):
+            return url
+        base = None
+        if request:
+            base = request.build_absolute_uri('/').rstrip('/')
+        if not base:
+            base = getattr(settings, 'SITE_DOMAIN', None) or ''
+            if base and not base.startswith('http'):
+                base = f'https://{base}' if base else 'https://wedesignz.com'
+        return f'{base}{url}' if base else url
     except Exception:
         return None
 
@@ -2535,6 +2544,20 @@ def pinterest_posts_list(request):
     return JsonResponse({
         'data': {'data': posts_data, 'pagination': pagination},
     })
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def pinterest_posts_stats(request):
+    """Return counts of Pinterest posts per status for filter badges and bulk_post_eligible count."""
+    from django.db.models import Count
+    stats = PinterestPost.objects.values('status').annotate(count=Count('id'))
+    counts = {'all': 0, 'success': 0, 'failed': 0, 'pending': 0, 'retrying': 0}
+    for row in stats:
+        counts[row['status']] = row['count']
+        counts['all'] += row['count']
+    counts['bulk_post_eligible'] = counts['pending'] + counts['failed'] + counts['retrying']
+    return JsonResponse(counts)
 
 
 @api_view(['POST'])
