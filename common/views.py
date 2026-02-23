@@ -2490,8 +2490,7 @@ def _get_product_thumbnail_url(request, product):
 @permission_classes([AllowAny])
 def pinterest_posts_list(request):
     """
-    List Pinterest posts with optional filter: status = success | failed | not_posted.
-    not_posted = pending, retrying, or failed (designs not present on Pinterest).
+    List Pinterest posts with optional filter: status = all | success | failed | pending | retrying.
     """
     from django.core.paginator import Paginator
 
@@ -2501,9 +2500,7 @@ def pinterest_posts_list(request):
 
     qs = PinterestPost.objects.select_related('product').order_by('-created_at')
 
-    if status_filter == 'not_posted':
-        qs = qs.filter(status__in=['pending', 'retrying', 'failed'])
-    elif status_filter and status_filter != 'all':
+    if status_filter and status_filter != 'all' and status_filter in ('success', 'failed', 'pending', 'retrying'):
         qs = qs.filter(status=status_filter)
 
     paginator = Paginator(qs, limit)
@@ -2527,16 +2524,16 @@ def pinterest_posts_list(request):
             'last_retry_at': post.last_retry_at.isoformat() if post.last_retry_at else None,
         })
 
+    pagination = {
+        'page': page,
+        'limit': limit,
+        'total': paginator.count,
+        'total_pages': paginator.num_pages,
+        'has_next': page_obj.has_next(),
+        'has_previous': page_obj.has_previous(),
+    }
     return JsonResponse({
-        'data': posts_data,
-        'pagination': {
-            'page': page,
-            'limit': limit,
-            'total': paginator.count,
-            'total_pages': paginator.num_pages,
-            'has_next': page_obj.has_next(),
-            'has_previous': page_obj.has_previous(),
-        },
+        'data': {'data': posts_data, 'pagination': pagination},
     })
 
 
