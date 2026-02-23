@@ -1199,6 +1199,7 @@ def capture_pdf_payment(request):
                     pdf_download.save()
                     pdf_downloads = [pdf_download]
                 except PDFDownload.DoesNotExist:
+                    pass
 
         for pdf_download in pdf_downloads:
             try:

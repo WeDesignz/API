@@ -27,9 +27,9 @@ def check_avif_support():
             import pillow_avif
             pillow_avif.register_avif_opener()
         except ImportError:
-            # Plugin not installed
-
+            pass
         except Exception as e:
+            pass
 
         # Try to save a test image to see if AVIF works
         # This is the most reliable way to check
@@ -56,6 +56,7 @@ def is_avif_supported():
     if _avif_supported is None:
         _avif_supported = check_avif_support()
         if not _avif_supported:
+            pass
 
     return _avif_supported
 
@@ -144,8 +145,9 @@ def convert_to_avif(input_path, output_dir, base_name, is_mockup=False):
                 avif_size = len(avif_content) / 1024  # Size in KB
                 
                 if is_mockup:
-
+                    pass
                 else:
+                    pass
 
                 return saved_path
                 
@@ -312,7 +314,7 @@ def create_avif_from_media_file(media_file_path, product_number, is_mockup=False
                     creator = created_by or (product.created_by if hasattr(product, 'created_by') else None)
                     
                     if not creator:
-
+                        pass
                     else:
                         # The AVIF file is already saved at avif_path (in the product's design folder: {user_id}/designs/{product_id}/)
                         # We need to create a Media object that references this existing file without Django trying to save it again
@@ -360,13 +362,14 @@ def create_avif_from_media_file(media_file_path, product_number, is_mockup=False
                             if dummy_file_path and default_storage.exists(dummy_file_path):
                                 try:
                                     default_storage.delete(dummy_file_path)
-
                                 except Exception as e:
+                                    pass
 
                             # Verify the AVIF file exists at the correct location
                             if not default_storage.exists(avif_path):
-
+                                pass
                             else:
+                                pass
 
                             # Validate AVIF file location - ensure it's in the correct product design folder
                             expected_path_prefix = f'{creator.id}/designs/{product.id}/'
@@ -392,9 +395,8 @@ def create_avif_from_media_file(media_file_path, product_number, is_mockup=False
                         finally:
                             Media.clear_product_context()
                 except Exception as e:
+                    pass
 
-                    # Don't fail the whole operation if linking fails
-            
             return avif_path, media_obj
         finally:
             # Clean up temp file

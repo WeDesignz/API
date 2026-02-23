@@ -2268,6 +2268,7 @@ def verify_designer_onboarding(request, designer_id):
             
             # Log the action
             if updated_count > 0:
+                pass
 
         message = f"Designer rejected: {rejection_reason}"
     else:
@@ -3558,8 +3559,9 @@ def design_action(request, design_id):
                 try:
                     approval = DesignApproval.objects.filter(product_id=design.pk).first()
                     if approval:
-
+                        pass
                 except Exception as e:
+                    pass
 
                 # Create new approval if not found
                 if not approval:
@@ -3574,8 +3576,7 @@ def design_action(request, design_id):
                         try:
                             attach_relation('Product:DesignApproval', design, approval, created_by=request.user)
                         except Exception as rel_error:
-
-                            # Continue anyway - the approval record exists
+                            pass
                     except Exception as e:
 
                         raise
@@ -3587,9 +3588,8 @@ def design_action(request, design_id):
                         success = approval.approve_design(request.user, admin_notes, request)
                         message = "Design approved successfully"
                         if success:
-
+                            pass
                         else:
-
                             error_detail = "Failed to approve design - check logs for details"
                     except Exception as e:
 
@@ -3600,9 +3600,8 @@ def design_action(request, design_id):
                     success = approval.reject_design(request.user, rejection_reason, admin_notes, request)
                     message = "Design rejected successfully"
                     if success:
-
+                        pass
                     else:
-
                         error_detail = "Failed to reject design - check logs for details"
                         
                 elif action == 'disable':
@@ -3610,9 +3609,8 @@ def design_action(request, design_id):
                     success = approval.disable_design(request.user, admin_notes, request)
                     message = "Design disabled successfully"
                     if success:
-
+                        pass
                     else:
-
                         error_detail = "Failed to disable design - check logs for details"
                 else:
 
@@ -5591,6 +5589,7 @@ def custom_orders_list(request):
         orders = filtered_orders
 
     else:
+        pass
 
     # Sorting
     sort_by = request.GET.get('sort_by', 'created_at')
@@ -5639,7 +5638,7 @@ def custom_orders_list(request):
     
     # Additional debug: check if serializer data is empty
     if len(serializer.data) == 0 and total_count > 0:
-
+        pass
     elif len(serializer.data) == 0 and total_count == 0:
 
         # Debug: check what happened to the queryset
@@ -6367,9 +6366,8 @@ def subscription_plans_list(request):
                     else:
                         plans = plans.filter(subscriptions__isnull=True)
                 except Exception as e:
+                    pass
 
-                    # If subscriptions relationship doesn't exist, skip this filter
-        
         if request.GET.get('search'):
             search_term = request.GET.get('search')
             plans = plans.filter(
@@ -6427,6 +6425,7 @@ def subscription_plans_list(request):
                 }
             )
         except Exception as log_error:
+            pass
 
         return Response({
             'message': 'Subscription plans retrieved successfully',
@@ -6632,6 +6631,7 @@ def create_subscription_plan(request):
                 }
             )
         except Exception as log_error:
+            pass
 
         # Return appropriate message based on whether plan was created or reactivated
         return Response({
@@ -6861,6 +6861,7 @@ def deactivate_subscription_plan(request, plan_id):
                 }
             )
         except Exception as log_error:
+            pass
 
         # Delete the plan (this will CASCADE delete all related subscriptions)
         plan.delete()

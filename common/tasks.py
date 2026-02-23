@@ -267,6 +267,7 @@ def send_auto_mandate_notifications(self):
                 notified_count += 1
                 
             except Exception as e:
+                pass
 
         return f"Sent auto-mandate notifications to {notified_count} users"
         
@@ -430,11 +431,11 @@ def check_custom_order_sla(self, order_id):
                     fail_silently=True,
                 )
             except Exception as e:
+                pass
 
         return f"Order {order_id} marked as delayed"
         
     except CustomOrderRequest.DoesNotExist:
-
         return f"Order {order_id} not found"
     except Exception as e:
 
@@ -465,6 +466,7 @@ def send_subscription_expiry_reminders(self):
                 reminded_count += 1
                 
             except Exception as e:
+                pass
 
         return f"Sent expiry reminders to {reminded_count} users"
         
@@ -559,6 +561,7 @@ def send_settlement_reminders(self):
                 reminded_count += 1
                 
             except Exception as e:
+                pass
 
         return f"Sent settlement reminders to {reminded_count} designers"
         
@@ -821,6 +824,7 @@ def process_settlement_payouts(self):
                         )
 
                     except Exception as unmark_error:
+                        pass
 
                 settlement_request.status = 'failed'
                 settlement_request.failure_reason = f'Processing error: {str(e)}'
@@ -860,6 +864,7 @@ def send_design_approval_reminders(self):
                 reminded_count += 1
                 
             except Exception as e:
+                pass
 
         return f"Sent design approval reminders for {reminded_count} designs"
         
@@ -896,6 +901,7 @@ def send_designer_performance_reports(self):
                 reported_count += 1
                 
             except Exception as e:
+                pass
 
         return f"Sent performance reports to {reported_count} designers"
         
@@ -1025,13 +1031,11 @@ def expire_processing_settlements(self):
                     )
                     
                     if unmarked_count > 0:
-
-                    # Mark settlement as expired
-                    settlement.status = 'expired'
-                    settlement.failure_reason = 'Settlement expired - not completed within 7 days of processing'
-                    settlement.save()
-                    
-                    expired_count += 1
+                        # Mark settlement as expired
+                        settlement.status = 'expired'
+                        settlement.failure_reason = 'Settlement expired - not completed within 7 days of processing'
+                        settlement.save()
+                        expired_count += 1
 
             except Exception as e:
 
@@ -1070,6 +1074,7 @@ def send_order_confirmation_email_async(self, order_id):
                 products = Product.objects.filter(id__in=product_ids)
                 order_items = [{'product': product} for product in products]
             except (ValueError, TypeError) as e:
+                pass
 
         # Send email
         EmailService.send_order_confirmation_email(order.created_by, order, order_items)
@@ -1077,7 +1082,6 @@ def send_order_confirmation_email_async(self, order_id):
         return f"Order confirmation email sent for order {order_id}"
         
     except Order.DoesNotExist:
-
         return f"Order {order_id} not found"
     except Exception as e:
 
@@ -1097,6 +1101,7 @@ def send_customer_invoice_email_async(self, invoice_id, order_id):
                 product_ids = [int(pid.strip()) for pid in order.product_ids.split(',') if pid.strip()]
                 products = Product.objects.filter(id__in=product_ids)
             except (ValueError, TypeError) as e:
+                pass
 
         # Send email
         EmailService.send_customer_invoice_email(invoice, order, products)
@@ -1104,10 +1109,8 @@ def send_customer_invoice_email_async(self, invoice_id, order_id):
         return f"Customer invoice email sent for invoice {invoice_id}"
         
     except Invoice.DoesNotExist:
-
         return f"Invoice {invoice_id} not found"
     except Order.DoesNotExist:
-
         return f"Order {order_id} not found"
     except Exception as e:
 
@@ -1131,7 +1134,6 @@ def send_settlement_receipt_email_async(self, settlement_id):
         return f"Settlement receipt email sent for settlement {settlement_id}"
         
     except SettlementRequest.DoesNotExist:
-
         return f"Settlement {settlement_id} not found"
     except Exception as e:
 
@@ -1179,6 +1181,7 @@ def process_subscription_billing(self):
                     processed_count += 1
 
                 except Exception as e:
+                    pass
 
         # ========== ANNUAL SUBSCRIPTIONS ==========
         # Process annual subscriptions monthly based on purchase date + 30 days
@@ -1246,6 +1249,7 @@ def process_subscription_billing(self):
                             processed_count += 1
 
                     except Exception as e:
+                        pass
 
         # Check if annual subscriptions have fully expired (365 days passed)
         annual_expired = Subscription.objects.filter(
@@ -1277,7 +1281,6 @@ def send_design_rejection_email_async(self, product_id, rejection_reason=None):
         try:
             product = Product.objects.select_related('created_by', 'category').get(id=product_id)
         except Product.DoesNotExist:
-
             return f"Product {product_id} not found"
         
         # Get the designer (user who created the design)
@@ -1321,8 +1324,9 @@ def send_design_sale_notification_async(self, order_id):
                 products = Product.objects.select_related('created_by').filter(id__in=product_ids)
                 for product in products:
                     if product.created_by and product.created_by != order.created_by:
-                        designers_to_notify.add(product.created_by)
+                            designers_to_notify.add(product.created_by)
             except (ValueError, TypeError) as e:
+                pass
 
         # Send notification to each designer
         notified_count = 0
@@ -1338,11 +1342,11 @@ def send_design_sale_notification_async(self, order_id):
                 )
                 notified_count += 1
             except Exception as e:
+                pass
 
         return f"Design sale notifications sent for order {order_id} to {notified_count} designers"
         
     except Order.DoesNotExist:
-
         return f"Order {order_id} not found"
     except Exception as e:
 
@@ -1377,7 +1381,6 @@ def delete_cart_items_async(self, order_id, user_id):
             return f"No valid product_ids for order {order_id}"
         
     except Order.DoesNotExist:
-
         return f"Order {order_id} not found"
     except Exception as e:
 
@@ -1477,6 +1480,7 @@ def send_scheduled_notification(self, campaign_id, title, message, priority, sen
                     customers_count=customers_count
                 )
             except AdminNotificationCampaign.DoesNotExist:
+                pass
 
         # Log the result with delivery method details
         emails_will_be_sent = delivery_method in ['email', 'both']
@@ -1555,9 +1559,7 @@ def post_to_instagram(self, instagram_post_id):
         # Get the InstagramPost record
         try:
             instagram_post = InstagramPost.objects.get(id=instagram_post_id)
-
         except InstagramPost.DoesNotExist:
-
             return
         
         # Check if already successfully processed
@@ -1568,11 +1570,9 @@ def post_to_instagram(self, instagram_post_id):
         # Mark as processing immediately
         try:
             instagram_post.mark_processing()
-
         except Exception as e:
+            pass
 
-            # Continue anyway - don't fail the task just because status update failed
-        
         # Check if Instagram is enabled
         integration = InstagramIntegration.get_instance()
         if not integration.is_enabled:
@@ -1594,7 +1594,6 @@ def post_to_instagram(self, instagram_post_id):
         try:
             product = instagram_post.product
         except Product.DoesNotExist:
-
             instagram_post.mark_failed("Product not found")
             return
 
@@ -1818,14 +1817,12 @@ def post_design_to_pinterest(self, pinterest_post_id, base_url=None):
         try:
             pinterest_post = PinterestPost.objects.get(id=pinterest_post_id)
         except PinterestPost.DoesNotExist:
-
             return
         
         # Get the product
         try:
             product = pinterest_post.product
         except Product.DoesNotExist:
-
             pinterest_post.mark_failed("Product not found")
             return
         
@@ -1935,8 +1932,8 @@ def post_design_to_pinterest(self, pinterest_post_id, base_url=None):
                     
                     if jpeg_url:
                         mockup_url = jpeg_url
-
                     else:
+                        pass
 
                 mockup_title = f"{base_title} - Mockup"
                 
@@ -1993,8 +1990,8 @@ def post_design_to_pinterest(self, pinterest_post_id, base_url=None):
                     
                     if jpeg_url:
                         design_url = jpeg_url
-
                     else:
+                        pass
 
                 design_title = f"{base_title} - Design"
                 
@@ -2043,6 +2040,7 @@ def post_design_to_pinterest(self, pinterest_post_id, base_url=None):
 
             # If there were partial failures, log them but don't fail the task
             if errors:
+                pass
 
         else:
             # All pins failed - build comprehensive error message
@@ -2095,17 +2093,19 @@ def post_design_to_pinterest(self, pinterest_post_id, base_url=None):
                 # Add integration status
                 error_message = f"{error_message} | Integration enabled: {integration.is_enabled}, Board ID: {integration.board_id}"
             except Exception as integration_error:
+                pass
 
             pinterest_post.mark_failed(error_message)
 
         except Exception as update_error:
+            pass
 
         # Check if we should retry
         retry_count = self.request.retries
         max_retries = self.max_retries
         
         if retry_count >= max_retries:
-
+            raise
         else:
             # Exponential backoff: 60s, 120s, 240s
             countdown = 60 * (2 ** retry_count)
@@ -2152,6 +2152,7 @@ def retry_failed_pinterest_posts():
                 post_design_to_pinterest.delay(post.id, base_url)
                 retried_count += 1
             except Exception as e:
+                pass
 
         return f"Retried {retried_count} failed Pinterest posts"
         

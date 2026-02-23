@@ -558,6 +558,7 @@ def pinterest_oauth_callback(request):
                 retry_failed_pinterest_posts.delay()
 
         except Exception as e:
+            pass
 
         # Try to get boards and auto-select or create one
         boards_info = ""
@@ -1771,6 +1772,7 @@ def instagram_oauth_callback(request):
         # Add detailed logging to debug what's being returned
 
         if pages_data.get('data'):
+            pass
 
         instagram_account_id = None
         instagram_username = None
@@ -1803,12 +1805,15 @@ def instagram_oauth_callback(request):
                             page_token_data = page_token_response.json()
                             page_access_token = page_token_data.get('access_token')
                             if page_access_token:
-
+                                pass
                             else:
+                                pass
 
                         else:
+                            pass
 
                     except Exception as e:
+                        pass
 
                     if not page_access_token:
 
@@ -1831,6 +1836,7 @@ def instagram_oauth_callback(request):
                         instagram_username = None
 
                     else:
+                        pass
 
                     break
         
@@ -1846,6 +1852,7 @@ def instagram_oauth_callback(request):
             )
 
             if pages_data.get('data'):
+                pass
 
             raise ValueError(error_msg)
         
@@ -1873,9 +1880,8 @@ def instagram_oauth_callback(request):
                 raise ValueError(f"Invalid Instagram Business Account ID: {error_msg}")
 
         except requests.exceptions.RequestException as e:
+            pass
 
-            # Continue anyway, but log the warning
-        
         # Save to database
         integration = InstagramIntegration.get_instance()
         # Store the PAGE ACCESS TOKEN, not the user's long-lived token
@@ -2392,6 +2398,7 @@ def instagram_post(request):
                 instagram_post.error_message = error_msg
                 instagram_post.save(update_fields=['status', 'error_message'])
             except Exception as save_error:
+                pass
 
             return JsonResponse({
                 'error': error_msg

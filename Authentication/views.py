@@ -2122,8 +2122,9 @@ def customer_notifications(request):
             # Verify each notification belongs to the current user
             for notif_detail in notification_details:
                 if notif_detail['customer_id'] != request.user.id:
-
+                    pass
                 else:
+                    pass
 
         # Apply status filter
         if status_filter == 'unread':
@@ -2153,6 +2154,7 @@ def customer_notifications(request):
 
             # Check if customer_id matches logged-in user
             if first_notif.get('customer_id') != request.user.id:
+                pass
 
             # Log all notifications customer IDs
             all_customer_ids = [n.get('customer_id') for n in serializer.data]
