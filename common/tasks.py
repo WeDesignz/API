@@ -1839,7 +1839,7 @@ def post_to_instagram(self, instagram_post_id):
 
 # ==================== PINTEREST TASKS ====================
 
-@shared_task(bind=True, max_retries=3)
+@shared_task(bind=True, max_retries=3, rate_limit='2/m')
 def post_design_to_pinterest(self, pinterest_post_id, base_url=None):
     """
     Post a design to Pinterest after approval.
@@ -2027,6 +2027,11 @@ def post_design_to_pinterest(self, pinterest_post_id, base_url=None):
                 error_msg = f"Exception posting mockup pin: {str(e)}"
                 errors.append(error_msg)
 
+        # Delay between pins to reduce Pinterest rate-limit (429) risk.
+        import time
+        if mockup_avif or design_jpg_avif:
+            time.sleep(5)
+
         # Post design_JPG.avif (convert to JPEG for Pinterest compatibility)
         if design_jpg_avif:
             try:
@@ -2115,10 +2120,18 @@ def post_design_to_pinterest(self, pinterest_post_id, base_url=None):
             error_msg_parts.append(f"Media domain: {media_domain}")
             
             full_error_msg = " | ".join(error_msg_parts)
-            
+
+            # If all failures are 429 (rate limit), retry with longer backoff instead of marking failed
+            all_rate_limited = bool(errors) and all("429" in str(e) for e in errors)
+            retry_count = self.request.retries
+            if all_rate_limited and retry_count < self.max_retries:
+                # Pinterest block: wait 5–15 minutes before retry to avoid prolonged blocks
+                countdown = 300 * (retry_count + 1)  # 300s, 600s, 900s
+                raise self.retry(exc=Exception(full_error_msg), countdown=countdown)
+
             pinterest_post.mark_failed(full_error_msg)
 
-            # Retry the task with detailed error
+            # Retry the task with detailed error (non-429 or out of retries)
             raise Exception(f"Pinterest API call failed: {full_error_msg}")
             
     except Exception as e:
