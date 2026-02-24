@@ -2627,8 +2627,11 @@ def pinterest_posts_bulk_post(request):
     if not base_url.startswith('http'):
         base_url = f'https://{base_url}' if base_url else 'https://wedesignz.com'
 
+    # Stagger delay in seconds between each queued task to avoid Pinterest rate limits (429).
+    PINTEREST_BULK_POST_DELAY_SECONDS = 30
+
     approved = Product.objects.filter(status='active', visibility_status='show')
-    queued = 0
+    to_queue = []  # (pinterest_post_id, countdown_seconds)
     for product in approved:
         media_files = product.get_media().filter(media_type='image') if hasattr(product.get_media(), 'filter') else []
         if not (hasattr(media_files, 'exists') and media_files.exists()) and not (isinstance(media_files, (list, tuple)) and media_files):
@@ -2640,10 +2643,22 @@ def pinterest_posts_bulk_post(request):
             )
             if pinterest_post.status == 'success':
                 continue
-            post_design_to_pinterest.delay(pinterest_post.id, base_url)
-            queued += 1
+            to_queue.append((pinterest_post.id, base_url))
         except Exception as e:
             logger.warning('Failed to queue Pinterest post for product %s: %s', product.id, e)
+
+    queued = 0
+    for idx, (post_id, base_url) in enumerate(to_queue):
+        try:
+            countdown = idx * PINTEREST_BULK_POST_DELAY_SECONDS
+            post_design_to_pinterest.apply_async(
+                args=[post_id],
+                kwargs={'base_url': base_url},
+                countdown=countdown,
+            )
+            queued += 1
+        except Exception as e:
+            logger.warning('Failed to queue Pinterest post id %s: %s', post_id, e)
 
     return JsonResponse({'success': True, 'queued': queued})
 
