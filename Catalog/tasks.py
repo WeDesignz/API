@@ -4,6 +4,7 @@ from django.utils import timezone
 from django.core.files.storage import default_storage
 from common.relations import attach_relation
 from common.avif_converter import create_avif_from_media_file
+import json
 import logging
 import os
 import tempfile
@@ -47,7 +48,10 @@ def process_single_design_upload(
                 return {'status': 'failed', 'error': 'Product has no product_number'}
         
         product_number = product.product_number
-        
+
+        # Precompute log_path once (use module-level os) so no inner import shadows os in the loop
+        _debug_log_path = os.getenv('DEBUG_LOG_PATH', os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'logs', 'debug.log'))
+
         # Process files
         from django.conf import settings
         from django.core.files.storage import default_storage
@@ -59,10 +63,11 @@ def process_single_design_upload(
                 file_path = file_data['path']
                 file_name = file_data['name']
                 file_size = file_data.get('size', 0)
-                
+
+                _exists = default_storage.exists(file_path)
                 # Use default_storage to check if file exists and open it
                 # This works with both local and cloud storage backends
-                if not default_storage.exists(file_path):
+                if not _exists:
                     continue
                 
                 # Determine media type
@@ -87,11 +92,8 @@ def process_single_design_upload(
                 
                 # Set product context for file path generation
                 # #region agent log
-                import json
-                import os
-                log_path = os.getenv('DEBUG_LOG_PATH', os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'logs', 'debug.log'))
                 try:
-                    with open(log_path, 'a') as f:
+                    with open(_debug_log_path, 'a') as f:
                         f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"B","location":"Catalog/tasks.py:process_single_design_upload","message":"Setting product context before Media.create","data":{"product_id":product.id,"filename":new_filename,"file_name":file_name},"timestamp":int(__import__('time').time()*1000)})+'\n')
                 except: pass
                 # #endregion
@@ -112,7 +114,7 @@ def process_single_design_upload(
                         media_obj.save()
                         # #region agent log
                         try:
-                            with open(log_path, 'a') as f:
+                            with open(_debug_log_path, 'a') as f:
                                 f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"B","location":"Catalog/tasks.py:process_single_design_upload","message":"Media object created","data":{"media_id":media_obj.id,"saved_path":media_obj.file.name,"product_id":product.id},"timestamp":int(__import__('time').time()*1000)})+'\n')
                         except: pass
                         # #endregion
@@ -123,7 +125,7 @@ def process_single_design_upload(
                             error_msg = f'Media file saved to wrong location! Expected: {expected_path_prefix}*, Got: {media_obj.file.name}'
                             # #region agent log
                             try:
-                                with open(log_path, 'a') as f:
+                                with open(_debug_log_path, 'a') as f:
                                     f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"B","location":"Catalog/tasks.py:process_single_design_upload","message":"VALIDATION ERROR: File in wrong location","data":{"media_id":media_obj.id,"saved_path":media_obj.file.name,"expected_prefix":expected_path_prefix,"product_id":product.id},"timestamp":int(__import__('time').time()*1000)})+'\n')
                             except: pass
                             # #endregion
@@ -132,7 +134,7 @@ def process_single_design_upload(
                     Media.clear_product_context()
                     # #region agent log
                     try:
-                        with open(log_path, 'a') as f:
+                        with open(_debug_log_path, 'a') as f:
                             f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"B","location":"Catalog/tasks.py:process_single_design_upload","message":"Product context cleared","data":{"product_id":product.id},"timestamp":int(__import__('time').time()*1000)})+'\n')
                     except: pass
                     # #endregion
@@ -160,7 +162,7 @@ def process_single_design_upload(
                 # Attach media to product
                 product.attach_media(media_obj, meta=upload_metadata, created_by=product.created_by)
                 processed_files += 1
-                
+
                 # Create AVIF version for JPG and PNG files
                 if file_name_lower.endswith(('.jpg', '.jpeg', '.png')):
                     try:

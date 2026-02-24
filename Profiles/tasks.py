@@ -1,5 +1,5 @@
 from celery import shared_task
-from django.db import transaction
+from django.db import transaction, connection
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 from django.conf import settings
@@ -28,6 +28,11 @@ def process_design_upload_task(self, task_id, zip_file_path):
         zip_file_path: Path to the stored zip file
     """
     logger.info(f"process_design_upload_task: starting for task_id={task_id}")
+    # Ensure clean DB connection (previous task e.g. cleanup_design_pdf_files may have left it aborted)
+    try:
+        connection.close()
+    except Exception:
+        pass
     try:
         # Get the task record
         try:
@@ -70,7 +75,8 @@ def process_design_upload_task(self, task_id, zip_file_path):
         # Read zip file from storage
 
         # Check if file exists in storage
-        if not default_storage.exists(actual_zip_file_path):
+        _zip_exists = default_storage.exists(actual_zip_file_path)
+        if not _zip_exists:
             # Try to construct absolute path as fallback for debugging
             absolute_path = None
             try:
@@ -259,9 +265,17 @@ def process_design_upload_task(self, task_id, zip_file_path):
             for idx, folder_name in enumerate(valid_folders.keys(), 1):
 
                 try:
-                    # Process each design in its own transaction
-                    # This allows progress updates to be committed immediately
+                    # Force a fresh DB connection so we never run on an aborted connection (e.g. from another task)
+                    try:
+                        connection.close()
+                    except Exception:
+                        pass
+                    try:
+                        transaction.rollback()
+                    except Exception:
+                        pass
 
+                    # Process each design in its own transaction
                     with transaction.atomic():
                         # Get metadata for this folder
                         metadata = metadata_dict.get(folder_name, {})
@@ -308,67 +322,49 @@ def process_design_upload_task(self, task_id, zip_file_path):
                         subcategory_name = metadata.get('subcategory', '').strip() if metadata.get('subcategory') else ''
 
                         # Create or get parent category (parent=None means it's a top-level category)
-                        # First try to get existing category, then create if it doesn't exist
+                        # Use nested atomic so a failed create rolls back and doesn't abort the outer transaction
                         parent_category = None
                         try:
-                            # Try to find existing parent category (where parent is NULL)
-                            parent_category = Category.objects.filter(name=category_name, parent__isnull=True).first()
-                            
-                            if parent_category:
-                                pass
-                            else:
-                                # Category doesn't exist, create it
-
-                                parent_category = Category.objects.create(
-                                    name=category_name,
-                                    parent=None,
-                                    created_by=task.user
-                                )
-
-                        except Exception as e:
-                            # Fallback: try to get 'other' category or create it
-                            try:
-                                parent_category = Category.objects.filter(name='other', parent__isnull=True).first()
+                            with transaction.atomic():
+                                parent_category = Category.objects.filter(name=category_name, parent__isnull=True).first()
                                 if not parent_category:
                                     parent_category = Category.objects.create(
-                                        name='other',
+                                        name=category_name,
                                         parent=None,
                                         created_by=task.user
                                     )
-
-                            except Exception as e2:
-
-                                raise  # Re-raise if even fallback fails
+                        except Exception:
+                            try:
+                                with transaction.atomic():
+                                    parent_category = Category.objects.filter(name='other', parent__isnull=True).first()
+                                    if not parent_category:
+                                        parent_category = Category.objects.create(
+                                            name='other',
+                                            parent=None,
+                                            created_by=task.user
+                                        )
+                            except Exception:
+                                raise ValueError(f"Failed to get or create parent category: '{category_name}' or fallback 'other'")
                         
-                        # Ensure parent_category is set
                         if not parent_category:
                             raise ValueError(f"Failed to get or create parent category: '{category_name}'")
                         
-                        # Create or get subcategory if specified
+                        # Create or get subcategory if specified (nested atomic so failure doesn't abort outer transaction)
                         if subcategory_name:
                             try:
-                                # Try to find existing subcategory with this parent
-                                category = Category.objects.filter(
-                                    name=subcategory_name,
-                                    parent=parent_category
-                                ).first()
-                                
-                                if category:
-                                    pass
-                                else:
-                                    # Subcategory doesn't exist, create it
-
-                                    category = Category.objects.create(
+                                with transaction.atomic():
+                                    category = Category.objects.filter(
                                         name=subcategory_name,
-                                        parent=parent_category,
-                                        created_by=task.user
-                                    )
-
-                            except Exception as e:
-
-                                # Fallback: use parent category if subcategory creation fails
+                                        parent=parent_category
+                                    ).first()
+                                    if not category:
+                                        category = Category.objects.create(
+                                            name=subcategory_name,
+                                            parent=parent_category,
+                                            created_by=task.user
+                                        )
+                            except Exception:
                                 category = parent_category
-
                         else:
                             category = parent_category
 
@@ -460,75 +456,47 @@ def process_design_upload_task(self, task_id, zip_file_path):
                         try:
                             for file_ext, file_path in design_files.items():
                                 try:
-
-                                    file_data = zip_ref.read(file_path)
-                                    file_name = os.path.basename(file_path)
-                                    media_type = 'image'
-                                    
-                                    # Generate new filename using product_number
-                                    # file_ext already includes the dot (e.g., '.eps')
-                                    new_filename = f'{product_number}{file_ext}'
-                                    
-                                    media_file = ContentFile(file_data, name=new_filename)
-
-                                    # Create Media instance and set temp product_id as additional fallback
-                                    media = Media(
-                                        file=media_file,
-                                        media_type=media_type,
-                                        created_by=product_owner
-                                    )
-                                    # Set instance-level product_id as fallback
-                                    media.set_temp_product_id(product.id)
-                                    # Save the instance
-                                    media.save()
-                                    # #region agent log
-                                    try:
-                                        with open(log_path, 'a') as f:
-                                            f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"B","location":"Profiles/tasks.py:process_design_upload_task","message":"Media object created (bulk upload)","data":{"media_id":media.id,"saved_path":media.file.name,"product_id":product.id,"filename":new_filename},"timestamp":int(__import__('time').time()*1000)})+'\n')
-                                    except: pass
-                                    # #endregion
-                                    
-                                    # Validate file location - ensure it's in the correct product design folder
-                                    expected_path_prefix = f'{product_owner.id}/designs/{product.id}/'
-                                    if not media.file.name.startswith(expected_path_prefix):
-                                        error_msg = f'Media file saved to wrong location! Expected: {expected_path_prefix}*, Got: {media.file.name}'
-
+                                    with transaction.atomic():
+                                        file_data = zip_ref.read(file_path)
+                                        file_name = os.path.basename(file_path)
+                                        media_type = 'image'
+                                        new_filename = f'{product_number}{file_ext}'
+                                        media_file = ContentFile(file_data, name=new_filename)
+                                        media = Media(
+                                            file=media_file,
+                                            media_type=media_type,
+                                            created_by=product_owner
+                                        )
+                                        media.set_temp_product_id(product.id)
+                                        media.save()
                                         # #region agent log
                                         try:
                                             with open(log_path, 'a') as f:
-                                                f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"B","location":"Profiles/tasks.py:process_design_upload_task","message":"VALIDATION ERROR: File in wrong location","data":{"media_id":media.id,"saved_path":media.file.name,"expected_prefix":expected_path_prefix,"product_id":product.id,"task_id":task_id},"timestamp":int(__import__('time').time()*1000)})+'\n')
+                                                f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"B","location":"Profiles/tasks.py:process_design_upload_task","message":"Media object created (bulk upload)","data":{"media_id":media.id,"saved_path":media.file.name,"product_id":product.id,"filename":new_filename},"timestamp":int(__import__('time').time()*1000)})+'\n')
                                         except: pass
                                         # #endregion
-                                    
-                                    meta_info = {
-                                        'type': file_ext[1:].upper(),
-                                        'folder_name': folder_name,
-                                        'original_filename': file_name
-                                    }
-
-                                    product.attach_media(media, meta=meta_info, created_by=task.user)
-                                    
-                                    # Create AVIF version for JPG and PNG files
-                                    if file_ext in ['.jpg', '.jpeg', '.png']:
-                                        try:
-                                            media_file_path = media.file.name
-                                            is_mockup = False
-                                            avif_path, avif_media_obj = create_avif_from_media_file(
-                                                media_file_path,
-                                                product_number,
-                                                is_mockup=is_mockup,
-                                                product=product,
-                                                created_by=product_owner
-                                            )
-                                            if avif_path:
+                                        expected_path_prefix = f'{product_owner.id}/designs/{product.id}/'
+                                        if not media.file.name.startswith(expected_path_prefix):
+                                            try:
+                                                with open(log_path, 'a') as f:
+                                                    f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"B","location":"Profiles/tasks.py:process_design_upload_task","message":"VALIDATION ERROR: File in wrong location","data":{"media_id":media.id,"saved_path":media.file.name,"expected_prefix":expected_path_prefix,"product_id":product.id,"task_id":task_id},"timestamp":int(__import__('time').time()*1000)})+'\n')
+                                            except: pass
+                                        meta_info = {
+                                            'type': file_ext[1:].upper(),
+                                            'folder_name': folder_name,
+                                            'original_filename': file_name
+                                        }
+                                        product.attach_media(media, meta=meta_info, created_by=task.user)
+                                        if file_ext in ['.jpg', '.jpeg', '.png']:
+                                            try:
+                                                media_file_path = media.file.name
+                                                avif_path, avif_media_obj = create_avif_from_media_file(
+                                                    media_file_path, product_number, is_mockup=False,
+                                                    product=product, created_by=product_owner
+                                                )
+                                            except Exception:
                                                 pass
-                                            if avif_media_obj:
-                                                pass
-
-                                        except Exception as avif_error:
-                                            pass
-
-                                except Exception as e:
+                                except Exception:
                                     pass
 
                         finally:
@@ -537,65 +505,38 @@ def process_design_upload_task(self, task_id, zip_file_path):
                         
                         # Process optional mockup file if present
                         if mockup_file:
-                            # Set product context for mockup file path generation
                             Media.set_product_context(product.id)
                             try:
-                                try:
-
+                                with transaction.atomic():
                                     file_data = zip_ref.read(mockup_file)
                                     file_name = os.path.basename(mockup_file)
-                                    media_type = 'image'
-                                    
-                                    # Generate new filename using product_number with MOCKUP suffix
                                     file_ext = os.path.splitext(file_name)[1].lower()
                                     new_filename = f'{product_number}_MOCKUP{file_ext}'
-                                    
                                     media_file = ContentFile(file_data, name=new_filename)
-
-                                    # Create Media instance and set temp product_id as additional fallback
                                     media = Media(
                                         file=media_file,
-                                        media_type=media_type,
+                                        media_type='image',
                                         created_by=product_owner
                                     )
-                                    # Set instance-level product_id as fallback
                                     media.set_temp_product_id(product.id)
-                                    # Save the instance
                                     media.save()
-                                    
                                     meta_info = {
                                         'type': 'MOCKUP',
                                         'folder_name': folder_name,
                                         'original_filename': file_name,
                                         'is_mockup': True
                                     }
-
                                     product.attach_media(media, meta=meta_info, created_by=task.user)
-                                    
-                                    # Create AVIF version for mockup
                                     try:
-                                        media_file_path = media.file.name
-                                        avif_path, avif_media_obj = create_avif_from_media_file(
-                                            media_file_path,
-                                            product_number,
-                                            is_mockup=True,
-                                            product=product,
-                                            created_by=product_owner
+                                        avif_path, _ = create_avif_from_media_file(
+                                            media.file.name, product_number, is_mockup=True,
+                                            product=product, created_by=product_owner
                                         )
-                                        if avif_path:
-                                            pass
-                                        if avif_media_obj:
-                                            pass
-
-                                    except Exception as avif_error:
+                                    except Exception:
                                         pass
-
-                                except Exception as e:
-                                    pass
-
-                                    # Don't fail the whole process if mockup fails
+                            except Exception:
+                                pass
                             finally:
-                                # Clear product context
                                 Media.clear_product_context()
 
                         # Process Tags (column 9, previously column 10)
@@ -613,23 +554,20 @@ def process_design_upload_task(self, task_id, zip_file_path):
                                     )
                                     product.attach_tag(tag, meta={'source': 'bulk_upload'}, created_by=task.user)
                         
-                        # Attach Plan if specified
+                        # Attach Plan if specified (nested atomic so failure doesn't abort design transaction)
                         if plan_value and str(plan_value).strip() in ['1', '2', '3']:
                             try:
-                                plan_name_mapping = {
-                                    '1': 'basic',
-                                    '2': 'prime',
-                                    '3': 'premium'
-                                }
-                                plan_name = plan_name_mapping.get(str(plan_value).strip())
-                                if plan_name:
-                                    plan, _ = Plan.objects.get_or_create(
-                                        plan_name=plan_name,
-                                        plan_duration='monthly',
-                                        defaults={'created_by': task.user}
-                                    )
-                                    product.attach_plan(plan, meta={'source': 'bulk_upload'}, created_by=task.user)
-                            except Exception as e:
+                                with transaction.atomic():
+                                    plan_name_mapping = {'1': 'basic', '2': 'prime', '3': 'premium'}
+                                    plan_name = plan_name_mapping.get(str(plan_value).strip())
+                                    if plan_name:
+                                        plan, _ = Plan.objects.get_or_create(
+                                            plan_name=plan_name,
+                                            plan_duration='monthly',
+                                            defaults={'created_by': task.user}
+                                        )
+                                        product.attach_plan(plan, meta={'source': 'bulk_upload'}, created_by=task.user)
+                            except Exception:
                                 pass
 
                         # SubProduct removed - using Product only
@@ -652,7 +590,13 @@ def process_design_upload_task(self, task_id, zip_file_path):
                         'folder_name': folder_name,
                         'error': error_msg
                     })
-                    
+
+                    # Force rollback so connection is not left in "aborted" state for next design (PostgreSQL)
+                    try:
+                        transaction.rollback()
+                    except Exception:
+                        pass
+
                     # Update progress even on failure (outside transaction)
                     if idx % 5 == 0 or idx == len(valid_folders):
                         task.processed_designs = processed_count

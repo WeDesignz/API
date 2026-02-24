@@ -178,6 +178,7 @@ def _draw_logo_and_company(c: canvas.Canvas, data: Dict[str, Any], page_width: f
                 c.drawImage(full_path, logo_x, top_y - logo_size, width=logo_width, height=logo_size, preserveAspectRatio=True)
                 logo_drawn = True
         except Exception as e:
+            pass
 
     # If logo not drawn, draw placeholder
     if not logo_drawn:
