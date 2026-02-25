@@ -899,9 +899,13 @@ def admin_sessions(request):
 # ==================== Scheduled Tasks (Celery) ====================
 
 def _scheduled_tasks_superuser_required(request):
-    """Return (None, None) if allowed, else (Response, status)."""
-    if not request.user.is_superuser:
-        return (Response({'error': 'Access denied. Superuser privileges required.'}, status=status.HTTP_403_FORBIDDEN), status.HTTP_403_FORBIDDEN)
+    """Return (None, None) if allowed, else (Response, status). Uses AdminUserProfile.admin_group (Super Admin) instead of User.is_superuser."""
+    try:
+        admin_profile = request.user.admin_profile
+    except AdminUserProfile.DoesNotExist:
+        return (Response({'error': 'Access denied. Admin profile required.'}, status=status.HTTP_403_FORBIDDEN), status.HTTP_403_FORBIDDEN)
+    if admin_profile.admin_group != 'superadmin':
+        return (Response({'error': 'Access denied. Super Admin privileges required.'}, status=status.HTTP_403_FORBIDDEN), status.HTTP_403_FORBIDDEN)
     return (None, None)
 
 
