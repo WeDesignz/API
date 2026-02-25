@@ -92,8 +92,7 @@ class PinterestService:
                 payload["link"] = link
 
             else:
-                # Don't add invalid link - Pinterest allows pins without links
-                pass
+                pass  # Don't add invalid link - Pinterest allows pins without links
 
         try:
             response = requests.post(url, json=payload, headers=headers, timeout=30)
@@ -229,7 +228,8 @@ class PinterestService:
                     error_data = e.response.json()
                     error_msg = error_data.get('message', error_data.get('error_description', str(e)))
 
-                except:
+                except Exception:
+                    pass
 
             self.integration.update_error(error_msg)
 
@@ -269,7 +269,8 @@ class PinterestService:
                     error_data = e.response.json()
                     error_msg = error_data.get('message', error_data.get('error_description', str(e)))
 
-                except:
+                except Exception:
+                    pass
 
             return None
     
@@ -316,7 +317,8 @@ class PinterestService:
                     error_data = e.response.json()
                     error_msg = error_data.get('message', error_data.get('error_description', str(e)))
 
-                except:
+                except Exception:
+                    pass
 
             return None
     
@@ -369,7 +371,8 @@ class PinterestService:
                     error_data = e.response.json()
                     error_msg = error_data.get('message', error_data.get('error_description', str(e)))
 
-                except:
+                except Exception:
+                    pass
 
             return None
     
@@ -404,7 +407,8 @@ class PinterestService:
                     error_data = e.response.json()
                     error_msg = error_data.get('message', error_data.get('error_description', str(e)))
 
-                except:
+                except Exception:
+                    pass
 
             return False
     
@@ -463,7 +467,8 @@ class PinterestService:
                     error_data = e.response.json()
                     error_msg = error_data.get('message', error_data.get('error_description', str(e)))
 
-                except:
+                except Exception:
+                    pass
 
             self.integration.update_error(error_msg)
 
@@ -498,7 +503,8 @@ class PinterestService:
                     error_data = e.response.json()
                     error_msg = error_data.get('message', error_data.get('error_description', str(e)))
 
-                except:
+                except Exception:
+                    pass
 
             self.integration.update_error(error_msg)
 
@@ -554,7 +560,8 @@ class PinterestService:
                     error_data = e.response.json()
                     error_msg = error_data.get('message', error_data.get('error_description', str(e)))
 
-                except:
+                except Exception:
+                    pass
 
             return None
     
@@ -589,7 +596,8 @@ class PinterestService:
                     error_data = e.response.json()
                     error_msg = error_data.get('message', error_data.get('error_description', str(e)))
 
-                except:
+                except Exception:
+                    pass
 
             return False
     
