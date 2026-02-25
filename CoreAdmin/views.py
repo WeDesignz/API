@@ -950,6 +950,76 @@ def scheduled_tasks_overview(request):
     }, status=status.HTTP_200_OK)
 
 
+def _get_task_description(task):
+    """Get docstring from a Celery task (task or task.run)."""
+    description = (getattr(task, '__doc__', None) or '').strip()
+    if not description and getattr(task, 'run', None):
+        description = (getattr(task.run, '__doc__', None) or '').strip()
+    return description or None
+
+
+@swagger_auto_schema(
+    method='get',
+    operation_summary="Registered tasks list",
+    operation_description="List all Celery task names and descriptions (docstrings) registered in the application (superusers only). Excludes internal celery.* tasks.",
+    responses={200: openapi.Response(description="List of tasks with name and description"), 403: openapi.Response(description="Access denied")},
+    tags=['Scheduled Tasks']
+)
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def registered_tasks_list(request):
+    err_resp, _ = _scheduled_tasks_superuser_required(request)
+    if err_resp is not None:
+        return err_resp
+    try:
+        from API.celery import app
+        task_names = sorted(
+            name for name in app.tasks.keys()
+            if not name.startswith('celery.')
+        )
+        tasks = []
+        for name in task_names:
+            task = app.tasks.get(name)
+            description = _get_task_description(task) if task else None
+            tasks.append({'name': name, 'description': description})
+        return Response({'tasks': tasks}, status=status.HTTP_200_OK)
+    except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@swagger_auto_schema(
+    method='get',
+    operation_summary="Registered task detail",
+    operation_description="Get description (docstring) for a registered Celery task by name (superusers only).",
+    manual_parameters=[
+        openapi.Parameter('task_name', openapi.IN_QUERY, description='Full task name (e.g. common.tasks.cleanup_expired_otps)', type=openapi.TYPE_STRING, required=True),
+    ],
+    responses={200: openapi.Response(description="Task name and description"), 403: openapi.Response(description="Access denied"), 404: openapi.Response(description="Task not found")},
+    tags=['Scheduled Tasks']
+)
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def registered_task_detail(request):
+    err_resp, _ = _scheduled_tasks_superuser_required(request)
+    if err_resp is not None:
+        return err_resp
+    task_name = (request.GET.get('task_name') or '').strip()
+    if not task_name:
+        return Response({'error': 'task_name is required'}, status=status.HTTP_400_BAD_REQUEST)
+    try:
+        from API.celery import app
+        task = app.tasks.get(task_name)
+        if task is None:
+            return Response({'error': 'Task not found'}, status=status.HTTP_404_NOT_FOUND)
+        description = (getattr(task, '__doc__', None) or '')
+        if not description and getattr(task, 'run', None):
+            description = getattr(task.run, '__doc__', None) or ''
+        description = (description or '').strip() or None
+        return Response({'name': task_name, 'description': description}, status=status.HTTP_200_OK)
+    except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
 @swagger_auto_schema(
     method='get',
     operation_summary="Scheduled tasks list",
@@ -981,7 +1051,7 @@ def scheduled_tasks_list(request):
     paginator = PageNumberPagination()
     try:
         ps = int(request.GET.get('page_size') or request.GET.get('limit', 25))
-        if ps in (10, 25, 50, 100, 200, 500):
+        if ps in (10, 25, 50, 100):
             paginator.page_size = ps
         else:
             paginator.page_size = 25
@@ -1227,7 +1297,7 @@ def periodic_tasks_list(request):
     paginator = PageNumberPagination()
     try:
         ps = int(request.GET.get('page_size') or request.GET.get('limit', 25))
-        if ps in (10, 25, 50, 100, 200, 500):
+        if ps in (10, 25, 50, 100):
             paginator.page_size = ps
         else:
             paginator.page_size = 25
