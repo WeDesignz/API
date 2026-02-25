@@ -1661,88 +1661,28 @@ def post_to_instagram(self, instagram_post_id):
         media_files = product.get_media().filter(media_type='image')
         
         if not media_files.exists():
-
             instagram_post.mark_failed("No image media found for product")
             return
         
-        # Find the appropriate image based on media_type preference
-        # Priority: mockup > requested type (png/jpg) > any available image
+        # Instagram posts only design_JPG.jpg (or design_JPG.jpeg)
         image_media = None
-        requested_type = instagram_post.media_type.lower()
-        
-        # First pass: collect all valid images (exclude CDR/EPS)
-        mockup_media = None
-        png_media = None
-        jpg_media = None
-        
         for media in media_files:
             if not media.file:
                 continue
-            
             try:
-                file_name = media.file.name.lower()
+                file_name = media.file.name
             except (AttributeError, ValueError):
                 continue
-            
-            # Skip CDR and EPS files
-            if file_name.endswith(('.cdr', '.eps')):
-                continue
-            
-            # Only process image files
-            if not file_name.endswith(('.jpg', '.jpeg', '.png', '.gif', '.webp')):
-                continue
-            
-            # Check if it's a mockup
             base_name = os.path.splitext(os.path.basename(file_name))[0]
-            is_mockup = base_name == 'mockup'
-            
-            # Also check metadata
-            if not is_mockup:
-                try:
-                    from MediaFiles.models import Relation
-                    relation = Relation.objects.filter(
-                        relation_type='Product:Media',
-                        id_1=product.pk,
-                        id_2=media.pk
-                    ).first()
-                    if relation and relation.meta and 'mockup' in str(relation.meta).lower():
-                        is_mockup = True
-                except Exception:
-                    pass
-            
-            # Categorize
-            if is_mockup and not mockup_media:
-                mockup_media = media
-            elif file_name.endswith('.png') and not png_media:
-                png_media = media
-            elif file_name.endswith(('.jpg', '.jpeg')) and not jpg_media:
-                jpg_media = media
-        
-        # Select image based on priority
-        # First, respect the user's requested type
-        if requested_type == 'jpg' and jpg_media:
-            image_media = jpg_media
-
-        elif requested_type == 'png' and png_media:
-            image_media = png_media
-
-        elif requested_type == 'mockup' and mockup_media:
-            image_media = mockup_media
-
-        # Fallback: use whatever is available (mockup > png > jpg)
-        elif mockup_media:
-            image_media = mockup_media
-
-        elif png_media:
-            image_media = png_media
-
-        elif jpg_media:
-            image_media = jpg_media
+            ext = (os.path.splitext(file_name)[1] or '').lower()
+            if base_name.lower() == 'design_jpg' and ext in ('.jpg', '.jpeg'):
+                image_media = media
+                break
 
         if not image_media:
-            error_msg = "No valid image found. Product must have at least one mockup, PNG, or JPG image file."
-
-            instagram_post.mark_failed(error_msg)
+            instagram_post.mark_failed(
+                "No design_JPG.jpg (or design_JPG.jpeg) image found for product. Instagram posts only this file."
+            )
             return
 
         # Get image URL
