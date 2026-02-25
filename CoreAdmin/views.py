@@ -895,6 +895,298 @@ def admin_sessions(request):
     
     return Response(serializer.data, status=status.HTTP_200_OK)
 
+
+# ==================== Scheduled Tasks (Celery) ====================
+
+def _scheduled_tasks_superuser_required(request):
+    """Return (None, None) if allowed, else (Response, status)."""
+    if not request.user.is_superuser:
+        return (Response({'error': 'Access denied. Superuser privileges required.'}, status=status.HTTP_403_FORBIDDEN), status.HTTP_403_FORBIDDEN)
+    return (None, None)
+
+
+@swagger_auto_schema(
+    method='get',
+    operation_summary="Scheduled tasks overview",
+    operation_description="Get counts of active, reserved, scheduled tasks and recent failure/success (superusers only).",
+    responses={200: openapi.Response(description="Overview data"), 403: openapi.Response(description="Access denied")},
+    tags=['Scheduled Tasks']
+)
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def scheduled_tasks_overview(request):
+    from django_celery_results.models import TaskResult
+    err_resp, err_status = _scheduled_tasks_superuser_required(request)
+    if err_resp is not None:
+        return err_resp
+    since = timezone.now() - timezone.timedelta(hours=24)
+    failed_24h = TaskResult.objects.filter(status='FAILURE', date_created__gte=since).count()
+    success_24h = TaskResult.objects.filter(status='SUCCESS', date_created__gte=since).count()
+    active_count = 0
+    reserved_count = 0
+    scheduled_count = 0
+    try:
+        from API.celery import app
+        i = app.control.inspect()
+        if i:
+            active = i.active() or {}
+            reserved = i.reserved() or {}
+            scheduled = i.scheduled() or {}
+            active_count = sum(len(tasks) for tasks in active.values())
+            reserved_count = sum(len(tasks) for tasks in reserved.values())
+            scheduled_count = sum(len(tasks) for tasks in scheduled.values())
+    except Exception:
+        pass
+    return Response({
+        'active': active_count,
+        'reserved': reserved_count,
+        'scheduled': scheduled_count,
+        'failed_last_24h': failed_24h,
+        'success_last_24h': success_24h,
+    }, status=status.HTTP_200_OK)
+
+
+@swagger_auto_schema(
+    method='get',
+    operation_summary="Scheduled tasks list",
+    operation_description="List Celery task history from TaskResult (superusers only).",
+    manual_parameters=[
+        openapi.Parameter('status', openapi.IN_QUERY, description='Filter by status (e.g. SUCCESS, FAILURE, PENDING)', type=openapi.TYPE_STRING),
+        openapi.Parameter('task_name', openapi.IN_QUERY, description='Filter by task name (contains)', type=openapi.TYPE_STRING),
+        openapi.Parameter('page', openapi.IN_QUERY, type=openapi.TYPE_INTEGER),
+        openapi.Parameter('page_size', openapi.IN_QUERY, type=openapi.TYPE_INTEGER),
+    ],
+    responses={200: openapi.Response(description="Paginated task list"), 403: openapi.Response(description="Access denied")},
+    tags=['Scheduled Tasks']
+)
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def scheduled_tasks_list(request):
+    from django_celery_results.models import TaskResult
+    from rest_framework.pagination import PageNumberPagination
+    err_resp, _ = _scheduled_tasks_superuser_required(request)
+    if err_resp is not None:
+        return err_resp
+    qs = TaskResult.objects.all().order_by('-date_created')
+    status_filter = request.GET.get('status')
+    if status_filter:
+        qs = qs.filter(status=status_filter.upper())
+    task_name = request.GET.get('task_name', '').strip()
+    if task_name:
+        qs = qs.filter(task_name__icontains=task_name)
+    paginator = PageNumberPagination()
+    try:
+        ps = int(request.GET.get('page_size') or request.GET.get('limit', 25))
+        if ps in (10, 25, 50, 100):
+            paginator.page_size = ps
+        else:
+            paginator.page_size = 25
+    except (ValueError, TypeError):
+        paginator.page_size = 25
+    page = paginator.paginate_queryset(qs, request)
+    results = []
+    for t in page:
+        result_preview = None
+        if t.result:
+            try:
+                s = str(t.result)
+                result_preview = s[:200] + ('...' if len(s) > 200 else '')
+            except Exception:
+                result_preview = str(t.result)[:200]
+        results.append({
+            'task_id': t.task_id,
+            'task_name': t.task_name or '',
+            'status': t.status,
+            'date_created': t.date_created.isoformat() if t.date_created else None,
+            'date_done': t.date_done.isoformat() if t.date_done else None,
+            'worker': t.worker or '',
+            'result_preview': result_preview,
+            'traceback': t.traceback[:500] if t.traceback and len(t.traceback) > 500 else (t.traceback or ''),
+        })
+    return paginator.get_paginated_response(results)
+
+
+@swagger_auto_schema(
+    method='get',
+    operation_summary="Scheduled task detail",
+    operation_description="Get a single task result by task_id (superusers only).",
+    responses={200: openapi.Response(description="Task detail"), 403: openapi.Response(description="Access denied"), 404: openapi.Response(description="Task not found")},
+    tags=['Scheduled Tasks']
+)
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def scheduled_tasks_detail(request, task_id):
+    from django_celery_results.models import TaskResult
+    err_resp, _ = _scheduled_tasks_superuser_required(request)
+    if err_resp is not None:
+        return err_resp
+    try:
+        t = TaskResult.objects.get(task_id=task_id)
+    except TaskResult.DoesNotExist:
+        return Response({'error': 'Task not found.'}, status=status.HTTP_404_NOT_FOUND)
+    return Response({
+        'task_id': t.task_id,
+        'task_name': t.task_name or '',
+        'status': t.status,
+        'date_created': t.date_created.isoformat() if t.date_created else None,
+        'date_done': t.date_done.isoformat() if t.date_done else None,
+        'worker': t.worker or '',
+        'result': t.result,
+        'traceback': t.traceback or '',
+        'task_args': t.task_args,
+        'task_kwargs': t.task_kwargs,
+        'meta': t.meta,
+    }, status=status.HTTP_200_OK)
+
+
+@swagger_auto_schema(
+    method='post',
+    operation_summary="Revoke a task",
+    operation_description="Revoke (stop) a running or pending Celery task by task_id (superusers only).",
+    request_body=openapi.Schema(
+        type=openapi.TYPE_OBJECT,
+        properties={
+            'terminate': openapi.Schema(type=openapi.TYPE_BOOLEAN, description='If true, terminate the task if running', default=True),
+        }
+    ),
+    responses={200: openapi.Response(description="Revoked"), 403: openapi.Response(description="Access denied"), 404: openapi.Response(description="Task not found")},
+    tags=['Scheduled Tasks']
+)
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def scheduled_tasks_revoke(request, task_id):
+    err_resp, _ = _scheduled_tasks_superuser_required(request)
+    if err_resp is not None:
+        return err_resp
+    terminate = request.data.get('terminate', True)
+    try:
+        from API.celery import app
+        app.control.revoke(task_id, terminate=terminate)
+        return Response({'success': True, 'message': 'Task revoke requested.'}, status=status.HTTP_200_OK)
+    except Exception as e:
+        return Response({'success': False, 'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+# ==================== Periodic Tasks (Celery Beat) ====================
+
+def _periodic_task_schedule_display(periodic_task):
+    """Build a human-readable schedule string for a PeriodicTask."""
+    from django_celery_beat.models import IntervalSchedule, CrontabSchedule
+    if periodic_task.interval_id:
+        interval = periodic_task.interval
+        if isinstance(interval, IntervalSchedule):
+            every = interval.every
+            period = (interval.period or 'seconds').lower()
+            if period == 'seconds':
+                return f'Every {every} sec' if every == 1 else f'Every {every} seconds'
+            if period == 'minutes':
+                return f'Every {every} min' if every == 1 else f'Every {every} minutes'
+            if period == 'hours':
+                return f'Every {every} hour' if every == 1 else f'Every {every} hours'
+            if period == 'days':
+                return f'Every {every} day' if every == 1 else f'Every {every} days'
+            return f'Every {every} {period}'
+    if periodic_task.crontab_id:
+        crontab = periodic_task.crontab
+        if isinstance(crontab, CrontabSchedule):
+            parts = []
+            if crontab.minute != '*':
+                parts.append(f'min {crontab.minute}')
+            if crontab.hour != '*':
+                parts.append(f'hour {crontab.hour}')
+            if crontab.day_of_week != '*':
+                parts.append(f'dow {crontab.day_of_week}')
+            if crontab.day_of_month != '*':
+                parts.append(f'dom {crontab.day_of_month}')
+            if crontab.month_of_year != '*':
+                parts.append(f'month {crontab.month_of_year}')
+            if parts:
+                return ', '.join(parts)
+            return 'Crontab (* * * * *)'
+    if periodic_task.solar_id:
+        return str(periodic_task.solar) if periodic_task.solar else 'Solar'
+    if periodic_task.clocked_id:
+        return str(periodic_task.clocked) if periodic_task.clocked else 'Clocked'
+    return '—'
+
+
+@swagger_auto_schema(
+    method='get',
+    operation_summary="Periodic tasks overview",
+    operation_description="Get counts of periodic tasks (total, enabled) from Celery Beat (superusers only).",
+    responses={200: openapi.Response(description="Overview data"), 403: openapi.Response(description="Access denied")},
+    tags=['Periodic Tasks']
+)
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def periodic_tasks_overview(request):
+    from django_celery_beat.models import PeriodicTask
+    err_resp, _ = _scheduled_tasks_superuser_required(request)
+    if err_resp is not None:
+        return err_resp
+    total = PeriodicTask.objects.count()
+    enabled = PeriodicTask.objects.filter(enabled=True).count()
+    return Response({
+        'total': total,
+        'enabled': enabled,
+    }, status=status.HTTP_200_OK)
+
+
+@swagger_auto_schema(
+    method='get',
+    operation_summary="Periodic tasks list",
+    operation_description="List Celery Beat periodic tasks (superusers only).",
+    manual_parameters=[
+        openapi.Parameter('enabled', openapi.IN_QUERY, description='Filter by enabled (true/false)', type=openapi.TYPE_BOOLEAN),
+        openapi.Parameter('task_name', openapi.IN_QUERY, description='Filter by task path (contains)', type=openapi.TYPE_STRING),
+        openapi.Parameter('page', openapi.IN_QUERY, type=openapi.TYPE_INTEGER),
+        openapi.Parameter('page_size', openapi.IN_QUERY, type=openapi.TYPE_INTEGER),
+    ],
+    responses={200: openapi.Response(description="Paginated periodic task list"), 403: openapi.Response(description="Access denied")},
+    tags=['Periodic Tasks']
+)
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def periodic_tasks_list(request):
+    from django_celery_beat.models import PeriodicTask
+    from rest_framework.pagination import PageNumberPagination
+    err_resp, _ = _scheduled_tasks_superuser_required(request)
+    if err_resp is not None:
+        return err_resp
+    qs = PeriodicTask.objects.select_related('interval', 'crontab', 'solar', 'clocked').order_by('name')
+    enabled_filter = request.GET.get('enabled')
+    if enabled_filter is not None:
+        if str(enabled_filter).lower() in ('true', '1', 'yes'):
+            qs = qs.filter(enabled=True)
+        elif str(enabled_filter).lower() in ('false', '0', 'no'):
+            qs = qs.filter(enabled=False)
+    task_name = request.GET.get('task_name', '').strip()
+    if task_name:
+        qs = qs.filter(task__icontains=task_name)
+    paginator = PageNumberPagination()
+    try:
+        ps = int(request.GET.get('page_size') or request.GET.get('limit', 25))
+        if ps in (10, 25, 50, 100):
+            paginator.page_size = ps
+        else:
+            paginator.page_size = 25
+    except (ValueError, TypeError):
+        paginator.page_size = 25
+    page = paginator.paginate_queryset(qs, request)
+    results = []
+    for pt in page:
+        results.append({
+            'id': pt.id,
+            'name': pt.name or '',
+            'task': pt.task or '',
+            'enabled': pt.enabled,
+            'last_run_at': pt.last_run_at.isoformat() if pt.last_run_at else None,
+            'total_run_count': getattr(pt, 'total_run_count', None) or 0,
+            'schedule_display': _periodic_task_schedule_display(pt),
+        })
+    return paginator.get_paginated_response(results)
+
+
 @swagger_auto_schema(
     method='post',
     operation_summary="Change Admin Password",
