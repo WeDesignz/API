@@ -92,9 +92,9 @@ class PinterestService:
                 payload["link"] = link
 
             else:
-
                 # Don't add invalid link - Pinterest allows pins without links
-        
+                pass
+
         try:
             response = requests.post(url, json=payload, headers=headers, timeout=30)
             response.raise_for_status()
