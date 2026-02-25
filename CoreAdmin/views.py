@@ -981,7 +981,7 @@ def scheduled_tasks_list(request):
     paginator = PageNumberPagination()
     try:
         ps = int(request.GET.get('page_size') or request.GET.get('limit', 25))
-        if ps in (10, 25, 50, 100):
+        if ps in (10, 25, 50, 100, 200, 500):
             paginator.page_size = ps
         else:
             paginator.page_size = 25
@@ -1227,7 +1227,7 @@ def periodic_tasks_list(request):
     paginator = PageNumberPagination()
     try:
         ps = int(request.GET.get('page_size') or request.GET.get('limit', 25))
-        if ps in (10, 25, 50, 100):
+        if ps in (10, 25, 50, 100, 200, 500):
             paginator.page_size = ps
         else:
             paginator.page_size = 25
