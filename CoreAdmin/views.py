@@ -899,9 +899,13 @@ def admin_sessions(request):
 # ==================== Scheduled Tasks (Celery) ====================
 
 def _scheduled_tasks_superuser_required(request):
-    """Return (None, None) if allowed, else (Response, status)."""
-    if not request.user.is_superuser:
-        return (Response({'error': 'Access denied. Superuser privileges required.'}, status=status.HTTP_403_FORBIDDEN), status.HTTP_403_FORBIDDEN)
+    """Return (None, None) if allowed, else (Response, status). Uses AdminUserProfile.admin_group (Super Admin) instead of User.is_superuser."""
+    try:
+        admin_profile = request.user.admin_profile
+    except AdminUserProfile.DoesNotExist:
+        return (Response({'error': 'Access denied. Admin profile required.'}, status=status.HTTP_403_FORBIDDEN), status.HTTP_403_FORBIDDEN)
+    if admin_profile.admin_group != 'superadmin':
+        return (Response({'error': 'Access denied. Super Admin privileges required.'}, status=status.HTTP_403_FORBIDDEN), status.HTTP_403_FORBIDDEN)
     return (None, None)
 
 
@@ -1063,6 +1067,63 @@ def scheduled_tasks_revoke(request, task_id):
         from API.celery import app
         app.control.revoke(task_id, terminate=terminate)
         return Response({'success': True, 'message': 'Task revoke requested.'}, status=status.HTTP_200_OK)
+    except Exception as e:
+        return Response({'success': False, 'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+@swagger_auto_schema(
+    method='post',
+    operation_summary="Bulk revoke tasks",
+    operation_description="Revoke (stop) multiple running or pending Celery tasks by task_id (superusers only).",
+    request_body=openapi.Schema(
+        type=openapi.TYPE_OBJECT,
+        properties={
+            'task_ids': openapi.Schema(
+                type=openapi.TYPE_ARRAY,
+                items=openapi.Schema(type=openapi.TYPE_STRING),
+                description='List of task IDs to revoke',
+            ),
+            'terminate': openapi.Schema(type=openapi.TYPE_BOOLEAN, description='If true, terminate tasks if running', default=True),
+        },
+        required=['task_ids'],
+    ),
+    responses={
+        200: openapi.Response(description="Bulk revoke result with revoked/failed counts"),
+        403: openapi.Response(description="Access denied"),
+    },
+    tags=['Scheduled Tasks']
+)
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def scheduled_tasks_bulk_revoke(request):
+    err_resp, _ = _scheduled_tasks_superuser_required(request)
+    if err_resp is not None:
+        return err_resp
+    task_ids = request.data.get('task_ids') or []
+    if not isinstance(task_ids, list):
+        return Response(
+            {'success': False, 'error': 'task_ids must be a list'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    terminate = request.data.get('terminate', True)
+    revoked = 0
+    errors = []
+    try:
+        from API.celery import app
+        for task_id in task_ids:
+            if not task_id:
+                continue
+            try:
+                app.control.revoke(str(task_id), terminate=terminate)
+                revoked += 1
+            except Exception as e:
+                errors.append({'task_id': str(task_id), 'error': str(e)})
+        return Response({
+            'success': True,
+            'revoked': revoked,
+            'failed': len(errors),
+            'errors': errors if errors else None,
+        }, status=status.HTTP_200_OK)
     except Exception as e:
         return Response({'success': False, 'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 

@@ -73,6 +73,9 @@ app.conf.timezone = 'Asia/Kolkata'
 
 # Task result backend
 app.conf.result_backend = 'django-db'
+# Store extended result fields (task_name, task_args, task_kwargs) in TaskResult table
+app.conf.result_extended = True
+
 
 # Task serialization
 app.conf.task_serializer = 'json'
