@@ -221,7 +221,9 @@ def _draw_logo_and_company(c: canvas.Canvas, data: Dict[str, Any], page_width: f
                 c.drawImage(full_text_path, text_logo_x, top_y - logo_size + text_logo_y_offset, 
                            width=text_logo_width, height=text_logo_size, preserveAspectRatio=True)
                 text_logo_drawn = True
-        except Exception as e:
+        except Exception:
+            # Fall back to company name text below
+            pass
 
     # If text logo not drawn, draw company name as text
     if not text_logo_drawn:
