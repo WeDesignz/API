@@ -1615,7 +1615,6 @@ def post_to_instagram(self, instagram_post_id):
         
         # Check if already successfully processed
         if instagram_post.status == 'success':
-
             return
         
         # Mark as processing immediately
