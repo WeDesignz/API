@@ -1071,6 +1071,63 @@ def scheduled_tasks_revoke(request, task_id):
         return Response({'success': False, 'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 
+@swagger_auto_schema(
+    method='post',
+    operation_summary="Bulk revoke tasks",
+    operation_description="Revoke (stop) multiple running or pending Celery tasks by task_id (superusers only).",
+    request_body=openapi.Schema(
+        type=openapi.TYPE_OBJECT,
+        properties={
+            'task_ids': openapi.Schema(
+                type=openapi.TYPE_ARRAY,
+                items=openapi.Schema(type=openapi.TYPE_STRING),
+                description='List of task IDs to revoke',
+            ),
+            'terminate': openapi.Schema(type=openapi.TYPE_BOOLEAN, description='If true, terminate tasks if running', default=True),
+        },
+        required=['task_ids'],
+    ),
+    responses={
+        200: openapi.Response(description="Bulk revoke result with revoked/failed counts"),
+        403: openapi.Response(description="Access denied"),
+    },
+    tags=['Scheduled Tasks']
+)
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def scheduled_tasks_bulk_revoke(request):
+    err_resp, _ = _scheduled_tasks_superuser_required(request)
+    if err_resp is not None:
+        return err_resp
+    task_ids = request.data.get('task_ids') or []
+    if not isinstance(task_ids, list):
+        return Response(
+            {'success': False, 'error': 'task_ids must be a list'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    terminate = request.data.get('terminate', True)
+    revoked = 0
+    errors = []
+    try:
+        from API.celery import app
+        for task_id in task_ids:
+            if not task_id:
+                continue
+            try:
+                app.control.revoke(str(task_id), terminate=terminate)
+                revoked += 1
+            except Exception as e:
+                errors.append({'task_id': str(task_id), 'error': str(e)})
+        return Response({
+            'success': True,
+            'revoked': revoked,
+            'failed': len(errors),
+            'errors': errors if errors else None,
+        }, status=status.HTTP_200_OK)
+    except Exception as e:
+        return Response({'success': False, 'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+
 # ==================== Periodic Tasks (Celery Beat) ====================
 
 def _periodic_task_schedule_display(periodic_task):
