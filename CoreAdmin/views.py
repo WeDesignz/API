@@ -5960,8 +5960,9 @@ def custom_orders_list(request):
     import logging
     logger = logging.getLogger(__name__)
     
-    # Get all custom orders with prefetched order relation for order_id
-    orders = CustomOrderRequest.objects.select_related('order').all()
+    # Only show custom orders that have been paid (have an associated Order).
+    # Unpaid CustomOrderRequests (user closed Razorpay) are not shown in the admin list.
+    orders = CustomOrderRequest.objects.select_related('order').exclude(order__isnull=True)
 
     # Apply filters
     # Only pass filter-related params to the serializer, not pagination params
@@ -6572,8 +6573,8 @@ def custom_order_analytics(request):
             'error': 'SuperAdmin privileges required for advanced analytics'
         }, status=status.HTTP_403_FORBIDDEN)
     
-    # Get orders in date range
-    orders = CustomOrderRequest.objects.all()
+    # Get orders in date range (paid only - have associated Order)
+    orders = CustomOrderRequest.objects.exclude(order__isnull=True)
     if start_date:
         orders = orders.filter(created_at__gte=start_date)
     if end_date:
