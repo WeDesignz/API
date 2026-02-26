@@ -194,9 +194,8 @@ def custom_request_detail(request, request_id):
 @permission_classes([IsAuthenticated])
 def submit_custom_request(request):
     """
-    Submit a custom request with payment.
+    Submit a custom request with payment. Order is created only after successful payment (see Razorpay capture_payment).
     """
-    from Orders.models import Order
     from common.business_config import BusinessConfig
     from decimal import Decimal
     import os
@@ -300,23 +299,11 @@ def submit_custom_request(request):
 
                 continue
     
-    # Create corresponding Order record with order_type='custom'
-    order = Order.objects.create(
-        order_type='custom',
-        product_ids='',  # Custom orders don't have product IDs
-        total_amount=budget,
-        status='pending',  # Will be updated to 'success' after payment
-        custom_order_request=custom_request,
-        created_by=request.user
-    )
-    
-    # Here you would integrate with Razorpay for payment
-    # For now, we'll just return the request details
-    
+    # Order is created only after successful payment capture (see Razorpay capture_payment).
     return Response({
         'message': 'Custom request submitted successfully',
         'custom_request': CustomOrderRequestSerializer(custom_request).data,
-        'order_id': order.id,
+        'custom_request_id': custom_request.id,
         'payment_required': True,
         'amount': float(budget),
         'payment_message': 'Please complete payment to process your custom request',
