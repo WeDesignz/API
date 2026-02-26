@@ -211,14 +211,14 @@ def dashboard_summary(request):
                 status='draft'
             ).count()
             
-            # Custom Orders requiring attention (pending or delayed)
+            # Custom Orders requiring attention (paid only; pending or delayed)
             custom_orders_pending = CustomOrderRequest.objects.filter(
                 status__in=['pending', 'in_progress']
-            ).count()
+            ).exclude(order__isnull=True).count()
             
             custom_orders_delayed = CustomOrderRequest.objects.filter(
                 status='delayed'
-            ).count()
+            ).exclude(order__isnull=True).count()
             
             # Support Tickets
             open_support_tickets = SupportThread.objects.filter(
@@ -358,7 +358,7 @@ def dashboard_summary(request):
                 status='completed',
                 completed_at__gte=today_start,
                 completed_at__lte=today_end
-            ).count()
+            ).exclude(order__isnull=True).count()
             
             support_resolved_today = SupportThread.objects.filter(
                 Q(assigned_to_id=moderator_id) | Q(resolved_by_id=moderator_id),
@@ -381,7 +381,7 @@ def dashboard_summary(request):
             custom_orders_assigned = CustomOrderRequest.objects.filter(
                 assigned_to_id=moderator_id,
                 status__in=['pending', 'in_progress']
-            ).count()
+            ).exclude(order__isnull=True).count()
             
             support_tickets_assigned = SupportThread.objects.filter(
                 assigned_to_id=moderator_id,
@@ -1373,27 +1373,27 @@ def moderator_daily_report(request, moderator_id):
             'id', 'product_id', 'approved_at', 'rejection_reason', 'admin_notes'
         )[:50]
         
-        # 3. Custom Orders
+        # 3. Custom Orders (paid only - have associated Order)
         # Orders assigned to or updated by this moderator
         custom_orders_completed = CustomOrderRequest.objects.filter(
             Q(assigned_to_id=moderator_id) | Q(updated_by_id=moderator_id),
             status='completed',
             completed_at__gte=start_datetime,
             completed_at__lte=end_datetime
-        ).count()
+        ).exclude(order__isnull=True).count()
         
         custom_orders_interacted = CustomOrderRequest.objects.filter(
             Q(assigned_to_id=moderator_id) | Q(updated_by_id=moderator_id),
             updated_at__gte=start_datetime,
             updated_at__lte=end_datetime
-        ).exclude(status='pending').count()
+        ).exclude(order__isnull=True).exclude(status='pending').count()
         
         # Get detailed list with rejection reasons
         custom_orders_list = CustomOrderRequest.objects.filter(
             Q(assigned_to_id=moderator_id) | Q(updated_by_id=moderator_id),
             updated_at__gte=start_datetime,
             updated_at__lte=end_datetime
-        ).values(
+        ).exclude(order__isnull=True).values(
             'id', 'title', 'status', 'updated_at', 'cancellation_reason', 'refund_reason'
         )[:50]
         

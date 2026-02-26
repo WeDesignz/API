@@ -118,7 +118,6 @@ def create_payment_order(request):
     currency = request.data.get('currency', 'INR')
     order_id = request.data.get('order_id')
     custom_request_id = request.data.get('custom_request_id')
-    
     if not amount:
         return Response({
             'error': 'Amount is required'
@@ -165,7 +164,6 @@ def create_payment_order(request):
             notes=payment_notes,
             created_by=request.user
         )
-        
         return Response({
             'message': 'Payment order created successfully',
             'razorpay_order_id': razorpay_order['id'],
@@ -228,7 +226,6 @@ def capture_payment(request):
             id=payment_id,
             created_by=request.user
         )
-        
         # Check if payment is already captured (fast check, no external API call)
         if payment.status == 'captured':
             # Custom order: ensure Order exists (created on first capture, may be missing on duplicate call)
@@ -344,7 +341,6 @@ def capture_payment(request):
             )
             payment.order = order
             payment.save()
-        
         # Update order status if exists
         if payment.order:
             payment.order.status = 'success'
@@ -444,7 +440,6 @@ def capture_payment(request):
                     )
                     payment.order = order
                     payment.save()
-                
                 # Update order status if exists
                 if payment.order:
                     payment.order.status = 'success'
@@ -737,6 +732,30 @@ def webhook_handler(request):
                     payment = RazorpayPayment.objects.get(razorpay_payment_id=payment_id)
                     payment.status = 'captured'
                     payment.save()
+                    
+                    # Custom order: create Order if payment has no order (e.g. only webhook fired)
+                    if payment.order is None and payment.notes.get('custom_request_id'):
+                        from CustomRequests.models import CustomOrderRequest
+                        try:
+                            custom_request = CustomOrderRequest.objects.get(
+                                id=payment.notes['custom_request_id']
+                            )
+                            order = Order.objects.create(
+                                order_type='custom',
+                                product_ids='',
+                                total_amount=payment.amount,
+                                status='success',
+                                custom_order_request=custom_request,
+                                created_by=payment.created_by
+                            )
+                            payment.order = order
+                            payment.save()
+                            custom_request.payment_status = 'success'
+                            if custom_request.status == 'pending':
+                                pass
+                            custom_request.save()
+                        except CustomOrderRequest.DoesNotExist:
+                            pass
                     
                     # Update order status
                     if payment.order:
