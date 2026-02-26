@@ -2987,7 +2987,12 @@ def customers_list(request):
         status_customers = []
         for customer in customers:
             account_statuses = get_related(customer, 'User:CustomerAccountStatus', CustomerAccountStatus)
-            if account_statuses.exists() and account_statuses.first().status == status_filter:
+            if account_statuses.exists():
+                current_status = account_statuses.first().status
+            else:
+                # No status record = treat as active (default for new customers)
+                current_status = 'active'
+            if current_status == status_filter:
                 status_customers.append(customer.id)
         customers = customers.filter(id__in=status_customers)
     

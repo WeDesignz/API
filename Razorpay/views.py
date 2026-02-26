@@ -112,10 +112,12 @@ def delete_cart_items_for_order(order, user):
 def create_payment_order(request):
     """
     Create a Razorpay order for payment.
+    Supports order_id (cart/subscription) or custom_request_id (custom order; Order created on capture).
     """
     amount = request.data.get('amount')
     currency = request.data.get('currency', 'INR')
     order_id = request.data.get('order_id')
+    custom_request_id = request.data.get('custom_request_id')
     
     if not amount:
         return Response({
@@ -123,35 +125,44 @@ def create_payment_order(request):
         }, status=status.HTTP_400_BAD_REQUEST)
     
     try:
-        # Create Razorpay order
-        razorpay_order = razorpay_client.order.create({
-            'amount': int(float(amount) * 100),  # Convert to paise
-            'currency': currency,
-            'receipt': f'order_{order_id}' if order_id else f'payment_{request.user.id}',
-            'notes': {
-                'user_id': request.user.id,
-                'order_id': order_id
-            }
-        })
-        
-        # Get or create order if order_id is provided
         order = None
-        if order_id:
+        payment_notes = {'user_id': request.user.id}
+        receipt = f'payment_{request.user.id}'
+        
+        if custom_request_id is not None:
+            # Custom order flow: validate CustomOrderRequest, order created on payment capture
+            from CustomRequests.models import CustomOrderRequest
+            try:
+                CustomOrderRequest.objects.get(id=custom_request_id, created_by=request.user)
+            except CustomOrderRequest.DoesNotExist:
+                return Response({
+                    'error': 'Custom request not found or access denied'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            payment_notes['custom_request_id'] = custom_request_id
+            receipt = f'custom_request_{custom_request_id}'
+        elif order_id:
             try:
                 order = Order.objects.get(id=order_id, created_by=request.user)
             except Order.DoesNotExist:
                 pass
+            payment_notes['order_id'] = order_id
+            receipt = f'order_{order_id}'
         
-        # Create payment record and associate with order
-        # Note: razorpay_payment_id is not set here - it will be set when payment is captured
-        # The field must be nullable in the database (run migration if you see NOT NULL constraint errors)
+        # Create Razorpay order
+        razorpay_order = razorpay_client.order.create({
+            'amount': int(float(amount) * 100),  # Convert to paise
+            'currency': currency,
+            'receipt': receipt,
+            'notes': payment_notes.copy()
+        })
+        
         payment = RazorpayPayment.objects.create(
-            order=order,  # Associate order immediately if available
+            order=order,
             razorpay_order_id=razorpay_order['id'],
             amount=amount,
             currency=currency,
             description=request.data.get('description', ''),
-            notes=request.data.get('notes', {}),
+            notes=payment_notes,
             created_by=request.user
         )
         
@@ -220,6 +231,23 @@ def capture_payment(request):
         
         # Check if payment is already captured (fast check, no external API call)
         if payment.status == 'captured':
+            # Custom order: ensure Order exists (created on first capture, may be missing on duplicate call)
+            if payment.order is None and payment.notes.get('custom_request_id'):
+                from CustomRequests.models import CustomOrderRequest
+                custom_request = CustomOrderRequest.objects.get(
+                    id=payment.notes['custom_request_id'],
+                    created_by=request.user
+                )
+                order = Order.objects.create(
+                    order_type='custom',
+                    product_ids='',
+                    total_amount=payment.amount,
+                    status='success',
+                    custom_order_request=custom_request,
+                    created_by=request.user
+                )
+                payment.order = order
+                payment.save()
             # Payment already captured, return success immediately
             if payment.order:
                 payment.order.status = 'success'
@@ -298,6 +326,24 @@ def capture_payment(request):
         payment.razorpay_payment_id = razorpay_payment_id
         payment.status = 'captured'
         payment.save()
+        
+        # Custom order: create Order only after successful capture (no order was created on submit)
+        if payment.order is None and payment.notes.get('custom_request_id'):
+            from CustomRequests.models import CustomOrderRequest
+            custom_request = CustomOrderRequest.objects.get(
+                id=payment.notes['custom_request_id'],
+                created_by=request.user
+            )
+            order = Order.objects.create(
+                order_type='custom',
+                product_ids='',
+                total_amount=payment.amount,
+                status='success',
+                custom_order_request=custom_request,
+                created_by=request.user
+            )
+            payment.order = order
+            payment.save()
         
         # Update order status if exists
         if payment.order:
@@ -381,6 +427,24 @@ def capture_payment(request):
                 payment.status = 'captured'
                 payment.save()
                 
+                # Custom order: create Order if this was a custom order payment (no order on submit)
+                if payment.order is None and payment.notes.get('custom_request_id'):
+                    from CustomRequests.models import CustomOrderRequest
+                    custom_request = CustomOrderRequest.objects.get(
+                        id=payment.notes['custom_request_id'],
+                        created_by=request.user
+                    )
+                    order = Order.objects.create(
+                        order_type='custom',
+                        product_ids='',
+                        total_amount=payment.amount,
+                        status='success',
+                        custom_order_request=custom_request,
+                        created_by=request.user
+                    )
+                    payment.order = order
+                    payment.save()
+                
                 # Update order status if exists
                 if payment.order:
                     payment.order.status = 'success'
@@ -401,10 +465,12 @@ def capture_payment(request):
                         subscription.status = 'active'
                         subscription.save()
                     
-                    # If this order is for custom order request, update custom request status
+                    # If this order is for custom order request, update custom request payment status
                     if payment.order.order_type == 'custom' and payment.order.custom_order_request:
                         custom_request = payment.order.custom_order_request
-                        custom_request.status = 'success'
+                        custom_request.payment_status = 'success'
+                        if custom_request.status == 'pending':
+                            custom_request.status = 'pending'
                         custom_request.save()
                     
                     # Delete cart items synchronously for immediate deletion (only for cart orders)
