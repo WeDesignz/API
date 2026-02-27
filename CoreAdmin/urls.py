@@ -123,4 +123,11 @@ urlpatterns = [
     # Reports - Mock PDF (admin)
     path('mock-pdf-reports/', views.mock_pdf_reports_list, name='mock_pdf_reports_list'),
     path('mock-pdf-reports/<int:download_id>/download/', views.mock_pdf_download_file, name='mock_pdf_download_file'),
+
+    # Admin PDF clients
+    path('pdf-clients/', views.pdf_clients_list_create, name='pdf_clients_list_create'),
+    path('pdf-clients/jobs/', views.pdf_client_jobs_create, name='pdf_client_jobs_create'),
+    path('pdf-clients/jobs/<int:job_id>/status/', views.pdf_client_job_status, name='pdf_client_job_status'),
+    path('pdf-clients/jobs/<int:job_id>/download/', views.pdf_client_job_download, name='pdf_client_job_download'),
+    path('pdf-clients/jobs/<int:job_id>/', views.pdf_client_job_delete, name='pdf_client_job_delete'),
 ]

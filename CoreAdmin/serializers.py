@@ -3,6 +3,7 @@ from django.contrib.auth.models import User
 from django.contrib.auth import authenticate
 from django.core.exceptions import ValidationError
 from .models import AdminUserProfile, AdminActivityLog, AdminSession, AdminPermissionGroup
+from Catalog.models import PDFClient, PDFClientJob
 import pyotp
 import base64
 
@@ -750,6 +751,73 @@ class AdminUserPasswordResetSerializer(serializers.Serializer):
             raise serializers.ValidationError('New passwords do not match')
         
         return attrs
+
+
+class PDFClientSerializer(serializers.ModelSerializer):
+    """Serializer for admin-configured PDF clients."""
+
+    created_by = serializers.StringRelatedField(read_only=True)
+
+    class Meta:
+        model = PDFClient
+        fields = ["id", "name", "created_at", "created_by"]
+        read_only_fields = ["id", "created_at", "created_by"]
+
+
+class PDFClientJobStatusSerializer(serializers.ModelSerializer):
+    """Serializer for PDF client job status polling."""
+
+    client_name = serializers.CharField(source="client.name", read_only=True)
+
+    class Meta:
+        model = PDFClientJob
+        fields = [
+            "id",
+            "client",
+            "client_name",
+            "status",
+            "designs_per_pdf",
+            "requested_pdfs",
+            "generated_pdfs",
+            "total_designs_requested",
+            "total_designs_used",
+            "progress_percent",
+            "error_message",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id",
+            "client",
+            "client_name",
+            "generated_pdfs",
+            "total_designs_requested",
+            "total_designs_used",
+            "progress_percent",
+            "error_message",
+            "created_at",
+            "updated_at",
+        ]
+
+
+class PDFClientJobCreateSerializer(serializers.Serializer):
+    """
+    Serializer for creating a PDF client job.
+    File upload (customer_logo) is handled directly in the view.
+    """
+
+    client_id = serializers.IntegerField()
+    number_of_pdfs = serializers.IntegerField(min_value=1, max_value=10)
+    designs_per_pdf = serializers.IntegerField(required=False)
+    customer_name = serializers.CharField(max_length=255)
+    customer_mobile = serializers.CharField(max_length=20)
+
+    def validate_client_id(self, value):
+        try:
+            PDFClient.objects.get(id=value)
+        except PDFClient.DoesNotExist:
+            raise serializers.ValidationError("PDF client does not exist.")
+        return value
 
 
 class AdminPasswordChangeSerializer(serializers.Serializer):

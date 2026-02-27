@@ -14,12 +14,26 @@ import uuid
 
 from .models import AdminUserProfile, AdminActivityLog, AdminSession, DesignerNotification, CustomerNotification, AdminNotificationCampaign, AdminPermissionGroup
 from .serializers import (
-    AdminLoginSerializer, Admin2FASetupSerializer, Admin2FAVerifySerializer,
-    Admin2FAEnableSerializer, Admin2FADisableSerializer, AdminLogoutSerializer,
-    AdminProfileSerializer, AdminActivityLogSerializer, AdminSessionSerializer,
-    AdminUserCreateSerializer, AdminUserUpdateSerializer, AdminUserListSerializer,
-    AdminUserPasswordResetSerializer, AdminPasswordChangeSerializer,
-    AdminNotificationCreateSerializer, AdminPermissionGroupSerializer, AdminPermissionGroupListSerializer
+    AdminLoginSerializer,
+    Admin2FASetupSerializer,
+    Admin2FAVerifySerializer,
+    Admin2FAEnableSerializer,
+    Admin2FADisableSerializer,
+    AdminLogoutSerializer,
+    AdminProfileSerializer,
+    AdminActivityLogSerializer,
+    AdminSessionSerializer,
+    AdminUserCreateSerializer,
+    AdminUserUpdateSerializer,
+    AdminUserListSerializer,
+    AdminUserPasswordResetSerializer,
+    AdminPasswordChangeSerializer,
+    AdminNotificationCreateSerializer,
+    AdminPermissionGroupSerializer,
+    AdminPermissionGroupListSerializer,
+    PDFClientSerializer,
+    PDFClientJobStatusSerializer,
+    PDFClientJobCreateSerializer,
 )
 from Profiles.serializers import (
     DesignerManagementSerializer, DesignerDetailSerializer, DesignerWalletSerializer,
@@ -57,7 +71,7 @@ from Profiles.models import DesignerProfile
 from Wallet.models import Wallet, WalletTransaction, WalletWithdrawalRequest
 from Authentication.user_relations import get_user_wallets
 from common.relations import get_related
-from Catalog.models import PDFDownload
+from Catalog.models import PDFDownload, PDFClient, PDFClientJob
 
 @swagger_auto_schema(
     method='post',
@@ -8970,3 +8984,312 @@ def mock_pdf_download_file(request, download_id):
         logger = logging.getLogger(__name__)
 
         return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@swagger_auto_schema(
+    method="get",
+    operation_summary="List PDF clients (admin)",
+    operation_description="List PDF clients that can be used for admin-generated PDFs.",
+    manual_parameters=[
+        openapi.Parameter(
+            "search",
+            openapi.IN_QUERY,
+            type=openapi.TYPE_STRING,
+            description="Search by client name",
+        ),
+        openapi.Parameter(
+            "page",
+            openapi.IN_QUERY,
+            type=openapi.TYPE_INTEGER,
+            description="Page number",
+        ),
+        openapi.Parameter(
+            "page_size",
+            openapi.IN_QUERY,
+            type=openapi.TYPE_INTEGER,
+            description="Page size",
+        ),
+    ],
+    responses={200: openapi.Response(description="List of PDF clients")},
+    tags=["CoreAdmin PDF Clients"],
+)
+@swagger_auto_schema(
+    method="post",
+    operation_summary="Create PDF client (admin)",
+    operation_description="Create a new PDF client that admins can use for generating PDFs.",
+    request_body=PDFClientSerializer,
+    responses={201: openapi.Response(description="Created PDF client")},
+    tags=["CoreAdmin PDF Clients"],
+)
+@api_view(["GET", "POST"])
+@permission_classes([IsAuthenticated])
+def pdf_clients_list_create(request):
+    """List or create PDF clients for admin-generated PDFs."""
+    try:
+        _ = request.user.admin_profile
+    except AdminUserProfile.DoesNotExist:
+        return Response({"error": "Admin access required"}, status=status.HTTP_403_FORBIDDEN)
+
+    if request.method == "GET":
+        search = request.GET.get("search", "").strip()
+        qs = PDFClient.objects.all().order_by("name")
+        if search:
+            qs = qs.filter(name__icontains=search)
+        page = int(request.GET.get("page", 1))
+        page_size = min(int(request.GET.get("page_size", 20)), 100)
+        paginator = Paginator(qs, page_size)
+        page_obj = paginator.get_page(page)
+        serializer = PDFClientSerializer(page_obj.object_list, many=True)
+        return Response(
+            {
+                "results": serializer.data,
+                "total_count": paginator.count,
+                "total_pages": paginator.num_pages,
+                "current_page": page_obj.number,
+            }
+        )
+
+    # POST
+    data = request.data.copy()
+    serializer = PDFClientSerializer(data=data)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    client = PDFClient.objects.create(
+        name=serializer.validated_data["name"],
+        created_by=request.user,
+        updated_by=request.user,
+    )
+    out = PDFClientSerializer(client)
+    return Response(out.data, status=status.HTTP_201_CREATED)
+
+
+@swagger_auto_schema(
+    method="get",
+    operation_summary="List PDF client jobs (admin)",
+    operation_description="List PDF client jobs with optional filter by client_id. Paginated.",
+    manual_parameters=[
+        openapi.Parameter("client_id", openapi.IN_QUERY, type=openapi.TYPE_INTEGER, description="Filter by PDF client ID"),
+        openapi.Parameter("page", openapi.IN_QUERY, type=openapi.TYPE_INTEGER, description="Page number"),
+        openapi.Parameter("page_size", openapi.IN_QUERY, type=openapi.TYPE_INTEGER, description="Page size"),
+    ],
+    tags=["CoreAdmin PDF Clients"],
+)
+@swagger_auto_schema(
+    method="post",
+    operation_summary="Create PDF client job (admin)",
+    operation_description="Create a new PDF generation job for a given PDF client. Accepts optional customer_logo file.",
+    request_body=openapi.Schema(
+        type=openapi.TYPE_OBJECT,
+        properties={
+            "data": openapi.Schema(
+                type=openapi.TYPE_OBJECT,
+                properties={
+                    "client_id": openapi.Schema(type=openapi.TYPE_INTEGER),
+                    "number_of_pdfs": openapi.Schema(type=openapi.TYPE_INTEGER),
+                    "designs_per_pdf": openapi.Schema(
+                        type=openapi.TYPE_INTEGER,
+                        description="Designs per PDF (20, 50, or 100). Defaults to 100.",
+                    ),
+                    "customer_name": openapi.Schema(type=openapi.TYPE_STRING),
+                    "customer_mobile": openapi.Schema(type=openapi.TYPE_STRING),
+                },
+                required=["client_id", "number_of_pdfs", "customer_name", "customer_mobile"],
+            )
+        },
+    ),
+    tags=["CoreAdmin PDF Clients"],
+)
+@api_view(["GET", "POST"])
+@permission_classes([IsAuthenticated])
+def pdf_client_jobs_create(request):
+    """List (GET) or create (POST) PDF client jobs."""
+    try:
+        _ = request.user.admin_profile
+    except AdminUserProfile.DoesNotExist:
+        return Response({"error": "Admin access required"}, status=status.HTTP_403_FORBIDDEN)
+
+    if request.method == "GET":
+        client_id = request.GET.get("client_id")
+        qs = PDFClientJob.objects.select_related("client").order_by("-created_at")
+        if client_id:
+            try:
+                qs = qs.filter(client_id=int(client_id))
+            except ValueError:
+                pass
+        page = int(request.GET.get("page", 1))
+        page_size = min(int(request.GET.get("page_size", 20)), 100)
+        paginator = Paginator(qs, page_size)
+        page_obj = paginator.get_page(page)
+        serializer = PDFClientJobStatusSerializer(page_obj.object_list, many=True)
+        return Response({
+            "results": serializer.data,
+            "total_count": paginator.count,
+            "total_pages": paginator.num_pages,
+            "current_page": page_obj.number,
+        })
+
+    # POST: create job
+    payload = request.data
+    if "data" in payload and isinstance(payload.get("data"), str):
+        import json
+
+        try:
+            data = json.loads(payload["data"])
+        except Exception:
+            return Response({"error": "Invalid JSON in 'data' field"}, status=status.HTTP_400_BAD_REQUEST)
+    else:
+        data = payload
+
+    serializer = PDFClientJobCreateSerializer(data=data)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    client = PDFClient.objects.get(id=serializer.validated_data["client_id"])
+
+    # Enforce per-client concurrency at creation time.
+    # Only block when an existing job is actively processing so stale "pending" jobs don't block new ones.
+    if PDFClientJob.objects.filter(
+        client=client,
+        status__in=["processing"],
+    ).exists():
+        return Response(
+            {"error": "Another PDF generation job is already running for this client."},
+            status=status.HTTP_409_CONFLICT,
+        )
+
+    designs_per_pdf = serializer.validated_data.get("designs_per_pdf") or 100
+    customer_logo = request.FILES.get("customer_logo")
+
+    job = PDFClientJob.objects.create(
+        client=client,
+        status="pending",
+        designs_per_pdf=designs_per_pdf,
+        requested_pdfs=serializer.validated_data["number_of_pdfs"],
+        customer_name=serializer.validated_data["customer_name"],
+        customer_mobile=serializer.validated_data["customer_mobile"],
+        customer_logo=customer_logo,
+        created_by=request.user,
+    )
+
+    # Trigger async generation
+    from Catalog.tasks import generate_client_pdfs_task
+
+    generate_client_pdfs_task.delay(job.id)
+
+    out = PDFClientJobStatusSerializer(job)
+    return Response(out.data, status=status.HTTP_201_CREATED)
+
+
+@swagger_auto_schema(
+    method="get",
+    operation_summary="Get PDF client job status (admin)",
+    operation_description="Get status and progress information for a specific PDF client job.",
+    responses={200: openapi.Response(description="Job status", schema=PDFClientJobStatusSerializer)},
+    tags=["CoreAdmin PDF Clients"],
+)
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def pdf_client_job_status(request, job_id):
+    """Return status of a PDF client job."""
+    try:
+        _ = request.user.admin_profile
+    except AdminUserProfile.DoesNotExist:
+        return Response({"error": "Admin access required"}, status=status.HTTP_403_FORBIDDEN)
+
+    try:
+        job = PDFClientJob.objects.select_related("client").get(id=job_id)
+    except PDFClientJob.DoesNotExist:
+        return Response({"error": "Job not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    serializer = PDFClientJobStatusSerializer(job)
+    return Response(serializer.data)
+
+
+@swagger_auto_schema(
+    method="get",
+    operation_summary="Download PDF client job ZIP (admin)",
+    operation_description="Download the ZIP archive containing all PDFs for a completed PDF client job.",
+    responses={200: openapi.Response(description="ZIP file"), 404: openapi.Response(description="Not found")},
+    tags=["CoreAdmin PDF Clients"],
+)
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def pdf_client_job_download(request, job_id):
+    """Download the ZIP file for a completed PDF client job."""
+    try:
+        _ = request.user.admin_profile
+    except AdminUserProfile.DoesNotExist:
+        return Response({"error": "Admin access required"}, status=status.HTTP_403_FORBIDDEN)
+
+    try:
+        job = PDFClientJob.objects.select_related("client").get(id=job_id)
+    except PDFClientJob.DoesNotExist:
+        return Response({"error": "Job not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    if job.status != "completed" or not job.zip_file_path:
+        return Response(
+            {"error": f"Job is not completed. Current status: {job.status}"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    media_root = getattr(settings, "MEDIA_ROOT", None)
+    if not media_root:
+        return Response({"error": "MEDIA_ROOT is not configured"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    file_path = os.path.join(media_root, job.zip_file_path)
+    if not os.path.exists(file_path):
+        return Response({"error": "ZIP file not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    filename = f"{job.client.name.replace(' ', '_')}_pdfs_job_{job.id}.zip"
+
+    try:
+        response = FileResponse(
+            open(file_path, "rb"),
+            as_attachment=True,
+            filename=filename,
+            content_type="application/zip",
+        )
+        from urllib.parse import quote
+
+        response["Content-Disposition"] = f'attachment; filename="{filename}"; filename*=UTF-8\'\'{quote(filename)}'
+        response["X-Filename"] = filename
+        return response
+    except Exception as e:
+        logger = logging.getLogger(__name__)
+        logger.info(f"pdf_client_job_download: error serving ZIP for job {job_id}: {e}")
+        return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@swagger_auto_schema(
+    method="delete",
+    operation_summary="Delete PDF client job (admin)",
+    operation_description="Delete a PDF client job. Allowed only for jobs with status 'pending' or 'failed'. Processing or completed jobs cannot be deleted.",
+    responses={
+        204: openapi.Response(description="Job deleted"),
+        400: openapi.Response(description="Job cannot be deleted (e.g. processing or completed)"),
+        404: openapi.Response(description="Job not found"),
+    },
+    tags=["CoreAdmin PDF Clients"],
+)
+@api_view(["DELETE"])
+@permission_classes([IsAuthenticated])
+def pdf_client_job_delete(request, job_id):
+    """Delete a pending or failed PDF client job. Cannot delete processing or completed jobs."""
+    try:
+        _ = request.user.admin_profile
+    except AdminUserProfile.DoesNotExist:
+        return Response({"error": "Admin access required"}, status=status.HTTP_403_FORBIDDEN)
+
+    try:
+        job = PDFClientJob.objects.get(id=job_id)
+    except PDFClientJob.DoesNotExist:
+        return Response({"error": "Job not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    if job.status not in ("pending", "failed"):
+        return Response(
+            {"error": f"Cannot delete job with status '{job.status}'. Only pending or failed jobs can be deleted."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    job.delete()
+    return Response(status=status.HTTP_204_NO_CONTENT)
