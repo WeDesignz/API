@@ -349,6 +349,123 @@ class PDFDownload(models.Model):
         return detach_relation('User:PDFDownload', self, user_obj)
 
 
+class PDFClient(models.Model):
+    """
+    Admin-configured PDF client for generating non-overlapping design PDFs.
+    """
+    name = models.CharField(max_length=255, unique=True)
+    used_product_ids = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="List of product IDs already used in PDFs for this client (to avoid repeats).",
+    )
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        related_name="created_pdf_clients",
+        null=True,
+        blank=True,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        related_name="updated_pdf_clients",
+        null=True,
+        blank=True,
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    objects = models.Manager()
+
+    class Meta:
+        db_table = "pdf_client"
+        verbose_name = "PDF Client"
+        verbose_name_plural = "PDF Clients"
+        ordering = ["name"]
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class PDFClientJob(models.Model):
+    """
+    Represents an admin-side PDF generation job for a PDF client.
+    A single job may generate multiple PDFs and an optional zip archive.
+    """
+
+    STATUS_CHOICES = [
+        ("pending", "Pending"),
+        ("processing", "Processing"),
+        ("completed", "Completed"),
+        ("failed", "Failed"),
+    ]
+
+    client = models.ForeignKey(
+        PDFClient, on_delete=models.CASCADE, related_name="jobs"
+    )
+    status = models.CharField(
+        max_length=20, choices=STATUS_CHOICES, default="pending"
+    )
+    designs_per_pdf = models.PositiveIntegerField(
+        default=100,
+        help_text="Number of designs per PDF (20, 50, or 100). Admin UI defaults to 100.",
+    )
+    requested_pdfs = models.PositiveIntegerField(
+        help_text="Number of PDFs requested in this job (max 10)."
+    )
+    generated_pdfs = models.PositiveIntegerField(default=0)
+    total_designs_requested = models.PositiveIntegerField(default=0)
+    total_designs_used = models.PositiveIntegerField(default=0)
+    included_product_ids_by_pdf = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="List of product-id lists, one per PDF in this job.",
+    )
+    pdf_file_paths = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="Relative MEDIA_ROOT paths to generated PDFs for this job.",
+    )
+    zip_file_path = models.CharField(
+        max_length=500,
+        blank=True,
+        null=True,
+        help_text="Optional path to a zip containing all PDFs for this job.",
+    )
+    progress_percent = models.PositiveIntegerField(default=0)
+    error_message = models.TextField(blank=True, null=True)
+
+    customer_name = models.CharField(max_length=255)
+    customer_mobile = models.CharField(max_length=20)
+    customer_logo = models.ImageField(
+        upload_to="admin_pdf_clients/logos/%Y/%m/",
+        null=True,
+        blank=True,
+    )
+
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        related_name="created_pdf_client_jobs",
+        null=True,
+        blank=True,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    objects = models.Manager()
+
+    class Meta:
+        db_table = "pdf_client_job"
+        verbose_name = "PDF Client Job"
+        verbose_name_plural = "PDF Client Jobs"
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:
+        return f"PDF Client Job {self.pk} - {self.client.name}"
+
+
 # ==================== DESIGN NUMBER GENERATION ====================
 
 @receiver(pre_save, sender=Product)

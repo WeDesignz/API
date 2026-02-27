@@ -17,11 +17,11 @@ import os
 from django.core.management.base import BaseCommand
 from django.conf import settings
 
-from Catalog.models import PDFDownload
+from Catalog.models import PDFDownload, PDFClientJob
 
 
 class Command(BaseCommand):
-    help = 'Delete design PDF files from disk (PDFDownload only). Never touches invoices or other PDFs.'
+    help = 'Delete design PDF files from disk (PDFDownload and admin PDF client jobs only). Never touches invoices or other PDFs.'
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -42,14 +42,10 @@ class Command(BaseCommand):
             self.stderr.write(self.style.ERROR(f'MEDIA_ROOT "{media_root}" is not a directory.'))
             return
 
-        qs = PDFDownload.objects.filter(pdf_file_path__isnull=False).exclude(pdf_file_path='')
-        total = qs.count()
+        pdf_qs = PDFDownload.objects.filter(pdf_file_path__isnull=False).exclude(pdf_file_path='')
+        total_pdf_downloads = pdf_qs.count()
 
-        if total == 0:
-            self.stdout.write('No PDF download records with file paths found.')
-            return
-
-        self.stdout.write(f'Found {total} PDF download record(s) with file paths.')
+        self.stdout.write(f'Found {total_pdf_downloads} PDFDownload record(s) with file paths.')
 
         if dry_run:
             self.stdout.write(self.style.WARNING('DRY RUN - no files will be deleted.\n'))
@@ -58,38 +54,83 @@ class Command(BaseCommand):
         skipped = 0
         errors = 0
 
-        for pdf_download in qs:
+        media_norm = os.path.normpath(media_root)
+
+        # Delete customer/mock PDF files (PDFDownload)
+        for pdf_download in pdf_qs:
             rel_path = (pdf_download.pdf_file_path or '').strip()
             if not rel_path:
                 continue
 
             full_path = os.path.normpath(os.path.join(media_root, rel_path))
 
-            # Safety: ensure path is under MEDIA_ROOT
-            media_norm = os.path.normpath(media_root)
             if not full_path.startswith(media_norm):
-                self.stdout.write(self.style.WARNING(f'  Skipping path outside MEDIA_ROOT: {rel_path}'))
+                self.stdout.write(self.style.WARNING(f'  [PDFDownload] Skipping path outside MEDIA_ROOT: {rel_path}'))
                 skipped += 1
                 continue
 
             if not os.path.isfile(full_path):
                 if dry_run:
-                    self.stdout.write(f'  Would skip (file not found): {rel_path}')
+                    self.stdout.write(f'  [PDFDownload] Would skip (file not found): {rel_path}')
                 skipped += 1
                 continue
 
             if dry_run:
-                self.stdout.write(f'  Would delete: {rel_path}')
+                self.stdout.write(f'  [PDFDownload] Would delete: {rel_path}')
                 deleted += 1
                 continue
 
             try:
                 os.unlink(full_path)
-                self.stdout.write(self.style.SUCCESS(f'  Deleted: {rel_path}'))
+                self.stdout.write(self.style.SUCCESS(f'  [PDFDownload] Deleted: {rel_path}'))
                 deleted += 1
             except Exception as e:
-                self.stderr.write(self.style.ERROR(f'  Failed to delete {rel_path}: {e}'))
+                self.stderr.write(self.style.ERROR(f'  [PDFDownload] Failed to delete {rel_path}: {e}'))
                 errors += 1
+
+        # Delete admin PDF client job files (only under admin_pdf_clients/)
+        self.stdout.write('\nChecking admin PDF client job files under "admin_pdf_clients/".')
+        jobs = PDFClientJob.objects.all()
+        for job in jobs:
+            paths = list(job.pdf_file_paths or [])
+            if job.zip_file_path:
+                paths.append(job.zip_file_path)
+
+            for rel_path in paths:
+                rel_path_str = str(rel_path or '').strip()
+                if not rel_path_str:
+                    continue
+
+                # Safety: only touch files under admin_pdf_clients/
+                if not rel_path_str.startswith('admin_pdf_clients/'):
+                    self.stdout.write(self.style.WARNING(f'  [PDFClientJob] Skipping non-admin path: {rel_path_str}'))
+                    skipped += 1
+                    continue
+
+                full_path = os.path.normpath(os.path.join(media_root, rel_path_str))
+                if not full_path.startswith(media_norm):
+                    self.stdout.write(self.style.WARNING(f'  [PDFClientJob] Skipping path outside MEDIA_ROOT: {rel_path_str}'))
+                    skipped += 1
+                    continue
+
+                if not os.path.isfile(full_path):
+                    if dry_run:
+                        self.stdout.write(f'  [PDFClientJob] Would skip (file not found): {rel_path_str}')
+                    skipped += 1
+                    continue
+
+                if dry_run:
+                    self.stdout.write(f'  [PDFClientJob] Would delete: {rel_path_str}')
+                    deleted += 1
+                    continue
+
+                try:
+                    os.unlink(full_path)
+                    self.stdout.write(self.style.SUCCESS(f'  [PDFClientJob] Deleted: {rel_path_str}'))
+                    deleted += 1
+                except Exception as e:
+                    self.stderr.write(self.style.ERROR(f'  [PDFClientJob] Failed to delete {rel_path_str}: {e}'))
+                    errors += 1
 
         self.stdout.write('')
         if dry_run:
@@ -97,6 +138,6 @@ class Command(BaseCommand):
         else:
             self.stdout.write(self.style.SUCCESS(f'Deleted {deleted} file(s).'))
         if skipped:
-            self.stdout.write(f'Skipped {skipped} (not found or outside scope).')
+            self.stdout.write(f'Skipped {skipped} (not found, outside scope, or non-admin paths).')
         if errors:
             self.stderr.write(self.style.ERROR(f'Errors: {errors}'))

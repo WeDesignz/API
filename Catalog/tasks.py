@@ -9,11 +9,148 @@ import logging
 import os
 import tempfile
 
-from Catalog.models import Product, Category, Tags, PDFDownload
+from Catalog.models import (
+    Product,
+    Category,
+    Tags,
+    PDFDownload,
+    PDFClient,
+    PDFClientJob,
+)
 from MediaFiles.models import Media
 
 logger = logging.getLogger(__name__)
 
+
+def generate_client_pdf_for_products(
+    pdf_file_path,
+    products,
+    customer_name,
+    customer_mobile,
+    logo_path=None,
+):
+    """
+    Generate a PDF file for a given list of products for admin PDF clients.
+    Layout matches the customer mock PDF style (logo + name/number + design image).
+
+    Returns the created file size in bytes.
+    """
+    from django.conf import settings
+    from reportlab.lib.pagesizes import letter
+    from reportlab.pdfgen import canvas
+    from PIL import Image
+
+    # Prepare page
+    page_width, page_height = letter
+    margin = 50
+
+    # Create PDF canvas
+    c = canvas.Canvas(pdf_file_path, pagesize=letter)
+
+    # Generate one page per product
+    for idx, product in enumerate(products, 1):
+        if idx > 1:
+            c.showPage()
+
+        # Resolve image path (first available media image, if any)
+        image_path = None
+        try:
+            media_list = product.get_media()
+            for media in media_list:
+                if not hasattr(media, "file") or not media.file:
+                    continue
+                file_name = getattr(media.file, "name", "") or ""
+                if not file_name:
+                    continue
+                # Try absolute path first
+                if hasattr(media.file, "path"):
+                    candidate = media.file.path
+                else:
+                    candidate = os.path.join(settings.MEDIA_ROOT, file_name)
+                if os.path.exists(candidate):
+                    image_path = candidate
+                    break
+        except Exception:
+            image_path = None
+
+        page_w, page_h = page_width, page_height
+        m = margin
+        center_x = page_w / 2
+
+        # Top-left logo
+        logo_size = 56
+        if logo_path and os.path.exists(logo_path):
+            try:
+                c.drawImage(
+                    logo_path,
+                    m,
+                    page_h - m - logo_size,
+                    width=logo_size,
+                    height=logo_size,
+                    preserveAspectRatio=True,
+                )
+            except Exception:
+                pass
+
+        # Top-center customer name and mobile
+        name_text = customer_name or ""
+        number_text = customer_mobile or ""
+        c.setFillColorRGB(0.2, 0.2, 0.25)
+        c.setFont("Helvetica-Bold", 14)
+        name_width = c.stringWidth(name_text or " ", "Helvetica-Bold", 14)
+        c.drawString(center_x - name_width / 2, page_h - m - 28, name_text[:60] or " ")
+        c.setFont("Helvetica", 12)
+        num_width = c.stringWidth(number_text or " ", "Helvetica", 12)
+        c.drawString(center_x - num_width / 2, page_h - m - 46, number_text[:20] or " ")
+
+        # Bottom design number
+        product_number = product.product_number or f"WD{product.id}"
+        c.setFont("Helvetica", 11)
+        c.setFillColorRGB(0.35, 0.35, 0.4)
+        c.drawString(m, m + 8, f"Design: {product_number}")
+
+        # Center design image
+        header_used = 70
+        footer_used = 36
+        available_width = page_w - (2 * m)
+        available_height = page_h - (2 * m) - header_used - footer_used
+
+        if image_path and os.path.exists(image_path):
+            try:
+                img = Image.open(image_path)
+                iw, ih = img.size
+                scale_x = available_width / iw
+                scale_y = available_height / ih
+                scale = min(scale_x, scale_y)
+                sw = iw * scale
+                sh = ih * scale
+                img_x = (page_w - sw) / 2
+                img_y = m + footer_used + (available_height - sh) / 2
+                c.drawImage(
+                    image_path,
+                    img_x,
+                    img_y,
+                    width=sw,
+                    height=sh,
+                    preserveAspectRatio=True,
+                )
+            except Exception:
+                c.setFont("Helvetica", 12)
+                c.setFillColorRGB(0.5, 0.5, 0.55)
+                c.drawString(center_x - 60, page_h / 2 - 20, "Image not available")
+        else:
+            c.setFont("Helvetica", 12)
+            c.setFillColorRGB(0.5, 0.5, 0.55)
+            c.drawString(center_x - 60, page_h / 2 - 20, "Image not available")
+
+    c.save()
+
+    if not os.path.exists(pdf_file_path):
+        raise Exception(f"PDF file was not created at {pdf_file_path}")
+    file_size = os.path.getsize(pdf_file_path)
+    if file_size == 0:
+        raise Exception(f"PDF file was created but is empty (0 bytes) at {pdf_file_path}")
+    return file_size
 
 @shared_task(bind=True, name='Catalog.tasks.process_single_design_upload')
 def process_single_design_upload(
@@ -271,106 +408,83 @@ def generate_pdf_task(self, pdf_download_id):
         if not products:
             raise ValueError('No products found for PDF generation')
         
-        # Get mockup images for each product
-        from MediaFiles.models import Relation
+        # Get mockup images for each product and generate PDF
         from django.conf import settings
-        from reportlab.lib.pagesizes import letter, A4
+        from MediaFiles.models import Relation
+        from reportlab.lib.pagesizes import letter
         from reportlab.pdfgen import canvas
-        from reportlab.lib.utils import ImageReader
         from PIL import Image
-        
+
         # Supported image formats for PDF generation
-        SUPPORTED_IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'}
-        UNSUPPORTED_EXTENSIONS = {'.cdr', '.eps', '.ai', '.svg', '.pdf'}
-        
+        SUPPORTED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
+        UNSUPPORTED_EXTENSIONS = {".cdr", ".eps", ".ai", ".svg", ".pdf"}
+
         # Get user from PDFDownload
         user = pdf_download.get_user()
         if not user:
-            # Fallback to old location if user not found
-            pdf_dir = os.path.join(settings.MEDIA_ROOT, 'pdfs')
+            pdf_dir = os.path.join(settings.MEDIA_ROOT, "pdfs")
             os.makedirs(pdf_dir, exist_ok=True)
-            pdf_filename = f'pdf_download_{pdf_download_id}.pdf'
+            pdf_filename = f"pdf_download_{pdf_download_id}.pdf"
             pdf_file_path = os.path.join(pdf_dir, pdf_filename)
-            relative_path = f'pdfs/{pdf_filename}'
+            relative_path = f"pdfs/{pdf_filename}"
         else:
-            # Create PDF file path in user-specific folder
             user_id = user.id
-            pdf_filename = f'pdf_download_{pdf_download_id}.pdf'
-            pdf_dir = os.path.join(settings.MEDIA_ROOT, str(user_id), 'pdfs')
+            pdf_filename = f"pdf_download_{pdf_download_id}.pdf"
+            pdf_dir = os.path.join(settings.MEDIA_ROOT, str(user_id), "pdfs")
             os.makedirs(pdf_dir, exist_ok=True)
             pdf_file_path = os.path.join(pdf_dir, pdf_filename)
-            relative_path = f'{user_id}/pdfs/{pdf_filename}'
-        
-        # Update PDF download with included products
-        # Only include products that have valid mockup images
-        # IMPORTANT: Maintain the exact sequence from the original products list
-        # Create a mapping of product_id to original index to preserve order
+            relative_path = f"{user_id}/pdfs/{pdf_filename}"
+
         original_order = {product.id: idx for idx, product in enumerate(products)}
         included_products = []
-        mockup_paths = []  # Store paths to mockup images for PDF generation
-        skipped_products = []  # Track products without mockups for logging
-        
-        # Process products in their original order to maintain sequence
+        skipped_products = []
+        temp_files_to_cleanup = []
+
         for idx, product in enumerate(products, 1):
-            # Get all media for this product
             media_list = product.get_media()
             mockup_media = None
-            
-            # Find mockup image by checking Relation metadata and filename
+
             for media in media_list:
                 try:
-                    # Skip if no file
-                    if not hasattr(media, 'file') or not media.file:
+                    if not hasattr(media, "file") or not media.file:
                         continue
-                    
-                    file_name = media.file.name if hasattr(media.file, 'name') else ''
+                    file_name = media.file.name if hasattr(media.file, "name") else ""
                     if not file_name:
                         continue
-                    
-                    # Check file extension - skip unsupported formats
                     file_name_lower = file_name.lower()
                     file_ext = os.path.splitext(file_name_lower)[1]
-                    
                     if file_ext in UNSUPPORTED_EXTENSIONS:
                         continue
-                    
-                    # Check if filename contains "mockup" (case-insensitive)
                     base_name = os.path.splitext(os.path.basename(file_name_lower))[0]
-                    is_mockup_by_name = base_name == 'mockup' or 'mockup' in base_name
-                    
-                    # Check Relation metadata
+                    is_mockup_by_name = base_name == "mockup" or "mockup" in base_name
                     is_mockup_by_meta = False
                     try:
                         relation = Relation.objects.filter(
-                            relation_type='Product:Media',
+                            relation_type="Product:Media",
                             id_1=product.pk,
-                            id_2=media.pk
+                            id_2=media.pk,
                         ).first()
-                        
                         if relation and relation.meta:
                             meta_data = relation.meta
                             if isinstance(meta_data, dict):
-                                is_mockup_by_meta = meta_data.get('is_mockup', False) or meta_data.get('type') == 'mockup'
+                                is_mockup_by_meta = meta_data.get("is_mockup", False) or meta_data.get("type") == "mockup"
                             elif isinstance(meta_data, str):
                                 meta_lower = str(meta_data).lower()
-                                is_mockup_by_meta = 'mockup' in meta_lower or '"is_mockup":true' in meta_lower
-                    except Exception as e:
+                                is_mockup_by_meta = "mockup" in meta_lower or '"is_mockup":true' in meta_lower
+                    except Exception:
                         pass
-                    
-                    # Only use if it's a mockup AND a supported image format
                     if (is_mockup_by_name or is_mockup_by_meta) and file_ext in SUPPORTED_IMAGE_EXTENSIONS:
                         mockup_media = media
                         break
-                except Exception as e:
+                except Exception:
                     continue
-            
-            # If no mockup found, use first available supported image so every design gets a page
-            if not mockup_media or not hasattr(mockup_media, 'file') or not mockup_media.file:
+
+            if not mockup_media or not hasattr(mockup_media, "file") or not mockup_media.file:
                 for media in media_list:
                     try:
-                        if not hasattr(media, 'file') or not media.file:
+                        if not hasattr(media, "file") or not media.file:
                             continue
-                        file_name = media.file.name if hasattr(media.file, 'name') else ''
+                        file_name = media.file.name if hasattr(media.file, "name") else ""
                         if not file_name:
                             continue
                         file_name_lower = file_name.lower()
@@ -380,41 +494,32 @@ def generate_pdf_task(self, pdf_download_id):
                             break
                     except Exception:
                         continue
-                if not mockup_media or not hasattr(mockup_media, 'file') or not mockup_media.file:
+                if not mockup_media or not hasattr(mockup_media, "file") or not mockup_media.file:
                     skipped_products.append(product.id)
                     continue
-            
-            # Get image path for the mockup (or fallback image) - use local path or copy from storage to temp file
+
             image_path = None
-            temp_files_to_cleanup = getattr(self, '_pdf_temp_files', None)
-            if temp_files_to_cleanup is None:
-                self._pdf_temp_files = []
-                temp_files_to_cleanup = self._pdf_temp_files
             try:
-                # Try absolute path first (local filesystem)
-                if hasattr(mockup_media.file, 'path'):
+                if hasattr(mockup_media.file, "path"):
                     image_path = mockup_media.file.path
                 else:
                     image_path = os.path.join(settings.MEDIA_ROOT, mockup_media.file.name)
-                
                 if not os.path.exists(image_path) and mockup_media.file.name:
-                    # File may be on remote storage (S3 etc.) - copy to temp file so reportlab can read it
                     try:
                         if default_storage.exists(mockup_media.file.name):
-                            with default_storage.open(mockup_media.file.name, 'rb') as src:
+                            with default_storage.open(mockup_media.file.name, "rb") as src:
                                 suffix = os.path.splitext(mockup_media.file.name)[1].lower()
                                 if suffix not in SUPPORTED_IMAGE_EXTENSIONS:
-                                    suffix = '.jpg'
-                                fd, image_path = tempfile.mkstemp(suffix=suffix, prefix='pdf_img_')
+                                    suffix = ".jpg"
+                                fd, image_path = tempfile.mkstemp(suffix=suffix, prefix="pdf_img_")
                                 os.close(fd)
-                                with open(image_path, 'wb') as dst:
+                                with open(image_path, "wb") as dst:
                                     dst.write(src.read())
                                 temp_files_to_cleanup.append(image_path)
                         else:
                             image_path = None
-                    except Exception as e:
+                    except Exception:
                         image_path = None
-                
                 if not image_path or not os.path.exists(image_path):
                     skipped_products.append(product.id)
                     continue
@@ -422,107 +527,106 @@ def generate_pdf_task(self, pdf_download_id):
                 if file_ext not in SUPPORTED_IMAGE_EXTENSIONS:
                     skipped_products.append(product.id)
                     continue
-            except Exception as e:
+            except Exception:
                 skipped_products.append(product.id)
                 continue
-            
-            # Only add products with valid mockup images
-            # Maintain original position index for sequence tracking
+
             original_position = original_order.get(product.id, idx)
-            included_products.append({
-                'product_id': product.id,
-                'page_number': len(included_products) + 1,  # Use actual count for PDF pages
-                'original_position': original_position,  # Track original position in sequence
-                'title': product.title,
-                'product_number': product.product_number or f"WD{product.id}",  # Add product number with fallback
-                'image_path': image_path
-            })
-            mockup_paths.append(image_path)
-        
+            included_products.append(
+                {
+                    "product_id": product.id,
+                    "page_number": len(included_products) + 1,
+                    "original_position": original_position,
+                    "title": product.title,
+                    "product_number": product.product_number or f"WD{product.id}",
+                    "image_path": image_path,
+                }
+            )
+
         if not included_products:
             raise ValueError(
-                f'No products with usable images for PDF. All {len(products)} product(s) were skipped. '
-                'Ensure each design has at least one image (JPG, PNG, etc.).'
+                f"No products with usable images for PDF. All {len(products)} product(s) were skipped. "
+                "Ensure each design has at least one image (JPG, PNG, etc.)."
             )
-        
+
         pdf_download.included_products = included_products
-        pdf_download.products_count = len(included_products)  # Use actual count of included products
-        
-        # Generate PDF with reportlab - one page per design
+        pdf_download.products_count = len(included_products)
+
         try:
-            
-            # Create PDF canvas
-            c = canvas.Canvas(pdf_file_path, pagesize=letter)
-            page_width, page_height = letter
-            margin = 50  # Define margin outside the loop
-            
-            # Only generate PDF pages for products with valid mockup images
-            # included_products already contains only products with valid mockups
-            # Get customer information from PDF download - refresh from DB to ensure we have latest values
+            # Refresh customer data
             pdf_download.refresh_from_db()
-            customer_name = pdf_download.customer_name or ''
-            customer_mobile = pdf_download.customer_mobile or ''
-            
-            # Resolve logo path: customer logo or default WeDesignz logo (no boxes around any text)
+            customer_name = pdf_download.customer_name or ""
+            customer_mobile = pdf_download.customer_mobile or ""
+
             logo_path = None
-            if pdf_download.customer_logo and hasattr(pdf_download.customer_logo, 'path') and pdf_download.customer_logo.path:
-                if os.path.exists(pdf_download.customer_logo.path):
-                    logo_path = pdf_download.customer_logo.path
+            if (
+                pdf_download.customer_logo
+                and hasattr(pdf_download.customer_logo, "path")
+                and pdf_download.customer_logo.path
+                and os.path.exists(pdf_download.customer_logo.path)
+            ):
+                logo_path = pdf_download.customer_logo.path
             if not logo_path:
-                # Default WeDesignz logo: set PDF_DEFAULT_LOGO_PATH in settings, or place wedesignz_logo.png in media/defaults/
-                default_logo = getattr(settings, 'PDF_DEFAULT_LOGO_PATH', None)
+                from django.conf import settings as dj_settings
+
+                default_logo = getattr(dj_settings, "PDF_DEFAULT_LOGO_PATH", None)
                 if default_logo and os.path.exists(default_logo):
                     logo_path = default_logo
                 else:
-                    alt_default = os.path.join(settings.MEDIA_ROOT, 'defaults', 'wedesignz_logo.png')
+                    alt_default = os.path.join(dj_settings.MEDIA_ROOT, "defaults", "wedesignz_logo.png")
                     if os.path.exists(alt_default):
                         logo_path = alt_default
-            
-            
+
+            # Generate PDF pages
+            page_width, page_height = letter
+            margin = 50
+            c = canvas.Canvas(pdf_file_path, pagesize=letter)
+
             for idx, product_info in enumerate(included_products, 1):
                 if idx > 1:
                     c.showPage()
-                
-                product_id = product_info['product_id']
-                product_title = product_info['title']
-                product_number = product_info.get('product_number', f"WD{product_id}")
-                image_path = product_info['image_path']
-                
-                # --- Layout: top-left logo, top-center name+number (no boxes), center design, bottom design number ---
+
+                product_id = product_info["product_id"]
+                product_number = product_info.get("product_number", f"WD{product_id}")
+                image_path = product_info["image_path"]
+
                 page_w, page_h = page_width, page_height
                 m = margin
-                
-                # 1) Top-left: logo (optional; no box)
+                center_x = page_w / 2
+
                 logo_size = 56
                 if logo_path and os.path.exists(logo_path):
                     try:
-                        c.drawImage(logo_path, m, page_h - m - logo_size, width=logo_size, height=logo_size, preserveAspectRatio=True)
-                    except Exception as e:
+                        c.drawImage(
+                            logo_path,
+                            m,
+                            page_h - m - logo_size,
+                            width=logo_size,
+                            height=logo_size,
+                            preserveAspectRatio=True,
+                        )
+                    except Exception:
                         pass
-                
-                # 2) Top-center: name, then number below (plain text, no boxes)
-                name_text = customer_name or ''
-                number_text = customer_mobile or ''
+
+                name_text = customer_name or ""
+                number_text = customer_mobile or ""
                 c.setFillColorRGB(0.2, 0.2, 0.25)
                 c.setFont("Helvetica-Bold", 14)
-                name_width = c.stringWidth(name_text or ' ', "Helvetica-Bold", 14)
-                center_x = page_w / 2
-                c.drawString(center_x - name_width / 2, page_h - m - 28, name_text[:60] or ' ')
+                name_width = c.stringWidth(name_text or " ", "Helvetica-Bold", 14)
+                c.drawString(center_x - name_width / 2, page_h - m - 28, name_text[:60] or " ")
                 c.setFont("Helvetica", 12)
-                num_width = c.stringWidth(number_text or ' ', "Helvetica", 12)
-                c.drawString(center_x - num_width / 2, page_h - m - 46, number_text[:20] or ' ')
-                
-                # 3) Bottom: design number (plain text, no box)
+                num_width = c.stringWidth(number_text or " ", "Helvetica", 12)
+                c.drawString(center_x - num_width / 2, page_h - m - 46, number_text[:20] or " ")
+
                 c.setFont("Helvetica", 11)
                 c.setFillColorRGB(0.35, 0.35, 0.4)
                 c.drawString(m, m + 8, f"Design: {product_number}")
-                
-                # 4) Center: design image (with margins for header and footer)
+
                 header_used = 70
                 footer_used = 36
                 available_width = page_w - (2 * m)
                 available_height = page_h - (2 * m) - header_used - footer_used
-                
+
                 if image_path and os.path.exists(image_path):
                     try:
                         img = Image.open(image_path)
@@ -534,8 +638,15 @@ def generate_pdf_task(self, pdf_download_id):
                         sh = ih * scale
                         img_x = (page_w - sw) / 2
                         img_y = m + footer_used + (available_height - sh) / 2
-                        c.drawImage(image_path, img_x, img_y, width=sw, height=sh, preserveAspectRatio=True)
-                    except Exception as e:
+                        c.drawImage(
+                            image_path,
+                            img_x,
+                            img_y,
+                            width=sw,
+                            height=sh,
+                            preserveAspectRatio=True,
+                        )
+                    except Exception:
                         c.setFont("Helvetica", 12)
                         c.setFillColorRGB(0.5, 0.5, 0.55)
                         c.drawString(center_x - 60, page_h / 2 - 20, "Image not available")
@@ -543,38 +654,27 @@ def generate_pdf_task(self, pdf_download_id):
                     c.setFont("Helvetica", 12)
                     c.setFillColorRGB(0.5, 0.5, 0.55)
                     c.drawString(center_x - 60, page_h / 2 - 20, "Image not available")
-            
-            # Save PDF (we already validated included_products is non-empty before this try block)
+
             c.save()
-            
-            # Clean up any temp files we created for remote storage images
-            temp_files_to_cleanup = getattr(self, '_pdf_temp_files', [])
+
             for tmp in temp_files_to_cleanup:
                 try:
                     if tmp and os.path.exists(tmp):
                         os.unlink(tmp)
-                except Exception as e:
+                except Exception:
                     pass
-            if hasattr(self, '_pdf_temp_files'):
-                self._pdf_temp_files = []
-            
-            
-            # Verify file was created
+
             if not os.path.exists(pdf_file_path):
-                raise Exception(f'PDF file was not created at {pdf_file_path}')
-            
-            # Get file size
+                raise Exception(f"PDF file was not created at {pdf_file_path}")
+
             file_size = os.path.getsize(pdf_file_path)
             if file_size == 0:
-                raise Exception(f'PDF file was created but is empty (0 bytes) at {pdf_file_path}')
-            
-            
-            # Store relative path (without MEDIA_ROOT)
+                raise Exception(f"PDF file was created but is empty (0 bytes) at {pdf_file_path}")
+
             pdf_download.pdf_file_path = relative_path
             pdf_download.file_size = file_size
-            
-            # Update status to completed
-            pdf_download.status = 'completed'
+
+            pdf_download.status = "completed"
             pdf_download.completed_at = timezone.now()
             pdf_download.save()
             
@@ -659,6 +759,186 @@ def cleanup_design_pdf_files():
     result = {'deleted': deleted_count, 'errors': error_count}
     logger.info(f"cleanup_design_pdf_files: {result}")
     return result
+
+
+@shared_task(bind=True, name="Catalog.tasks.generate_client_pdfs_task", max_retries=0)
+def generate_client_pdfs_task(self, job_id):
+    """
+    Generate one or more PDFs for an admin PDF client job.
+    Uses non-overlapping designs per client and stores PDFs under MEDIA_ROOT/admin_pdf_clients/.
+    """
+    from django.conf import settings
+    from zipfile import ZipFile
+    from Catalog.pdf_clients_service import select_products_for_client_pdfs
+
+    logger.info(f"generate_client_pdfs_task: starting for job_id={job_id}")
+
+    try:
+        with transaction.atomic():
+            job = (
+                PDFClientJob.objects.select_for_update()
+                .select_related("client")
+                .get(id=job_id)
+            )
+
+            # Enforce per-client concurrency
+            if PDFClientJob.objects.filter(
+                client=job.client,
+                status__in=["pending", "processing"],
+            ).exclude(id=job.id).exists():
+                job.status = "failed"
+                job.error_message = "Another PDF generation job is already running for this client."
+                job.progress_percent = 0
+                job.save()
+                return {"status": "failed", "reason": "concurrent_job"}
+
+            job.status = "processing"
+            job.progress_percent = 0
+            job.save()
+
+        # Outside the select_for_update block
+        selection = select_products_for_client_pdfs(
+            client=job.client,
+            designs_per_pdf=job.designs_per_pdf,
+            requested_pdfs=job.requested_pdfs,
+        )
+
+        if selection["actual_pdfs"] == 0 or not selection["included_product_ids_by_pdf"]:
+            job.status = "failed"
+            job.error_message = "Not enough designs available to generate PDFs for this client."
+            job.progress_percent = 0
+            job.total_designs_requested = 0
+            job.total_designs_used = 0
+            job.save()
+            return {"status": "failed", "reason": "no_designs"}
+
+        job.designs_per_pdf = selection["designs_per_pdf"]
+        job.requested_pdfs = selection["requested_pdfs"]
+        job.total_designs_requested = (
+            selection["designs_per_pdf"] * selection["requested_pdfs"]
+        )
+        job.included_product_ids_by_pdf = selection["included_product_ids_by_pdf"]
+        job.total_designs_used = selection["total_designs_used"]
+        job.generated_pdfs = 0
+        job.pdf_file_paths = []
+        job.save()
+
+        media_root = getattr(settings, "MEDIA_ROOT", None)
+        if not media_root or not os.path.isdir(media_root):
+            job.status = "failed"
+            job.error_message = "MEDIA_ROOT is not configured correctly."
+            job.progress_percent = 0
+            job.save()
+            return {"status": "failed", "reason": "no_media_root"}
+
+        client_id = job.client.id
+        base_dir = os.path.join(
+            media_root, "admin_pdf_clients", str(client_id), "jobs", str(job.id)
+        )
+        os.makedirs(base_dir, exist_ok=True)
+
+        pdf_paths = []
+        included_lists = job.included_product_ids_by_pdf or []
+
+        for index, product_ids in enumerate(included_lists, start=1):
+            products = list(
+                Product.objects.filter(id__in=product_ids, status="active", visibility_status="show")
+            )
+            if not products:
+                continue
+
+            pdf_filename = f"client_{client_id}_job_{job.id}_part_{index}.pdf"
+            pdf_path = os.path.join(base_dir, pdf_filename)
+
+            # Resolve logo path (customer_logo or default)
+            logo_path = None
+            if job.customer_logo and hasattr(job.customer_logo, "path") and job.customer_logo.path:
+                if os.path.exists(job.customer_logo.path):
+                    logo_path = job.customer_logo.path
+            if not logo_path:
+                default_logo = getattr(settings, "PDF_DEFAULT_LOGO_PATH", None)
+                if default_logo and os.path.exists(default_logo):
+                    logo_path = default_logo
+                else:
+                    alt_default = os.path.join(
+                        media_root, "defaults", "wedesignz_logo.png"
+                    )
+                    if os.path.exists(alt_default):
+                        logo_path = alt_default
+
+            file_size = generate_client_pdf_for_products(
+                pdf_file_path=pdf_path,
+                products=products,
+                customer_name=job.customer_name,
+                customer_mobile=job.customer_mobile,
+                logo_path=logo_path,
+            )
+
+            rel_path = os.path.relpath(pdf_path, media_root)
+            pdf_paths.append(rel_path)
+
+            job.generated_pdfs += 1
+            job.progress_percent = int(
+                100 * job.generated_pdfs / max(1, len(included_lists))
+            )
+            job.total_designs_used = selection["total_designs_used"]
+            job.save()
+
+        if not pdf_paths:
+            job.status = "failed"
+            job.error_message = "No PDFs could be generated for this job."
+            job.progress_percent = 0
+            job.save()
+            return {"status": "failed", "reason": "no_pdfs"}
+
+        # Create ZIP archive containing all PDFs
+        zip_filename = f"client_{client_id}_job_{job.id}_pdfs.zip"
+        zip_path = os.path.join(base_dir, zip_filename)
+        with ZipFile(zip_path, "w") as zip_file:
+            for rel_path in pdf_paths:
+                abs_path = os.path.join(media_root, rel_path)
+                if os.path.exists(abs_path):
+                    arcname = os.path.basename(abs_path)
+                    zip_file.write(abs_path, arcname=arcname)
+
+        job.pdf_file_paths = pdf_paths
+        job.zip_file_path = os.path.relpath(zip_path, media_root)
+
+        # Update client's used_product_ids with newly used designs
+        used_ids = set(job.client.used_product_ids or [])
+        for product_ids in included_lists:
+            for pid in product_ids:
+                used_ids.add(int(pid))
+        job.client.used_product_ids = sorted({int(x) for x in used_ids})
+        job.client.save()
+
+        job.status = "completed"
+        job.progress_percent = 100
+        job.save()
+
+        logger.info(
+            f"generate_client_pdfs_task: completed for job_id={job_id}, pdfs={len(pdf_paths)}"
+        )
+        return {
+            "status": "completed",
+            "job_id": job_id,
+            "pdfs": len(pdf_paths),
+            "zip_file_path": job.zip_file_path,
+        }
+    except PDFClientJob.DoesNotExist:
+        logger.info(f"generate_client_pdfs_task: job_id={job_id} does not exist")
+        return {"status": "not_found", "job_id": job_id}
+    except Exception as exc:
+        try:
+            job = PDFClientJob.objects.get(id=job_id)
+            job.status = "failed"
+            job.error_message = str(exc)
+            job.progress_percent = 0
+            job.save()
+        except Exception:
+            pass
+        logger.info(f"generate_client_pdfs_task: failed for job_id={job_id}, error={exc}")
+        return {"status": "failed", "job_id": job_id, "error": str(exc)}
 
 
 # Only index PNG for visual search (per design media storage)
