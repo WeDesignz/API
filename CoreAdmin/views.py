@@ -3716,6 +3716,7 @@ def designs_list(request):
         designs = designs.filter(
             Q(title__icontains=search) |
             Q(description__icontains=search) |
+            Q(product_number__icontains=search) |
             Q(created_by__first_name__icontains=search) |
             Q(created_by__last_name__icontains=search) |
             Q(created_by__email__icontains=search)
