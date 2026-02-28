@@ -9,6 +9,7 @@ from datetime import timedelta
 import logging
 import os
 import shutil
+from urllib.parse import urlparse, urlunparse
 from django.core.files.storage import default_storage
 
 from .email_service import EmailService
@@ -1668,167 +1669,89 @@ def post_to_instagram(self, instagram_post_id):
             instagram_post.mark_failed(error_msg)
             return
         
-        # Get all image media files for the product
-        media_files = product.get_media().filter(media_type='image')
-        media_files_list = list(media_files)
-        _log("Media files retrieved", {"count": len(media_files_list), "product_id": product.id, "file_names": [getattr(m, 'file', None).name if getattr(m, 'file', None) else None for m in media_files_list[:10]]}, "C")
-        
-        if not media_files.exists():
-            _log("No image media found", {"product_id": product.id}, "D")
-            instagram_post.mark_failed("No image media found for product")
+        # Use product number to build image path: {product_number}_JPG.jpg or _MOCKUP.jpg (no AVIF)
+        product_number = (getattr(product, 'product_number', None) or '').strip()
+        if not product_number:
+            _log("No product number", {"product_id": product.id}, "D")
+            instagram_post.mark_failed("Product has no product number.")
             return
-        
-        # Pick media based on requested type (admin UI sends: mockup | jpg)
+
         requested_media_type = (getattr(instagram_post, 'media_type', None) or 'jpg').lower().strip()
-        _log("Requested media type", {"requested_media_type": requested_media_type, "instagram_post_media_type": getattr(instagram_post, 'media_type', None)}, "B")
+        _log("Requested media type", {"requested_media_type": requested_media_type, "product_number": product_number}, "B")
 
-        def _get_file_name(m):
-            if not getattr(m, 'file', None):
-                return None
-            try:
-                return m.file.name
-            except (AttributeError, ValueError):
-                return None
-
-        def _file_parts(file_name: str):
-            base = os.path.splitext(os.path.basename(file_name))[0].lower()
-            ext = (os.path.splitext(file_name)[1] or '').lower()
-            return base, ext
-
-        # Define matching rules (case-insensitive)
-        # - jpg: prefer {PRODUCT_NUMBER}_JPG.jpg|jpeg (e.g., WDG00000002_JPG.jpg)
-        #        also accept legacy design_JPG.*
-        # - mockup: prefer {PRODUCT_NUMBER}_MOCKUP.jpg|jpeg|png (e.g., WDG00000002_MOCKUP.jpg)
-        #           also accept legacy mockup.*
+        # Use JPG/PNG only (we have both .jpg and .avif per product; Instagram gets the .jpg)
         if requested_media_type == 'mockup':
-            wanted_exts = ('.jpg', '.jpeg', '.png')
-            strong_suffixes = ('_mockup',)
-            legacy_names = ('mockup',)
+            filename = f"{product_number}_MOCKUP.jpg"
         elif requested_media_type == 'png':
-            wanted_exts = ('.png',)
-            strong_suffixes = ('_png',)
-            legacy_names = ('design_png',)
-        else:  # 'jpg' (default)
-            wanted_exts = ('.jpg', '.jpeg')
-            strong_suffixes = ('_jpg',)
-            legacy_names = ('design_jpg',)
+            filename = f"{product_number}_PNG.png"
+        else:
+            filename = f"{product_number}_JPG.jpg"
 
-        def _is_match(base: str, ext: str):
-            if ext not in wanted_exts:
-                return False
-            if base in legacy_names:
-                return True
-            return any(base.endswith(suf) for suf in strong_suffixes)
+        created_by_id = getattr(product.created_by, 'id', None) if getattr(product, 'created_by', None) else None
+        if not created_by_id:
+            instagram_post.mark_failed("Product has no creator (created_by); cannot resolve image path.")
+            return
+        dir_prefix = f"{created_by_id}/designs/{product.id}/".replace('\\', '/')
+        storage_path = f"{dir_prefix}{filename}".replace('\\', '/')
 
-        # 1) Strong match by suffix/legacy name
-        image_media = None
-        checked_files = []
-        for media in media_files:
-            file_name = _get_file_name(media)
-            if not file_name:
-                continue
-            base, ext = _file_parts(file_name)
-            checked_files.append({"file_name": file_name, "base": base, "ext": ext, "is_match": _is_match(base, ext)})
-            if _is_match(base, ext):
-                image_media = media
-                _log("Strong match found", {"file_name": file_name, "base": base, "ext": ext, "requested_type": requested_media_type}, "E")
-                break
-        if not image_media:
-            _log("No strong match found", {"checked_files": checked_files[:20], "requested_type": requested_media_type, "wanted_exts": list(wanted_exts), "strong_suffixes": list(strong_suffixes)}, "E")
-
-        # 2) Fallbacks
-        if not image_media:
-            # For mockup, try any file that contains 'mockup' in name (common variants)
-            if requested_media_type == 'mockup':
-                for media in media_files:
-                    file_name = _get_file_name(media)
-                    if not file_name:
-                        continue
-                    base, ext = _file_parts(file_name)
-                    if ext in wanted_exts and 'mockup' in base:
-                        image_media = media
-                        break
-
-            # For jpg, try any JPG/JPEG that is NOT a mockup
-            if not image_media and requested_media_type == 'jpg':
-                for media in media_files:
-                    file_name = _get_file_name(media)
-                    if not file_name:
-                        continue
-                    base, ext = _file_parts(file_name)
-                    if ext in wanted_exts and 'mockup' not in base:
-                        image_media = media
-                        break
-
-            # Last resort: first compatible image
-            if not image_media:
-                for media in media_files:
-                    file_name = _get_file_name(media)
-                    if not file_name:
-                        continue
-                    _, ext = _file_parts(file_name)
-                    if ext in wanted_exts:
-                        image_media = media
-                        break
-
-        if not image_media:
-            all_file_info = []
-            for m in media_files:
-                fn = _get_file_name(m)
-                if fn:
-                    b, e = _file_parts(fn)
-                    all_file_info.append({"file": fn, "base": b, "ext": e})
-            _log("No image media found after all attempts", {"requested_type": requested_media_type, "all_files": all_file_info[:30], "wanted_exts": list(wanted_exts)}, "F")
-            if requested_media_type == 'mockup':
-                instagram_post.mark_failed(
-                    "No mockup image found. Expected *_MOCKUP.jpg/jpeg (or mockup.jpg/jpeg/png)."
-                )
-            elif requested_media_type == 'png':
-                instagram_post.mark_failed(
-                    "No PNG image found. Expected *_PNG.png (or design_PNG.png)."
-                )
-            else:
-                instagram_post.mark_failed(
-                    "No JPG image found. Expected *_JPG.jpg/jpeg (or design_JPG.jpg/jpeg)."
-                )
+        if not default_storage.exists(storage_path):
+            _log("Image file not found in storage", {"storage_path": storage_path}, "G")
+            instagram_post.mark_failed(f"Image not found: {filename}. Ensure the file exists at {dir_prefix}.")
             return
 
-        # Get image URL
         try:
-            _log("Image media selected successfully", {"file_name": _get_file_name(image_media), "requested_type": requested_media_type}, "G")
-            image_url = image_media.file.url
-            _log("Image URL retrieved", {"url": str(image_url)[:200] if image_url else None}, "G")
+            image_url = default_storage.url(storage_path)
+            _log("Image URL from product number", {"storage_path": storage_path, "url": str(image_url)[:200]}, "G")
         except Exception as e:
-            error_msg = f"Error getting image URL: {str(e)}"
-            _log("Error getting image URL", {"error": str(e)}, "H")
-            instagram_post.mark_failed(error_msg)
+            instagram_post.mark_failed(f"Error getting image URL: {str(e)}")
             return
+        
+        # Normalize URL to absolute HTTPS (Instagram must receive a valid, non-empty URL)
+        image_url = str(image_url).strip() if image_url else ''
+        original_url = image_url
         
         if not image_url:
-            error_msg = "Image URL not available"
-
+            error_msg = "Image URL is empty; cannot post to Instagram."
+            _log("Empty image URL", {"original_url": original_url}, "K")
             instagram_post.mark_failed(error_msg)
             return
-        
-        # Normalize URL to absolute HTTPS
-        image_url = str(image_url).strip()
-        original_url = image_url
         
         # Check if there's a separate domain for Instagram (publicly accessible)
         instagram_media_domain = getattr(settings, 'INSTAGRAM_MEDIA_DOMAIN', None)
         media_domain = instagram_media_domain or getattr(settings, 'MEDIA_DOMAIN', 'devapi.wedesignz.com')
-        media_domain = media_domain.rstrip('/')
+        media_domain = (media_domain or '').strip().rstrip('/')
+        if not media_domain:
+            error_msg = "INSTAGRAM_MEDIA_DOMAIN or MEDIA_DOMAIN must be set so Instagram can fetch the image."
+            instagram_post.mark_failed(error_msg)
+            return
         
         if image_url.startswith('/'):
-            image_url = f"https://{media_domain}/{image_url.lstrip('/')}"
+            path = image_url.lstrip('/')
+            image_url = f"https://{media_domain}/{path}"
         elif not image_url.startswith(('http://', 'https://')):
-            image_url = f"https://{media_domain}/{image_url.lstrip('/')}"
+            path = image_url.lstrip('/')
+            image_url = f"https://{media_domain}/{path}"
         elif image_url.startswith('http://'):
             image_url = image_url.replace('http://', 'https://', 1)
+        
+        # Normalize path only: collapse duplicate slashes without losing host (fixes empty-URI errors)
+        try:
+            parsed = urlparse(image_url)
+            path = '/' + '/'.join(p for p in (parsed.path or '').split('/') if p)
+            image_url = urlunparse((parsed.scheme, parsed.netloc, path or '/', parsed.params, parsed.query, parsed.fragment))
+        except Exception as e:
+            _log("URL parse error", {"image_url": image_url[:200], "error": str(e)}, "K")
         
         if not image_url.startswith('https://'):
             error_msg = f"Invalid image URL format (must be HTTPS): {image_url[:100]}"
             _log("Invalid URL format", {"original_url": original_url, "final_url": image_url}, "K")
+            instagram_post.mark_failed(error_msg)
+            return
+        
+        parsed = urlparse(image_url)
+        if not parsed.netloc or (parsed.path in ('', '/')):
+            error_msg = f"Image URL must include host and path (Instagram could not use: {image_url[:80]}...)"
+            _log("URL missing host or path", {"final_url": image_url}, "K")
             instagram_post.mark_failed(error_msg)
             return
         
@@ -1851,7 +1774,11 @@ def post_to_instagram(self, instagram_post_id):
             validation_passed = True
         except requests.exceptions.HTTPError as e:
             # HTTP error (404, 403, etc.) - file likely doesn't exist or isn't accessible
-            status_code = e.response.status_code if hasattr(e, 'response') and e.response else None
+            resp = getattr(e, 'response', None)
+            status_code = getattr(resp, 'status_code', None) if resp else None
+            err_str = str(e).lower()
+            if status_code is None and ('404' in err_str or 'not found' in err_str):
+                status_code = 404
             validation_error = str(e)
             _log("URL validation failed - HTTP error", {"url": image_url, "error": validation_error, "status_code": status_code}, "L")
             if status_code == 404:
@@ -1867,7 +1794,7 @@ def post_to_instagram(self, instagram_post_id):
                 else:
                     error_msg = (
                         f"Image file not found on server (404): {image_url}\n"
-                        f"Ensure media files are on the server or set INSTAGRAM_MEDIA_DOMAIN to where they are publicly accessible."
+                        f"Ensure the JPEG exists at that URL (e.g. {filename}) or set INSTAGRAM_MEDIA_DOMAIN to where media is publicly accessible."
                     )
                 instagram_post.mark_failed(error_msg)
                 return
@@ -1880,11 +1807,10 @@ def post_to_instagram(self, instagram_post_id):
                 instagram_post.mark_failed(error_msg)
                 return
             else:
-                # Other HTTP errors - proceed but log warning
-                logger.warning(
-                    "Image URL returned HTTP error %s: %s. Proceeding with post (Instagram will attempt to fetch).",
-                    status_code, str(e)
-                )
+                # Other HTTP errors - do NOT send broken URL to Instagram; fail with clear message
+                error_msg = f"Image URL returned HTTP {status_code or 'error'}: {str(e)}. Fix the URL or ensure the file is accessible."
+                instagram_post.mark_failed(error_msg)
+                return
         except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
             # Worker cannot reach media server (e.g. local dev, DNS not resolvable). Skip validation
             # so Instagram can still fetch the URL if it is publicly accessible.
@@ -1904,14 +1830,26 @@ def post_to_instagram(self, instagram_post_id):
                 str(e),
             )
         
-        # Post to Instagram
+        # Post to Instagram (retry once on generic "unexpected error" - often transient)
         is_story = instagram_post.post_type == 'story'
-
-        result = instagram_service.create_and_publish_post(
-            image_url=image_url,
-            caption=instagram_post.caption or '',
-            is_story=is_story
-        )
+        max_attempts = 2
+        result = None
+        for attempt in range(max_attempts):
+            result = instagram_service.create_and_publish_post(
+                image_url=image_url,
+                caption=instagram_post.caption or '',
+                is_story=is_story
+            )
+            if result and result.get('success'):
+                break
+            err = (result or {}).get('error', '') or ''
+            if attempt < max_attempts - 1 and (
+                'unexpected error' in err.lower() or 'retry your request' in err.lower()
+            ):
+                import time
+                time.sleep(5 + attempt * 5)  # 5s then 10s
+                continue
+            break
         
         # Handle result
         if result and result.get('success') and result.get('data') and result['data'].get('id'):

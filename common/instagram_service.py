@@ -109,6 +109,12 @@ class InstagramService:
             if not user_info:
                 return None
         
+        # Instagram requires a non-empty, publicly reachable image URL
+        image_url = (image_url or '').strip()
+        if not image_url:
+            self.integration.update_error("Image URL is empty; Instagram requires a valid media URI.")
+            return None
+        
         url = f"{self.base_url}/{self.integration.user_id}/media"
         
         params = {
@@ -121,9 +127,9 @@ class InstagramService:
             # Instagram Stories API requires media_type='STORIES' and NO caption
             params['media_type'] = 'STORIES'
         else:
-            # Regular posts: explicitly set media_type='IMAGE' (required by Instagram Graph API)
-            params['media_type'] = 'IMAGE'
-            # Regular posts can have captions
+            # Regular feed posts: do NOT send media_type. Per Meta docs it is only for
+            # STORIES, REELS, CAROUSEL. Single image = image_url + caption only.
+            # (IMAGE → "Only photo or video..."; PHOTO → "Unknown media type".)
             if caption:
                 params['caption'] = caption[:2200]  # Instagram limits caption to 2200 chars
         
@@ -166,16 +172,26 @@ class InstagramService:
             if hasattr(e, 'response') and e.response is not None:
                 try:
                     error_data = e.response.json()
-                    error_msg = error_data.get('error', {}).get('message', str(e))
+                    err = error_data.get('error', {})
+                    error_msg = err.get('message', str(e))
+                    # Surface Instagram's user-facing messages (often more helpful than generic "unexpected error")
+                    user_title = err.get('error_user_title', '')
+                    user_msg = err.get('error_user_msg', '')
+                    if user_title or user_msg:
+                        error_msg = f"{error_msg}. {user_title or ''} {user_msg or ''}".strip()
                     error_details = {
-                        'error_code': error_data.get('error', {}).get('code'),
-                        'error_type': error_data.get('error', {}).get('type'),
-                        'error_subcode': error_data.get('error', {}).get('error_subcode'),
+                        'error_code': err.get('code'),
+                        'error_type': err.get('type'),
+                        'error_subcode': err.get('error_subcode'),
                         'full_error': error_data
                     }
-                except:
-                    error_msg = e.response.text[:500]
-                    error_details = {'response_text': e.response.text[:500], 'status_code': e.response.status_code}
+                except Exception:
+                    resp = getattr(e, 'response', None)
+                    error_msg = (resp.text[:500] if resp and getattr(resp, 'text', None) else None) or str(e)
+                    error_details = {
+                        'response_text': getattr(resp, 'text', str(e))[:500] if resp else str(e),
+                        'status_code': getattr(resp, 'status_code', None) if resp else None
+                    }
             
             _log("Container creation failed", {"error": error_msg, "error_details": error_details, "image_url": image_url[:200], "params": {k: v for k, v in params.items() if k != 'access_token'}}, "J")
             
