@@ -2435,9 +2435,13 @@ def instagram_posts_list(request):
     
     posts_data = []
     for post in page_obj.object_list:
+        product_number = getattr(post.product, 'product_number', None)
+        if product_number is not None:
+            product_number = str(product_number).strip() or None
         posts_data.append({
             'id': post.id,
             'product_id': post.product.id,
+            'product_number': product_number,
             'product_title': post.product.title,
             'media_type': post.media_type,
             'caption': post.caption,
