@@ -121,16 +121,33 @@ class InstagramService:
             # Instagram Stories API requires media_type='STORIES' and NO caption
             params['media_type'] = 'STORIES'
         else:
+            # Regular posts: explicitly set media_type='IMAGE' (required by Instagram Graph API)
+            params['media_type'] = 'IMAGE'
             # Regular posts can have captions
             if caption:
                 params['caption'] = caption[:2200]  # Instagram limits caption to 2200 chars
         
         try:
+            import json
+            import os
+            import logging
+            logger = logging.getLogger(__name__)
+            log_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), '.cursor', 'debug-4b2be8.log')
+            def _log(msg, data=None, hyp=None):
+                try:
+                    with open(log_path, 'a') as f:
+                        f.write(json.dumps({"sessionId":"4b2be8","id":f"log_{int(__import__('time').time()*1000)}","timestamp":int(__import__('time').time()*1000),"location":"common/instagram_service.py:create_media_container","message":msg,"data":data or {},"runId":"run1","hypothesisId":hyp or "A"})+'\n')
+                except: pass
+            
+            _log("Creating media container", {"image_url": image_url[:200], "is_story": is_story, "media_type": params.get('media_type'), "has_caption": bool(params.get('caption'))}, "I")
+            
             response = requests.post(url, params=params, timeout=30)
             response.raise_for_status()
             
             data = response.json()
             container_id = data.get('id')
+            
+            _log("Container created", {"container_id": container_id, "status_code": data.get('status_code')}, "I")
             
             if not container_id:
                 error_msg = "Instagram API did not return a container ID"
@@ -145,12 +162,22 @@ class InstagramService:
             
         except requests.exceptions.RequestException as e:
             error_msg = str(e)
+            error_details = {}
             if hasattr(e, 'response') and e.response is not None:
                 try:
                     error_data = e.response.json()
                     error_msg = error_data.get('error', {}).get('message', str(e))
+                    error_details = {
+                        'error_code': error_data.get('error', {}).get('code'),
+                        'error_type': error_data.get('error', {}).get('type'),
+                        'error_subcode': error_data.get('error', {}).get('error_subcode'),
+                        'full_error': error_data
+                    }
                 except:
                     error_msg = e.response.text[:500]
+                    error_details = {'response_text': e.response.text[:500], 'status_code': e.response.status_code}
+            
+            _log("Container creation failed", {"error": error_msg, "error_details": error_details, "image_url": image_url[:200], "params": {k: v for k, v in params.items() if k != 'access_token'}}, "J")
             
             self.integration.update_error(error_msg)
             return None
