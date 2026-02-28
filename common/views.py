@@ -2468,6 +2468,26 @@ def instagram_posts_list(request):
     })
 
 
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def instagram_posted_product_numbers(request):
+    """
+    Return product_numbers that have at least one InstagramPost with status='success'.
+    Used by the admin Instagram posts page so "Posted" = any one success entry for that product.
+    No pagination; returns the full set.
+    """
+    product_numbers = list(
+        InstagramPost.objects.filter(status='success')
+        .exclude(product__product_number__isnull=True)
+        .exclude(product__product_number='')
+        .values_list('product__product_number', flat=True)
+        .distinct()
+    )
+    # Normalise to strings (values_list can return mixed types)
+    product_numbers = [str(pn).strip() for pn in product_numbers if pn]
+    return JsonResponse({'product_numbers': product_numbers})
+
+
 # ==================== Pinterest Posts (admin list, retry, bulk) ====================
 
 def _get_product_thumbnail_url(request, product):
