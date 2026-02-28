@@ -38,5 +38,6 @@ urlpatterns = [
     path('instagram/post', views.instagram_post, name='instagram_post_no_slash'),
     path('instagram/posts/', views.instagram_posts_list, name='instagram_posts_list'),
     path('instagram/posts', views.instagram_posts_list, name='instagram_posts_list_no_slash'),
+    path('instagram/posted-product-numbers/', views.instagram_posted_product_numbers, name='instagram_posted_product_numbers'),
 ]
 
