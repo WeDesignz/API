@@ -1883,7 +1883,7 @@ def post_to_instagram(self, instagram_post_id):
 
 # ==================== PINTEREST TASKS ====================
 
-@shared_task(bind=True, max_retries=3, rate_limit='2/m')
+@shared_task(bind=True, max_retries=1, rate_limit='2/m')
 def post_design_to_pinterest(self, pinterest_post_id, base_url=None):
     """
     Post a design to Pinterest after approval.
