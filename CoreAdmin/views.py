@@ -1503,6 +1503,114 @@ def periodic_tasks_list(request):
     return paginator.get_paginated_response(results)
 
 
+# ==================== Management Commands ====================
+
+# Project app labels that define management commands we expose in the admin UI.
+_PROJECT_APP_LABELS = {'common', 'Catalog', 'Wallet', 'Orders', 'MediaFiles', 'CoreAdmin', 'AdminAnalytics'}
+
+
+def _get_management_commands_list():
+    """Return list of project management commands with name, app, help, and arguments."""
+    from django.core.management import get_commands, load_command_class
+    commands = get_commands()
+    result = []
+    skip_dest = {'version', 'verbosity', 'settings', 'pythonpath', 'traceback'}
+    for name, app in commands.items():
+        if app not in _PROJECT_APP_LABELS:
+            continue
+        try:
+            cmd = load_command_class(app, name)
+            help_text = getattr(cmd, 'help', '') or ''
+            parser = cmd.create_parser('manage.py', name)
+            args_list = []
+            for action in getattr(parser, '_actions', []):
+                dest = getattr(action, 'dest', None)
+                if dest in skip_dest:
+                    continue
+                optional = bool(getattr(action, 'option_strings', None))
+                opt_name = action.option_strings[0] if getattr(action, 'option_strings', None) else (dest or '')
+                args_list.append({
+                    'name': opt_name,
+                    'dest': dest,
+                    'help': getattr(action, 'help') or '',
+                    'optional': optional,
+                    'default': getattr(action, 'default', None),
+                })
+            result.append({
+                'name': name,
+                'app': app,
+                'help': help_text,
+                'arguments': args_list,
+            })
+        except Exception:
+            continue
+    result.sort(key=lambda x: (x['app'], x['name']))
+    return result
+
+
+@swagger_auto_schema(
+    method='get',
+    operation_summary="List management commands",
+    operation_description="List Django management commands from project apps (Super Admin only).",
+    responses={200: openapi.Response(description="List of commands with help and arguments"), 403: openapi.Response(description="Access denied")},
+    tags=['Management Commands']
+)
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def management_commands_list(request):
+    err_resp, _ = _scheduled_tasks_superuser_required(request)
+    if err_resp is not None:
+        return err_resp
+    commands = _get_management_commands_list()
+    return Response({'commands': commands}, status=status.HTTP_200_OK)
+
+
+@swagger_auto_schema(
+    method='post',
+    operation_summary="Run management command",
+    operation_description="Run a Django management command (Super Admin only). Optional args and kwargs in body.",
+    request_body=openapi.Schema(
+        type=openapi.TYPE_OBJECT,
+        properties={
+            'args': openapi.Schema(type=openapi.TYPE_ARRAY, items=openapi.Schema(type=openapi.TYPE_STRING), description='Positional arguments'),
+            'kwargs': openapi.Schema(type=openapi.TYPE_OBJECT, description='Keyword arguments (e.g. {"dry_run": true})'),
+        },
+    ),
+    responses={200: openapi.Response(description="Command output"), 400: openapi.Response(description="Bad request"), 403: openapi.Response(description="Access denied")},
+    tags=['Management Commands']
+)
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def management_command_run(request, command_name):
+    from django.core.management import call_command, get_commands
+    from io import StringIO
+    err_resp, _ = _scheduled_tasks_superuser_required(request)
+    if err_resp is not None:
+        return err_resp
+    commands = get_commands()
+    app = commands.get(command_name)
+    if not app or app not in _PROJECT_APP_LABELS:
+        return Response({'success': False, 'error': 'Unknown or disallowed command.'}, status=status.HTTP_404_NOT_FOUND)
+    args = request.data.get('args') if isinstance(request.data.get('args'), list) else []
+    kwargs = request.data.get('kwargs') if isinstance(request.data.get('kwargs'), dict) else {}
+    stdout_buf = StringIO()
+    stderr_buf = StringIO()
+    try:
+        call_command(command_name, *args, stdout=stdout_buf, stderr=stderr_buf, **kwargs)
+        return Response({
+            'success': True,
+            'stdout': stdout_buf.getvalue(),
+            'stderr': stderr_buf.getvalue(),
+        }, status=status.HTTP_200_OK)
+    except Exception as e:
+        return Response({
+            'success': False,
+            'error': str(e),
+            'stdout': stdout_buf.getvalue(),
+            'stderr': stderr_buf.getvalue(),
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+
 @swagger_auto_schema(
     method='post',
     operation_summary="Change Admin Password",

@@ -5,7 +5,7 @@ from django.views.decorators.csrf import csrf_exempt
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
 from django.utils import timezone
-from datetime import timedelta
+from datetime import timedelta, datetime, date
 import os
 import requests
 import logging
@@ -2413,10 +2413,14 @@ def instagram_post(request):
 def instagram_posts_list(request):
     """
     Get list of Instagram posts with filtering and pagination.
+    Supports from_date, to_date (ISO date YYYY-MM-DD) to filter by posted_at (for success posts).
+    When date range is used, orders by posted_at descending (recent first).
     """
     from django.core.paginator import Paginator
     
     status_filter = request.GET.get('status')
+    from_date_str = request.GET.get('from_date')
+    to_date_str = request.GET.get('to_date')
     page = int(request.GET.get('page', 1))
     limit = int(request.GET.get('limit', 20))
     
@@ -2425,7 +2429,20 @@ def instagram_posts_list(request):
     if status_filter:
         posts = posts.filter(status=status_filter)
     
-    posts = posts.order_by('-created_at')
+    # Date range filter on posted_at (for "posted" history view)
+    if from_date_str or to_date_str:
+        try:
+            if from_date_str:
+                from_d = datetime.strptime(from_date_str, '%Y-%m-%d').date()
+                posts = posts.filter(posted_at__date__gte=from_d)
+            if to_date_str:
+                to_d = datetime.strptime(to_date_str, '%Y-%m-%d').date()
+                posts = posts.filter(posted_at__date__lte=to_d)
+            posts = posts.order_by('-posted_at')
+        except ValueError:
+            pass
+    if not (from_date_str or to_date_str):
+        posts = posts.order_by('-created_at')
     
     paginator = Paginator(posts, limit)
     page_obj = paginator.get_page(page)
@@ -2440,6 +2457,7 @@ def instagram_posts_list(request):
             'product_id': post.product.id,
             'product_number': product_number,
             'product_title': post.product.title,
+            'product_thumbnail_url': _get_product_thumbnail_url(request, post.product),
             'media_type': post.media_type,
             'caption': post.caption,
             'post_type': post.post_type,
