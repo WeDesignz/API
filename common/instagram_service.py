@@ -65,6 +65,7 @@ class InstagramService:
         
         try:
             response = requests.get(url, params=params, timeout=30)
+            self.integration.update_rate_limit_from_response(response)
             response.raise_for_status()
             
             user_data = response.json()
@@ -79,6 +80,8 @@ class InstagramService:
             return user_data
             
         except requests.exceptions.RequestException as e:
+            if hasattr(e, 'response') and e.response is not None:
+                self.integration.update_rate_limit_from_response(e.response)
             error_msg = str(e)
             if hasattr(e, 'response') and e.response is not None:
                 try:
@@ -148,6 +151,7 @@ class InstagramService:
             _log("Creating media container", {"image_url": image_url[:200], "is_story": is_story, "media_type": params.get('media_type'), "has_caption": bool(params.get('caption'))}, "I")
             
             response = requests.post(url, params=params, timeout=30)
+            self.integration.update_rate_limit_from_response(response)
             response.raise_for_status()
             
             data = response.json()
@@ -167,6 +171,8 @@ class InstagramService:
             }
             
         except requests.exceptions.RequestException as e:
+            if hasattr(e, 'response') and e.response is not None:
+                self.integration.update_rate_limit_from_response(e.response)
             error_msg = str(e)
             error_details = {}
             if hasattr(e, 'response') and e.response is not None:
@@ -222,6 +228,7 @@ class InstagramService:
         
         try:
             response = requests.post(url, params=params, timeout=30)
+            self.integration.update_rate_limit_from_response(response)
             response.raise_for_status()
             
             data = response.json()
@@ -244,6 +251,8 @@ class InstagramService:
             }
             
         except requests.exceptions.RequestException as e:
+            if hasattr(e, 'response') and e.response is not None:
+                self.integration.update_rate_limit_from_response(e.response)
             error_msg = str(e)
             if hasattr(e, 'response') and e.response is not None:
                 try:
@@ -368,6 +377,7 @@ class InstagramService:
         
         try:
             response = requests.get(url, params=params, timeout=30)
+            self.integration.update_rate_limit_from_response(response)
             response.raise_for_status()
             
             data = response.json()
@@ -377,6 +387,8 @@ class InstagramService:
             }
             
         except requests.exceptions.RequestException as e:
+            if hasattr(e, 'response') and e.response is not None:
+                self.integration.update_rate_limit_from_response(e.response)
             error_msg = str(e)
             if hasattr(e, 'response') and e.response is not None:
                 try:
@@ -407,6 +419,7 @@ class InstagramService:
         
         try:
             response = requests.get(url, params=params, timeout=30)
+            self.integration.update_rate_limit_from_response(response)
             response.raise_for_status()
             
             token_data = response.json()
@@ -422,6 +435,8 @@ class InstagramService:
             return True
             
         except requests.exceptions.RequestException as e:
+            if hasattr(e, 'response') and e.response is not None:
+                self.integration.update_rate_limit_from_response(e.response)
             error_msg = str(e)
             if hasattr(e, 'response') and e.response is not None:
                 try:

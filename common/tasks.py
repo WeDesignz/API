@@ -1883,389 +1883,159 @@ def post_to_instagram(self, instagram_post_id):
 
 # ==================== PINTEREST TASKS ====================
 
-@shared_task(bind=True, max_retries=1, rate_limit='2/m')
+def execute_pinterest_post_sync(pinterest_post_id, base_url=None):
+    """
+    Execute Pinterest post synchronously. Used by Celery task (on approval) and by
+    "Post again" API so no extra task is queued. Returns (success, error_message).
+    """
+    import os
+    import time
+    from django.conf import settings
+    from .models import PinterestPost, PinterestIntegration
+    from Catalog.models import Product
+
+    integration = PinterestIntegration.get_instance()
+    if not integration.is_enabled:
+        try:
+            post = PinterestPost.objects.get(id=pinterest_post_id)
+            post.mark_failed("Pinterest integration is disabled")
+        except PinterestPost.DoesNotExist:
+            pass
+        return False, "Pinterest integration is disabled"
+
+    try:
+        pinterest_post = PinterestPost.objects.get(id=pinterest_post_id)
+    except PinterestPost.DoesNotExist:
+        return False, "Pinterest post not found"
+
+    try:
+        product = pinterest_post.product
+    except Product.DoesNotExist:
+        pinterest_post.mark_failed("Product not found")
+        return False, "Product not found"
+
+    try:
+        from .pinterest_service import PinterestService
+        pinterest_service = PinterestService()
+    except Exception as e:
+        pinterest_post.mark_failed(str(e))
+        return False, str(e)
+
+    media_files = product.get_media().filter(media_type='image')
+    if not media_files.exists():
+        pinterest_post.mark_failed("No image media found for product")
+        return False, "No image media found for product"
+
+    mockup_avif = None
+    design_jpg_avif = None
+    for media in media_files:
+        if not media.file:
+            continue
+        file_name = media.file.name.lower()
+        base_name = os.path.splitext(os.path.basename(file_name))[0]
+        if file_name.endswith('.avif'):
+            if 'mockup' in base_name.lower() or base_name.endswith('_mockup'):
+                mockup_avif = media
+            elif '_jpg' in base_name.lower() or base_name.endswith('_jpg'):
+                design_jpg_avif = media
+
+    if not mockup_avif and not design_jpg_avif:
+        pinterest_post.mark_failed("No AVIF images (mockup.avif or design_JPG.avif) found")
+        return False, "No AVIF images found"
+
+    media_domain = getattr(settings, 'MEDIA_DOMAIN', 'devapi.wedesignz.com')
+    if not media_domain.startswith('http'):
+        media_domain = f"https://{media_domain}"
+    if not (media_domain.startswith('https://') and 'localhost' not in media_domain.lower() and '127.0.0.1' not in media_domain):
+        err = f"Invalid media domain for Pinterest: {media_domain}"
+        pinterest_post.mark_failed(err)
+        return False, err
+
+    base_title = product.title[:100] if product.title else "Design"
+    description = product.description[:800] if product.description else ""
+    if product.product_number:
+        description = f"Design #{product.product_number}\n\n{description}"
+
+    domain = getattr(settings, 'SITE_DOMAIN', 'wedesignz.com')
+    if not domain.startswith('http'):
+        domain = f"https://{domain}"
+    link = f"{domain}/customer-dashboard?product={product.id}" if (domain.startswith('https://') and 'localhost' not in domain.lower() and '127.0.0.1' not in domain) else None
+
+    pinterest_post.mark_retrying()
+    pins_data = {}
+    errors = []
+
+    if mockup_avif:
+        try:
+            mockup_url = f"{media_domain}{mockup_avif.file.url}"
+            if mockup_avif.file.name.lower().endswith('.avif'):
+                from .avif_converter import convert_avif_to_jpeg
+                _path, jpeg_url = convert_avif_to_jpeg(mockup_avif.file.name, quality=85)
+                if jpeg_url:
+                    mockup_url = jpeg_url
+            pin_params = {'image_url': mockup_url, 'title': (f"{base_title} - Mockup")[:100], 'description': description}
+            if link:
+                pin_params['link'] = link
+            result = pinterest_service.create_pin(**pin_params)
+            if result and 'id' in result:
+                pins_data['mockup'] = {'id': result.get('id'), 'url': result.get('url', '')}
+            elif result and 'error' in result:
+                errors.append(f"Mockup: {result.get('error')} (HTTP {result.get('status_code', '')})")
+            else:
+                integration.refresh_from_db()
+                errors.append(f"Mockup: {integration.last_error or 'Unknown error'}")
+        except Exception as e:
+            errors.append(f"Mockup: {str(e)}")
+
+    if mockup_avif or design_jpg_avif:
+        time.sleep(5)
+
+    if design_jpg_avif:
+        try:
+            design_url = f"{media_domain}{design_jpg_avif.file.url}"
+            if design_jpg_avif.file.name.lower().endswith('.avif'):
+                from .avif_converter import convert_avif_to_jpeg
+                _path, jpeg_url = convert_avif_to_jpeg(design_jpg_avif.file.name, quality=85)
+                if jpeg_url:
+                    design_url = jpeg_url
+            pin_params = {'image_url': design_url, 'title': (f"{base_title} - Design")[:100], 'description': description}
+            if link:
+                pin_params['link'] = link
+            result = pinterest_service.create_pin(**pin_params)
+            if result and 'id' in result:
+                pins_data['design'] = {'id': result.get('id'), 'url': result.get('url', '')}
+            elif result and 'error' in result:
+                errors.append(f"Design: {result.get('error')} (HTTP {result.get('status_code', '')})")
+            else:
+                integration.refresh_from_db()
+                errors.append(f"Design: {integration.last_error or 'Unknown error'}")
+        except Exception as e:
+            errors.append(f"Design: {str(e)}")
+
+    if pins_data:
+        pinterest_post.mark_success(pins_data=pins_data)
+        return True, None
+
+    full_error_msg = " | ".join(["Failed to post any pins"] + (errors or ["No error details"]))
+    pinterest_post.mark_failed(full_error_msg)
+    return False, full_error_msg
+
+
+@shared_task(bind=True, rate_limit='2/m')
 def post_design_to_pinterest(self, pinterest_post_id, base_url=None):
     """
-    Post a design to Pinterest after approval.
-    Posts both mockup.avif and design_JPG.avif as separate pins.
-    This runs asynchronously so it doesn't block the approval process.
-    Updates PinterestPost record with result.
+    Post a design to Pinterest after approval (queued from approval flow only).
+    No retries: on failure the post is marked failed; admin can use "Post again" to post synchronously.
     """
-    import logging
-    import os
-    logger = logging.getLogger(__name__)
-    
-    try:
-        from django.conf import settings
-        from .models import PinterestPost, PinterestIntegration
-        from Catalog.models import Product
-        
-        # Check if Pinterest is enabled
-        integration = PinterestIntegration.get_instance()
-        if not integration.is_enabled:
-
+    success, error_message = execute_pinterest_post_sync(pinterest_post_id, base_url)
+    if not success and error_message:
+        try:
+            from .models import PinterestPost, PinterestIntegration
             pinterest_post = PinterestPost.objects.get(id=pinterest_post_id)
-            pinterest_post.mark_failed("Pinterest integration is disabled")
-            return
-        
-        # Get the PinterestPost record
-        try:
-            pinterest_post = PinterestPost.objects.get(id=pinterest_post_id)
-        except PinterestPost.DoesNotExist:
-            return
-        
-        # Get the product
-        try:
-            product = pinterest_post.product
-        except Product.DoesNotExist:
-            pinterest_post.mark_failed("Product not found")
-            return
-        
-        # Check if Pinterest is configured
-        try:
-            from .pinterest_service import PinterestService
-            pinterest_service = PinterestService()
-        except Exception as e:
-            error_msg = f"Pinterest not configured: {str(e)}"
-
-            pinterest_post.mark_failed(error_msg)
-            return
-        
-        # Get media files (images)
-        media_files = product.get_media().filter(media_type='image')
-        
-        if not media_files.exists():
-
-            pinterest_post.mark_failed("No image media found for product")
-            return
-        
-        # Find mockup.avif and design_JPG.avif
-        mockup_avif = None
-        design_jpg_avif = None
-        
-        for media in media_files:
-            if not media.file:
-                continue
-            
-            file_name = media.file.name.lower()
-            base_name = os.path.splitext(os.path.basename(file_name))[0]
-            
-            # Check for AVIF files
-            if file_name.endswith('.avif'):
-                # Check for mockup.avif (could be mockup.avif or {product_number}_MOCKUP.avif)
-                if 'mockup' in base_name.lower() or base_name.endswith('_mockup'):
-                    mockup_avif = media
-
-                # Check for design_JPG.avif (could be design_JPG.avif or {product_number}_JPG.avif)
-                elif '_jpg' in base_name.lower() or base_name.endswith('_jpg'):
-                    design_jpg_avif = media
-
-        # Need at least one image to post
-        if not mockup_avif and not design_jpg_avif:
-
-            pinterest_post.mark_failed("No AVIF images (mockup.avif or design_JPG.avif) found")
-            return
-        
-        # Build base URL for media files
-        # Pinterest requires HTTPS and publicly accessible URLs (no localhost)
-        # Always use MEDIA_DOMAIN from settings (where media files are actually hosted)
-        media_domain = getattr(settings, 'MEDIA_DOMAIN', 'devapi.wedesignz.com')
-        if not media_domain.startswith('http'):
-            media_domain = f"https://{media_domain}"
-        
-        # Validate media domain - must be HTTPS and not localhost
-        if not (media_domain.startswith('https://') and 'localhost' not in media_domain.lower() and '127.0.0.1' not in media_domain):
-            error_msg = f"Invalid media domain for Pinterest: {media_domain}. Pinterest requires publicly accessible HTTPS URLs."
-
-            pinterest_post.mark_failed(error_msg)
-            return
-        
-        # Prepare pin details
-        base_title = product.title[:100] if product.title else "Design"  # Pinterest limit
-        description = product.description[:800] if product.description else ""
-        
-        # Add design number if available
-        if product.product_number:
-            description = f"Design #{product.product_number}\n\n{description}"
-        
-        # Prepare link to design page
-        # Pinterest requires HTTPS and publicly accessible URLs (no localhost)
-        # Always use production domain for Pinterest links (Pinterest doesn't accept localhost)
-        link = None
-        domain = getattr(settings, 'SITE_DOMAIN', 'wedesignz.com')
-        if not domain.startswith('http'):
-            domain = f"https://{domain}"
-        
-        # Validate domain - must be HTTPS and not localhost
-        if domain.startswith('https://') and 'localhost' not in domain.lower() and '127.0.0.1' not in domain:
-            # Link to customer dashboard with product ID to auto-open product modal
-            link = f"{domain}/customer-dashboard?product={product.id}"
-
-        else:
-            # Invalid domain (localhost), skip link - Pinterest allows pins without links
-
-            link = None
-        
-        # Mark as retrying
-        pinterest_post.mark_retrying()
-        
-        # Post pins - create separate pins for mockup and design
-        pins_data = {}
-        errors = []  # Track errors for each pin attempt
-        
-        # Post mockup.avif (convert to JPEG for Pinterest compatibility)
-        if mockup_avif:
-            try:
-                # Pinterest doesn't support AVIF, so convert to JPEG
-                mockup_url = f"{media_domain}{mockup_avif.file.url}"
-                
-                # If it's an AVIF file, convert to JPEG
-                if mockup_avif.file.name.lower().endswith('.avif'):
-                    from .avif_converter import convert_avif_to_jpeg
-
-                    jpeg_path, jpeg_url = convert_avif_to_jpeg(mockup_avif.file.name, quality=85)
-                    
-                    if jpeg_url:
-                        mockup_url = jpeg_url
-                    else:
-                        pass
-
-                mockup_title = f"{base_title} - Mockup"
-                
-                pin_params = {
-                    'image_url': mockup_url,
-                    'title': mockup_title[:100],  # Pinterest limit
-                    'description': description,
-                }
-                if link:
-                    pin_params['link'] = link
-
-                result = pinterest_service.create_pin(**pin_params)
-                
-                if result and 'id' in result:
-                    pins_data['mockup'] = {
-                        'id': result.get('id'),
-                        'url': result.get('url', '')
-                    }
-
-                elif result and 'error' in result:
-                    # Detailed error from create_pin
-                    error_info = result.get('error', 'Unknown error')
-                    error_type = result.get('type', 'unknown')
-                    status_code = result.get('status_code')
-                    
-                    error_msg = f"Mockup pin failed: {error_info}"
-                    if status_code:
-                        error_msg += f" (HTTP {status_code})"
-                    
-                    errors.append(error_msg)
-
-                else:
-                    # Fallback: check integration for error
-                    integration.refresh_from_db()
-                    error_detail = integration.last_error if integration.last_error else "Unknown error (no error details available)"
-                    error_msg = f"Mockup pin failed: {error_detail}"
-                    errors.append(error_msg)
-
-            except Exception as e:
-                error_msg = f"Exception posting mockup pin: {str(e)}"
-                errors.append(error_msg)
-
-        # Delay between pins to reduce Pinterest rate-limit (429) risk.
-        import time
-        if mockup_avif or design_jpg_avif:
-            time.sleep(5)
-
-        # Post design_JPG.avif (convert to JPEG for Pinterest compatibility)
-        if design_jpg_avif:
-            try:
-                # Pinterest doesn't support AVIF, so convert to JPEG
-                design_url = f"{media_domain}{design_jpg_avif.file.url}"
-                
-                # If it's an AVIF file, convert to JPEG
-                if design_jpg_avif.file.name.lower().endswith('.avif'):
-                    from .avif_converter import convert_avif_to_jpeg
-
-                    jpeg_path, jpeg_url = convert_avif_to_jpeg(design_jpg_avif.file.name, quality=85)
-                    
-                    if jpeg_url:
-                        design_url = jpeg_url
-                    else:
-                        pass
-
-                design_title = f"{base_title} - Design"
-                
-                pin_params = {
-                    'image_url': design_url,
-                    'title': design_title[:100],  # Pinterest limit
-                    'description': description,
-                }
-                if link:
-                    pin_params['link'] = link
-
-                result = pinterest_service.create_pin(**pin_params)
-                
-                if result and 'id' in result:
-                    pins_data['design'] = {
-                        'id': result.get('id'),
-                        'url': result.get('url', '')
-                    }
-
-                elif result and 'error' in result:
-                    # Detailed error from create_pin
-                    error_info = result.get('error', 'Unknown error')
-                    error_type = result.get('type', 'unknown')
-                    status_code = result.get('status_code')
-                    
-                    error_msg = f"Design pin failed: {error_info}"
-                    if status_code:
-                        error_msg += f" (HTTP {status_code})"
-                    
-                    errors.append(error_msg)
-
-                else:
-                    # Fallback: check integration for error
-                    integration.refresh_from_db()
-                    error_detail = integration.last_error if integration.last_error else "Unknown error (no error details available)"
-                    error_msg = f"Design pin failed: {error_detail}"
-                    errors.append(error_msg)
-
-            except Exception as e:
-                error_msg = f"Exception posting design pin: {str(e)}"
-                errors.append(error_msg)
-
-        # Mark success if at least one pin was posted
-        if pins_data:
-            pinterest_post.mark_success(pins_data=pins_data)
-
-            # If there were partial failures, log them but don't fail the task
-            if errors:
-                pass
-
-        else:
-            # All pins failed - build comprehensive error message
-            error_msg_parts = ["Failed to post any pins"]
-            
-            if errors:
-                error_msg_parts.append("Errors:")
-                for i, err in enumerate(errors, 1):
-                    error_msg_parts.append(f"{i}. {err}")
-            else:
-                # Fallback: check integration for last error
-                integration.refresh_from_db()
-                if integration.last_error:
-                    error_msg_parts.append(f"Last Pinterest API error: {integration.last_error}")
-                else:
-                    error_msg_parts.append("No specific error details available. Check Pinterest integration status.")
-            
-            # Add context information
-            error_msg_parts.append(f"Product ID: {product.id}")
-            error_msg_parts.append(f"Board ID: {integration.board_id}")
-            error_msg_parts.append(f"Media domain: {media_domain}")
-            
-            full_error_msg = " | ".join(error_msg_parts)
-
-            # If all failures are 429 (rate limit), retry with longer backoff instead of marking failed
-            all_rate_limited = bool(errors) and all("429" in str(e) for e in errors)
-            retry_count = self.request.retries
-            if all_rate_limited and retry_count < self.max_retries:
-                # Pinterest block: wait 5–15 minutes before retry to avoid prolonged blocks
-                countdown = 300 * (retry_count + 1)  # 300s, 600s, 900s
-                raise self.retry(exc=Exception(full_error_msg), countdown=countdown)
-
-            pinterest_post.mark_failed(full_error_msg)
-
-            # Retry the task with detailed error (non-429 or out of retries)
-            raise Exception(f"Pinterest API call failed: {full_error_msg}")
-            
-    except Exception as e:
-        error_message = str(e)
-
-        # Update PinterestPost record with detailed error
-        try:
-            pinterest_post = PinterestPost.objects.get(id=pinterest_post_id)
-            
-            # Try to get more context from integration
-            try:
-                integration = PinterestIntegration.get_instance()
-                integration.refresh_from_db()
-                
-                # Enhance error message with integration status if available
-                if integration.last_error and integration.last_error not in error_message:
-                    error_message = f"{error_message} | Integration error: {integration.last_error}"
-                
-                # Add token validity check
-                if not integration.is_token_valid():
-                    error_message = f"{error_message} | Token is expired or invalid (expires at: {integration.token_expires_at})"
-                
-                # Add integration status
-                error_message = f"{error_message} | Integration enabled: {integration.is_enabled}, Board ID: {integration.board_id}"
-            except Exception as integration_error:
-                pass
-
+            integration = PinterestIntegration.get_instance()
+            integration.refresh_from_db()
+            if integration.last_error and integration.last_error not in error_message:
+                error_message = f"{error_message} | {integration.last_error}"
             pinterest_post.mark_failed(error_message)
-
-        except Exception as update_error:
+        except Exception:
             pass
-
-        # Check if we should retry
-        retry_count = self.request.retries
-        max_retries = self.max_retries
-        
-        if retry_count >= max_retries:
-            raise
-        else:
-            # Exponential backoff: 60s, 120s, 240s
-            countdown = 60 * (2 ** retry_count)
-
-        # Retry with exponential backoff
-        raise self.retry(exc=e, countdown=60 * (2 ** self.request.retries))
-
-@shared_task
-def retry_failed_pinterest_posts():
-    """
-    Retry all failed Pinterest posts.
-    Called when Pinterest is reconnected or manually triggered.
-    """
-    import logging
-    logger = logging.getLogger(__name__)
-    
-    try:
-        from .models import PinterestPost, PinterestIntegration
-        from django.conf import settings
-        
-        # Check if Pinterest is enabled and configured
-        integration = PinterestIntegration.get_instance()
-        if not integration.is_enabled or not integration.is_token_valid():
-
-            return
-        
-        # Find all failed posts
-        failed_posts = PinterestPost.objects.filter(status='failed')
-        count = failed_posts.count()
-        
-        if count == 0:
-
-            return
-
-        # Get base URL for image links
-        base_url = getattr(settings, 'SITE_DOMAIN', 'https://wedesignz.com')
-        if not base_url.startswith('http'):
-            base_url = f"https://{base_url}"
-        
-        retried_count = 0
-        for post in failed_posts:
-            try:
-                # Queue the post task
-                post_design_to_pinterest.delay(post.id, base_url)
-                retried_count += 1
-            except Exception as e:
-                pass
-
-        msg = f"Retried {retried_count} failed Pinterest posts"
-        logger.info(msg)
-        return msg
-        
-    except Exception as e:
-
-        raise
