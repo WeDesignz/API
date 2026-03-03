@@ -912,6 +912,90 @@ def admin_sessions(request):
 
 # ==================== Scheduled Tasks (Celery) ====================
 
+def _get_redis_queue_connection():
+    """
+    Return (redis_client, queue_name) if broker is Redis, else (None, None).
+    Uses CELERY_BROKER_URL and the Celery app default queue name.
+    """
+    broker_url = getattr(settings, 'CELERY_BROKER_URL', '') or ''
+    if not broker_url.strip().lower().startswith('redis://'):
+        return (None, None)
+    try:
+        from API.celery import app
+        import redis
+        client = redis.Redis.from_url(broker_url, decode_responses=False)
+        client.ping()
+        queue_name = app.conf.task_default_queue or 'celery'
+        return (client, queue_name)
+    except Exception:
+        return (None, None)
+
+
+def _redis_queue_length():
+    """Return (queue_name, length) or (None, None) if not Redis or on error."""
+    client, queue_name = _get_redis_queue_connection()
+    if client is None:
+        return (None, None)
+    try:
+        length = client.llen(queue_name)
+        return (queue_name, length)
+    except Exception:
+        return (queue_name, None)
+
+
+def _redis_queue_preview(limit=50, task_name_filter=None):
+    """
+    Peek at up to `limit` messages in the Redis broker queue (read-only).
+    If task_name_filter is set, scan up to 5000 messages and filter by task name (case-insensitive substring).
+    Returns (queue_name, total, sample) where sample is list of dicts with task_id, task_name.
+    """
+    client, queue_name = _get_redis_queue_connection()
+    if client is None:
+        return None, 0, []
+    import json
+    try:
+        total = client.llen(queue_name)
+        filter_substring = (task_name_filter or '').strip().lower()
+        if filter_substring:
+            # Scan more messages to find matches; cap at 5000 to avoid heavy load
+            max_scan = 5000
+            raw_list = client.lrange(queue_name, 0, max_scan - 1)
+            sample = []
+            for raw in raw_list:
+                entry = {'task_id': None, 'task_name': None}
+                try:
+                    msg = raw.decode('utf-8') if isinstance(raw, bytes) else raw
+                    data = json.loads(msg)
+                    headers = data.get('headers') or {}
+                    entry['task_id'] = headers.get('id')
+                    entry['task_name'] = headers.get('task')
+                except Exception:
+                    pass
+                name = (entry.get('task_name') or '') or ''
+                if filter_substring in name.lower():
+                    sample.append(entry)
+                    if len(sample) >= limit:
+                        break
+            sample = sample[:limit]
+        else:
+            raw_list = client.lrange(queue_name, 0, max(0, limit - 1))
+            sample = []
+            for raw in raw_list:
+                entry = {'task_id': None, 'task_name': None}
+                try:
+                    msg = raw.decode('utf-8') if isinstance(raw, bytes) else raw
+                    data = json.loads(msg)
+                    headers = data.get('headers') or {}
+                    entry['task_id'] = headers.get('id')
+                    entry['task_name'] = headers.get('task')
+                except Exception:
+                    pass
+                sample.append(entry)
+        return queue_name, total, sample
+    except Exception:
+        return queue_name, None, []
+
+
 def _scheduled_tasks_superuser_required(request):
     """Return (None, None) if allowed, else (Response, status). Uses AdminUserProfile.admin_group (Super Admin) instead of User.is_superuser."""
     try:
@@ -955,13 +1039,18 @@ def scheduled_tasks_overview(request):
             scheduled_count = sum(len(tasks) for tasks in scheduled.values())
     except Exception:
         pass
-    return Response({
+    queue_name, queue_pending = _redis_queue_length()
+    payload = {
         'active': active_count,
         'reserved': reserved_count,
         'scheduled': scheduled_count,
         'failed_last_24h': failed_24h,
         'success_last_24h': success_24h,
-    }, status=status.HTTP_200_OK)
+    }
+    if queue_name is not None:
+        payload['queue_name'] = queue_name
+        payload['queue_pending'] = queue_pending if queue_pending is not None else None
+    return Response(payload, status=status.HTTP_200_OK)
 
 
 def _get_task_description(task):
@@ -1032,6 +1121,51 @@ def registered_task_detail(request):
         return Response({'name': task_name, 'description': description}, status=status.HTTP_200_OK)
     except Exception as e:
         return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+QUEUE_PREVIEW_LIMIT_CHOICES = (25, 50, 100, 500, 1000)
+
+
+@swagger_auto_schema(
+    method='get',
+    operation_summary="Redis queue preview",
+    operation_description="Peek at messages in the Celery broker queue (Redis only). Read-only; returns total count and a sample of task_id/task_name. Limit can be 25, 50, 100, 500, or 1000. Optional task_name filter (case-insensitive substring).",
+    manual_parameters=[
+        openapi.Parameter('limit', openapi.IN_QUERY, description='Number of messages to return (25, 50, 100, 500, 1000; default 50)', type=openapi.TYPE_INTEGER),
+        openapi.Parameter('task_name', openapi.IN_QUERY, description='Filter by task name (substring, case-insensitive). When set, scans first 5000 messages.', type=openapi.TYPE_STRING),
+    ],
+    responses={200: openapi.Response(description="Queue name, total count, and sample of tasks"), 403: openapi.Response(description="Access denied"), 503: openapi.Response(description="Broker is not Redis or unavailable")},
+    tags=['Scheduled Tasks']
+)
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def scheduled_tasks_queue_preview(request):
+    err_resp, _ = _scheduled_tasks_superuser_required(request)
+    if err_resp is not None:
+        return err_resp
+    raw_limit = request.GET.get('limit', '').strip()
+    limit = 50
+    if raw_limit:
+        try:
+            n = int(raw_limit)
+            if n in QUEUE_PREVIEW_LIMIT_CHOICES:
+                limit = n
+            else:
+                limit = min(1000, max(1, n))
+        except (ValueError, TypeError):
+            pass
+    task_name_filter = request.GET.get('task_name', '').strip() or None
+    queue_name, total, sample = _redis_queue_preview(limit=limit, task_name_filter=task_name_filter)
+    if queue_name is None:
+        return Response(
+            {'error': 'Queue preview is only available when Celery broker is Redis.'},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE
+        )
+    return Response({
+        'queue_name': queue_name,
+        'total': total,
+        'sample': sample,
+    }, status=status.HTTP_200_OK)
 
 
 @swagger_auto_schema(

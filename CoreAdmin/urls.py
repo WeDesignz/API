@@ -26,6 +26,7 @@ urlpatterns = [
     path('scheduled-tasks/registered/', views.registered_tasks_list, name='registered_tasks_list'),
     path('scheduled-tasks/registered-detail/', views.registered_task_detail, name='registered_task_detail'),
     path('scheduled-tasks/bulk-revoke/', views.scheduled_tasks_bulk_revoke, name='scheduled_tasks_bulk_revoke'),
+    path('scheduled-tasks/queue-preview/', views.scheduled_tasks_queue_preview, name='scheduled_tasks_queue_preview'),
     path('scheduled-tasks/<str:task_id>/revoke/', views.scheduled_tasks_revoke, name='scheduled_tasks_revoke'),
     path('scheduled-tasks/<str:task_id>/', views.scheduled_tasks_detail, name='scheduled_tasks_detail'),
     path('periodic-tasks/overview/', views.periodic_tasks_overview, name='periodic_tasks_overview'),
