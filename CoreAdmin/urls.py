@@ -31,7 +31,9 @@ urlpatterns = [
     path('scheduled-tasks/<str:task_id>/', views.scheduled_tasks_detail, name='scheduled_tasks_detail'),
     path('periodic-tasks/overview/', views.periodic_tasks_overview, name='periodic_tasks_overview'),
     path('periodic-tasks/', views.periodic_tasks_list, name='periodic_tasks_list'),
-    
+    path('management-commands/', views.management_commands_list, name='management_commands_list'),
+    path('management-commands/<str:command_name>/run/', views.management_command_run, name='management_command_run'),
+
     # Designer Management endpoints
     path('designers/', views.designers_list, name='designers_list'),
     path('designers/<int:designer_id>/', views.designer_detail, name='designer_detail'),
