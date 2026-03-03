@@ -143,6 +143,7 @@ class PinterestIntegrationAdmin(admin.ModelAdmin):
     readonly_fields = [
         'access_token', 'refresh_token', 'token_expires_at',
         'last_successful_post', 'last_error', 'last_error_at',
+        'rate_limit_remaining', 'rate_limit_limit', 'rate_limit_reset_at', 'rate_limit_retry_after_at',
         'created_at', 'updated_at', 'created_by'
     ]
     
@@ -156,6 +157,10 @@ class PinterestIntegrationAdmin(admin.ModelAdmin):
         }),
         ('Status Tracking', {
             'fields': ('last_successful_post', 'last_error', 'last_error_at'),
+            'classes': ('collapse',)
+        }),
+        ('Rate Limit', {
+            'fields': ('rate_limit_remaining', 'rate_limit_limit', 'rate_limit_reset_at', 'rate_limit_retry_after_at'),
             'classes': ('collapse',)
         }),
         ('Metadata', {
@@ -186,27 +191,27 @@ class PinterestIntegrationAdmin(admin.ModelAdmin):
 @admin.register(PinterestPost)
 class PinterestPostAdmin(PaginatedAdminMixin, admin.ModelAdmin):
     list_display = [
-        'product', 'status', 'pin_id', 'retry_count', 
-        'created_at', 'posted_at', 'last_retry_at', 'action_buttons'
+        'product', 'status', 'pin_id',
+        'created_at', 'posted_at', 'action_buttons'
     ]
     list_filter = ['status', 'created_at', 'posted_at']
     search_fields = ['product__title', 'product__product_number', 'pin_id', 'error_message']
     readonly_fields = [
-        'product', 'pin_id', 'pin_url', 'error_message', 'retry_count',
-        'created_at', 'posted_at', 'last_retry_at'
+        'product', 'pin_id', 'pin_url', 'pins_data', 'error_message',
+        'created_at', 'posted_at'
     ]
     ordering = ['-created_at']
     list_per_page = 25
-    
+
     fieldsets = (
         ('Product Information', {
             'fields': ('product',)
         }),
         ('Pinterest Status', {
-            'fields': ('status', 'pin_id', 'pin_url')
+            'fields': ('status', 'pin_id', 'pin_url', 'pins_data')
         }),
         ('Error Tracking', {
-            'fields': ('error_message', 'retry_count', 'last_retry_at'),
+            'fields': ('error_message',),
             'classes': ('collapse',)
         }),
         ('Timestamps', {
@@ -214,16 +219,16 @@ class PinterestPostAdmin(PaginatedAdminMixin, admin.ModelAdmin):
             'classes': ('collapse',)
         }),
     )
-    
+
     def action_buttons(self, obj):
-        if obj.status == 'failed':
+        if obj.status != 'success':
             return format_html(
-                '<a href="/admin/common/pinterestpost/{}/retry/" class="button">Retry</a>',
+                '<a href="/admin/common/pinterestpost/{}/retry/" class="button">Post again</a>',
                 obj.id
             )
         return '-'
     action_buttons.short_description = 'Actions'
-    
+
     def get_urls(self):
         from django.urls import path
         urls = super().get_urls()
@@ -235,28 +240,28 @@ class PinterestPostAdmin(PaginatedAdminMixin, admin.ModelAdmin):
             ),
         ]
         return custom_urls + urls
-    
+
     def retry_post(self, request, post_id):
-        """Retry a failed Pinterest post."""
+        """Post to Pinterest synchronously (same as "Post again" in app)."""
         from django.shortcuts import redirect
         from django.contrib import messages
         from .models import PinterestPost
-        from .tasks import post_design_to_pinterest
+        from .tasks import execute_pinterest_post_sync
         from django.conf import settings
-        
+
         try:
             post = PinterestPost.objects.get(id=post_id)
-            if post.status != 'failed':
-                messages.warning(request, f'Post is not in failed status. Current status: {post.get_status_display()}')
+            base_url = getattr(settings, 'SITE_DOMAIN', 'https://wedesignz.com')
+            if not base_url.startswith('http'):
+                base_url = f"https://{base_url}"
+            success, error_message = execute_pinterest_post_sync(post.id, base_url)
+            if success:
+                messages.success(request, f'Posted to Pinterest: {post.product.title}')
             else:
-                base_url = getattr(settings, 'SITE_DOMAIN', 'https://wedesignz.com')
-                if not base_url.startswith('http'):
-                    base_url = f"https://{base_url}"
-                post_design_to_pinterest.delay(post.id, base_url)
-                messages.success(request, f'Retry queued for Pinterest post: {post.product.title}')
+                messages.error(request, error_message or 'Post failed')
         except PinterestPost.DoesNotExist:
             messages.error(request, 'Pinterest post not found')
-        
+
         return redirect('admin:common_pinterestpost_changelist')
 
 
@@ -272,6 +277,7 @@ class InstagramIntegrationAdmin(admin.ModelAdmin):
     readonly_fields = [
         'access_token', 'refresh_token', 'token_expires_at', 'user_id', 'username',
         'last_successful_post', 'last_error', 'last_error_at',
+        'rate_limit_remaining', 'rate_limit_limit', 'rate_limit_reset_at', 'rate_limit_retry_after_at',
         'created_at', 'updated_at', 'created_by'
     ]
     
@@ -285,6 +291,10 @@ class InstagramIntegrationAdmin(admin.ModelAdmin):
         }),
         ('Status Tracking', {
             'fields': ('last_successful_post', 'last_error', 'last_error_at'),
+            'classes': ('collapse',)
+        }),
+        ('Rate Limit', {
+            'fields': ('rate_limit_remaining', 'rate_limit_limit', 'rate_limit_reset_at', 'rate_limit_retry_after_at'),
             'classes': ('collapse',)
         }),
         ('Metadata', {

@@ -19,7 +19,7 @@ class AdminUserProfileAdmin(admin.ModelAdmin):
         'last_2fa_verification', 'created_at'
     ]
     list_filter = [
-        'is_2fa_enabled', 'is_active', 'admin_group', 
+        'is_2fa_enabled', 'is_active', 'admin_group', 'permission_group',
         'last_2fa_verification', 'created_at'
     ]
     search_fields = ['user__username', 'user__email', 'user__first_name', 'user__last_name']
@@ -27,7 +27,7 @@ class AdminUserProfileAdmin(admin.ModelAdmin):
     
     fieldsets = (
         ('User Information', {
-            'fields': ('user', 'admin_group', 'is_active')
+            'fields': ('user', 'admin_group', 'permission_group', 'permissions', 'is_active')
         }),
         ('Two-Factor Authentication', {
             'fields': ('is_2fa_enabled', 'last_2fa_verification', 'two_factor_secret', 'backup_codes'),
@@ -40,7 +40,7 @@ class AdminUserProfileAdmin(admin.ModelAdmin):
     )
     
     def get_queryset(self, request):
-        return super().get_queryset(request).select_related('user')
+        return super().get_queryset(request).select_related('user', 'permission_group')
 
 @admin.register(AdminActivityLog)
 class AdminActivityLogAdmin(admin.ModelAdmin):

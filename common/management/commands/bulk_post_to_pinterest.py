@@ -72,8 +72,8 @@ class Command(BaseCommand):
                 if pinterest_post.status == 'success':
                     continue
                 
-                # Include if pending, retrying, or (failed if force_retry)
-                if pinterest_post.status in ['pending', 'retrying']:
+                # Include if pending or (failed if force_retry)
+                if pinterest_post.status == 'pending':
                     products_to_post.append((product, pinterest_post, 'existing'))
                 elif pinterest_post.status == 'failed' and force_retry:
                     products_to_post.append((product, pinterest_post, 'retry'))
@@ -104,9 +104,9 @@ class Command(BaseCommand):
         if new_count > 0:
             self.stdout.write(f'  • New posts: {new_count}')
         if existing_count > 0:
-            self.stdout.write(f'  • Pending/Retrying: {existing_count}')
+            self.stdout.write(f'  • Pending: {existing_count}')
         if retry_count > 0:
-            self.stdout.write(f'  • Failed (retrying): {retry_count}')
+            self.stdout.write(f'  • Failed: {retry_count}')
         
         self.stdout.write('')
         
