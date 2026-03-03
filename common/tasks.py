@@ -1961,7 +1961,6 @@ def execute_pinterest_post_sync(pinterest_post_id, base_url=None):
         domain = f"https://{domain}"
     link = f"{domain}/customer-dashboard?product={product.id}" if (domain.startswith('https://') and 'localhost' not in domain.lower() and '127.0.0.1' not in domain) else None
 
-    pinterest_post.mark_retrying()
     pins_data = {}
     errors = []
 

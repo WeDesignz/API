@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Wallet, WalletTransaction, WalletWithdrawalRequest, SettlementRequest
+from .models import Wallet, WalletTransaction, WalletWithdrawalRequest, SettlementRequest, SettlementTDS
 
 
 @admin.register(Wallet)
@@ -52,6 +52,10 @@ class WalletTransactionAdmin(admin.ModelAdmin):
         ('Transaction Information', {
             'fields': ('wallet_transaction_type', 'amount', 'description', 'reference_id')
         }),
+        ('Settlement', {
+            'fields': ('settlement_request', 'settled_at'),
+            'classes': ('collapse',)
+        }),
         ('User Information', {
             'fields': ('created_by', 'updated_by')
         }),
@@ -62,7 +66,7 @@ class WalletTransactionAdmin(admin.ModelAdmin):
     )
     
     def get_queryset(self, request):
-        return super().get_queryset(request).select_related('created_by', 'updated_by')
+        return super().get_queryset(request).select_related('settlement_request', 'created_by', 'updated_by')
 
 
 @admin.register(WalletWithdrawalRequest)
@@ -98,6 +102,39 @@ class WalletWithdrawalRequestAdmin(admin.ModelAdmin):
     
     def get_queryset(self, request):
         return super().get_queryset(request).select_related('wallet', 'processed_by', 'created_by', 'updated_by')
+
+
+@admin.register(SettlementTDS)
+class SettlementTDSAdmin(admin.ModelAdmin):
+    """
+    Admin interface for SettlementTDS model.
+    Manages TDS (Tax Deducted at Source) records for settlements.
+    """
+    list_display = ['id', 'settlement_request', 'settlement_amount', 'tds_percentage', 'tds_amount', 'net_amount', 'has_pan', 'created_at']
+    list_filter = ['has_pan', 'created_at', 'updated_at']
+    search_fields = ['settlement_request__id', 'pan_number']
+    readonly_fields = ['created_at', 'updated_at']
+    ordering = ['-created_at']
+    list_per_page = 25
+
+    fieldsets = (
+        ('Settlement', {
+            'fields': ('settlement_request',)
+        }),
+        ('Amounts', {
+            'fields': ('settlement_amount', 'tds_percentage', 'tds_amount', 'net_amount')
+        }),
+        ('PAN', {
+            'fields': ('has_pan', 'pan_number')
+        }),
+        ('Timestamps', {
+            'fields': ('created_at', 'updated_at'),
+            'classes': ('collapse',)
+        }),
+    )
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related('settlement_request')
 
 
 @admin.register(SettlementRequest)

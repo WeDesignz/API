@@ -54,7 +54,7 @@ class DesignerProfileAdmin(admin.ModelAdmin):
     
     fieldsets = (
         ('Designer Information', {
-            'fields': ('bio', 'skill_tags', 'status', 'is_individual', 'onboarding_completed')
+            'fields': ('bio', 'date_of_birth', 'skill_tags', 'status', 'is_individual', 'onboarding_completed')
         }),
         ('Profile Type & Studio Relationship', {
             'fields': ('profile_type_display', 'studio_info', 'owned_studio_info', 'membership_info', 'access_info'),
@@ -204,6 +204,10 @@ class StudioBusinessDetailsAdmin(admin.ModelAdmin):
         }),
         ('Tax Information', {
             'fields': ('pan_number', 'pan_card', 'gst_number'),
+            'classes': ('collapse',)
+        }),
+        ('Bank Details', {
+            'fields': ('bank_account_number', 'bank_ifsc_code', 'bank_account_holder_name', 'account_type'),
             'classes': ('collapse',)
         }),
         ('Address Information', {

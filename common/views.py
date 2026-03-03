@@ -2547,7 +2547,7 @@ def _get_product_thumbnail_url(request, product):
 @permission_classes([AllowAny])
 def pinterest_posts_list(request):
     """
-    List Pinterest posts with optional filter: status = all | success | failed | pending | retrying.
+    List Pinterest posts with optional filter: status = all | success | failed | pending.
     """
     from django.core.paginator import Paginator
 
@@ -2557,7 +2557,7 @@ def pinterest_posts_list(request):
 
     qs = PinterestPost.objects.select_related('product').order_by('-created_at')
 
-    if status_filter and status_filter != 'all' and status_filter in ('success', 'failed', 'pending', 'retrying'):
+    if status_filter and status_filter != 'all' and status_filter in ('success', 'failed', 'pending'):
         qs = qs.filter(status=status_filter)
 
     paginator = Paginator(qs, limit)
@@ -2575,10 +2575,8 @@ def pinterest_posts_list(request):
             'error_message': post.error_message,
             'pin_url': post.pin_url,
             'pins_data': post.pins_data or {},
-            'retry_count': post.retry_count,
             'created_at': post.created_at.isoformat(),
             'posted_at': post.posted_at.isoformat() if post.posted_at else None,
-            'last_retry_at': post.last_retry_at.isoformat() if post.last_retry_at else None,
         })
 
     pagination = {
@@ -2600,11 +2598,12 @@ def pinterest_posts_stats(request):
     """Return counts of Pinterest posts per status for filter badges and bulk_post_eligible count."""
     from django.db.models import Count
     stats = PinterestPost.objects.values('status').annotate(count=Count('id'))
-    counts = {'all': 0, 'success': 0, 'failed': 0, 'pending': 0, 'retrying': 0}
+    counts = {'all': 0, 'success': 0, 'failed': 0, 'pending': 0}
     for row in stats:
-        counts[row['status']] = row['count']
+        if row['status'] in counts:
+            counts[row['status']] = row['count']
         counts['all'] += row['count']
-    counts['bulk_post_eligible'] = counts['pending'] + counts['failed'] + counts['retrying']
+    counts['bulk_post_eligible'] = counts['pending'] + counts['failed']
     return JsonResponse(counts)
 
 

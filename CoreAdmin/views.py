@@ -1193,6 +1193,8 @@ def scheduled_tasks_queue_preview(request):
     manual_parameters=[
         openapi.Parameter('status', openapi.IN_QUERY, description='Filter by status (e.g. SUCCESS, FAILURE, PENDING)', type=openapi.TYPE_STRING),
         openapi.Parameter('task_name', openapi.IN_QUERY, description='Filter by task name (contains)', type=openapi.TYPE_STRING),
+        openapi.Parameter('from_date', openapi.IN_QUERY, description='Filter tasks from this date (YYYY-MM-DD). Shows tasks with date_created >= from_date.', type=openapi.TYPE_STRING),
+        openapi.Parameter('to_date', openapi.IN_QUERY, description='Filter tasks until this date (YYYY-MM-DD). Shows tasks with date_created <= end of to_date.', type=openapi.TYPE_STRING),
         openapi.Parameter('page', openapi.IN_QUERY, type=openapi.TYPE_INTEGER),
         openapi.Parameter('page_size', openapi.IN_QUERY, type=openapi.TYPE_INTEGER),
     ],
@@ -1204,6 +1206,7 @@ def scheduled_tasks_queue_preview(request):
 def scheduled_tasks_list(request):
     from django_celery_results.models import TaskResult
     from rest_framework.pagination import PageNumberPagination
+    from datetime import datetime, timezone as dt_timezone
     err_resp, _ = _scheduled_tasks_superuser_required(request)
     if err_resp is not None:
         return err_resp
@@ -1214,6 +1217,22 @@ def scheduled_tasks_list(request):
     task_name = request.GET.get('task_name', '').strip()
     if task_name:
         qs = qs.filter(task_name__icontains=task_name)
+    from_date_str = request.GET.get('from_date', '').strip()
+    if from_date_str:
+        try:
+            from_dt = datetime.strptime(from_date_str, '%Y-%m-%d').replace(tzinfo=dt_timezone.utc)
+            qs = qs.filter(date_created__gte=from_dt)
+        except ValueError:
+            pass
+    to_date_str = request.GET.get('to_date', '').strip()
+    if to_date_str:
+        try:
+            to_dt = datetime.strptime(to_date_str, '%Y-%m-%d').replace(
+                hour=23, minute=59, second=59, microsecond=999999, tzinfo=dt_timezone.utc
+            )
+            qs = qs.filter(date_created__lte=to_dt)
+        except ValueError:
+            pass
     paginator = PageNumberPagination()
     try:
         ps = int(request.GET.get('page_size') or request.GET.get('limit', 25))

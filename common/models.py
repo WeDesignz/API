@@ -123,39 +123,35 @@ class PinterestIntegration(models.Model):
 
 class PinterestPost(models.Model):
     """
-    Model to track Pinterest post attempts for each approved design.
-    This allows retrying failed posts when Pinterest is reconnected.
+    Model to track Pinterest post status per product.
+    If a post fails, admin can manually post again from the Pinterest Posts page.
     """
     STATUS_CHOICES = [
         ('pending', 'Pending'),
         ('success', 'Success'),
         ('failed', 'Failed'),
-        ('retrying', 'Retrying'),
     ]
-    
+
     product = models.ForeignKey('Catalog.Product', on_delete=models.CASCADE, related_name='pinterest_posts')
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
-    
+
     # Pinterest pin information
     pin_id = models.CharField(max_length=255, null=True, blank=True, help_text="Pinterest pin ID if successfully posted (legacy - use pins_data)")
     pin_url = models.URLField(null=True, blank=True, help_text="URL to the Pinterest pin (legacy - use pins_data)")
     pins_data = models.JSONField(default=dict, blank=True, help_text="Dictionary of pin data: {'mockup': {'id': '...', 'url': '...'}, 'design': {'id': '...', 'url': '...'}}")
-    
+
     # Error tracking
     error_message = models.TextField(null=True, blank=True, help_text="Error message if posting failed")
-    retry_count = models.IntegerField(default=0, help_text="Number of retry attempts")
-    
+
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
     posted_at = models.DateTimeField(null=True, blank=True, help_text="When the pin was successfully posted")
-    last_retry_at = models.DateTimeField(null=True, blank=True, help_text="Last retry attempt timestamp")
-    
+
     class Meta:
         db_table = 'pinterest_post'
         verbose_name = 'Pinterest Post'
         verbose_name_plural = 'Pinterest Posts'
         ordering = ['-created_at']
-        # Ensure one Pinterest post record per product (can retry but not duplicate)
         unique_together = [['product']]
     
     def __str__(self):
@@ -186,24 +182,12 @@ class PinterestPost(models.Model):
     def mark_failed(self, error_message):
         """Mark the post as failed."""
         self.status = 'failed'
-        
-        # Truncate error message if too long (database field limits)
-        # TextField can hold ~65KB, but let's keep it reasonable for readability
         max_length = 5000
         if len(error_message) > max_length:
             error_message = error_message[:max_length] + f"... (truncated, full length: {len(error_message)})"
-        
         self.error_message = error_message
-        self.last_retry_at = timezone.now()
-        self.retry_count += 1
-        self.save(update_fields=['status', 'error_message', 'last_retry_at', 'retry_count'])
-    
-    def mark_retrying(self):
-        """Mark the post as being retried."""
-        self.status = 'retrying'
-        self.last_retry_at = timezone.now()
-        self.save(update_fields=['status', 'last_retry_at'])
-    
+        self.save(update_fields=['status', 'error_message'])
+
     def get_error_summary(self):
         """Get a formatted error summary for display."""
         if not self.error_message:

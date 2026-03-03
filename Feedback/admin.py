@@ -126,7 +126,7 @@ class SupportThreadAdmin(admin.ModelAdmin):
     
     fieldsets = (
         ('Thread Information', {
-            'fields': ('subject', 'category', 'priority', 'status')
+            'fields': ('subject', 'category', 'thread_type', 'priority', 'status')
         }),
         ('Assignment', {
             'fields': ('created_by', 'assigned_to')

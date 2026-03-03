@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Cart, Order, OrderComment, OrderCommentReadReceipt, Invoice
+from .models import Cart, Order, OrderComment, OrderCommentReadReceipt, Invoice, OrderTransaction
 
 
 @admin.register(Cart)
@@ -170,8 +170,8 @@ class InvoiceAdmin(admin.ModelAdmin):
             'description': 'Invoice number, type (customer/designer), and dates'
         }),
         ('Order & User Information', {
-            'fields': ('order', 'user'),
-            'description': 'Order this invoice is for and user (customer or designer)'
+            'fields': ('order', 'subscription', 'user'),
+            'description': 'Order this invoice is for; subscription (for settlement invoices); user (customer or designer)'
         }),
         ('Financial Details', {
             'fields': ('subtotal', 'gst_amount', 'commission_amount', 'total_amount'),
@@ -191,6 +191,7 @@ class InvoiceAdmin(admin.ModelAdmin):
     def get_queryset(self, request):
         return super().get_queryset(request).select_related(
             'order',
+            'subscription',
             'user'
         )
     
@@ -200,6 +201,39 @@ class InvoiceAdmin(admin.ModelAdmin):
         """
         readonly = list(self.readonly_fields)
         if obj:  # Editing an existing invoice
-            readonly.extend(['invoice_type', 'order', 'user', 'subtotal', 'gst_amount', 'commission_amount', 'total_amount', 'payment_due_date', 'pdf_file_path'])
+            readonly.extend(['invoice_type', 'order', 'subscription', 'user', 'subtotal', 'gst_amount', 'commission_amount', 'total_amount', 'payment_due_date', 'pdf_file_path'])
         return readonly
+
+
+@admin.register(OrderTransaction)
+class OrderTransactionAdmin(admin.ModelAdmin):
+    """
+    Admin interface for OrderTransaction model (Deprecated - merged into Order).
+    Read-only for backward compatibility.
+    """
+    list_display = ['id', 'order_transaction_number', 'order_transaction_type', 'created_by', 'created_at']
+    list_filter = ['order_transaction_type', 'created_at', 'updated_at']
+    search_fields = ['order_transaction_number', 'created_by__username']
+    readonly_fields = ['order_transaction_number', 'order_transaction_type', 'created_by', 'updated_by', 'created_at', 'updated_at']
+    ordering = ['-created_at']
+    list_per_page = 25
+
+    fieldsets = (
+        ('Transaction Information', {
+            'fields': ('order_transaction_number', 'order_transaction_type')
+        }),
+        ('User Information', {
+            'fields': ('created_by', 'updated_by')
+        }),
+        ('Timestamps', {
+            'fields': ('created_at', 'updated_at'),
+            'classes': ('collapse',)
+        }),
+    )
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related('created_by', 'updated_by')
+
+    def has_add_permission(self, request):
+        return False  # Deprecated model - no new records
 

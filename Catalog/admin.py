@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.utils.html import format_html
 from common.admin import PaginatedAdminMixin
-from .models import Category, Product, ProductCounter, CollectionBundle, Tags, PDFDownload
+from .models import Category, Product, ProductCounter, CollectionBundle, Tags, PDFDownload, PDFClient, PDFClientJob
 
 
 @admin.register(Category)
@@ -19,7 +19,7 @@ class CategoryAdmin(admin.ModelAdmin):
     
     fieldsets = (
         ('Category Information', {
-            'fields': ('name', 'parent', 'created_by')
+            'fields': ('name', 'icon_name', 'parent', 'created_by')
         }),
         ('User Information', {
             'fields': ('updated_by',)
@@ -51,7 +51,7 @@ class ProductAdmin(admin.ModelAdmin):
     
     fieldsets = (
         ('Product Information', {
-            'fields': ('title', 'description', 'category', 'status', 'product_plan_type', 'product_metadata')
+            'fields': ('title', 'description', 'category', 'status', 'product_plan_type', 'product_metadata', 'is_indexed')
         }),
         ('Product Details', {
             'fields': ('product_number', 'studio_design_number', 'color', 'price', 'visibility_status', 'rejection_reason')
@@ -184,11 +184,11 @@ class PDFDownloadAdmin(admin.ModelAdmin):
             'fields': ('download_type', 'status', 'total_pages', 'selection_type')
         }),
         ('Customer Information', {
-            'fields': ('customer_name', 'customer_mobile'),
+            'fields': ('customer_name', 'customer_mobile', 'customer_logo'),
             'description': 'Customer details that appear on each page of the mock PDF'
         }),
         ('PDF Configuration', {
-            'fields': ('selected_products', 'search_filters', 'included_products', 'products_count')
+            'fields': ('selected_products', 'search_filters', 'exclude_designs_from_previous_pdfs', 'included_products', 'products_count')
         }),
         ('Pricing Information', {
             'fields': ('price_per_design', 'total_amount')
@@ -209,3 +209,84 @@ class PDFDownloadAdmin(admin.ModelAdmin):
     
     def get_queryset(self, request):
         return super().get_queryset(request).select_related('razorpay_payment')
+
+
+@admin.register(PDFClient)
+class PDFClientAdmin(admin.ModelAdmin):
+    """
+    Admin interface for PDFClient model.
+    Manages admin-configured PDF clients for generating non-overlapping design PDFs.
+    """
+    list_display = ['name', 'created_by', 'created_at']
+    list_filter = ['created_at', 'updated_at']
+    search_fields = ['name', 'created_by__username']
+    readonly_fields = ['created_at', 'updated_at']
+    ordering = ['name']
+    list_per_page = 25
+
+    fieldsets = (
+        ('Client Information', {
+            'fields': ('name', 'used_product_ids')
+        }),
+        ('User Information', {
+            'fields': ('created_by', 'updated_by')
+        }),
+        ('Timestamps', {
+            'fields': ('created_at', 'updated_at'),
+            'classes': ('collapse',)
+        }),
+    )
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related('created_by', 'updated_by')
+
+
+@admin.register(PDFClientJob)
+class PDFClientJobAdmin(admin.ModelAdmin):
+    """
+    Admin interface for PDFClientJob model.
+    Manages admin-side PDF generation jobs for PDF clients.
+    """
+    list_display = [
+        'id', 'client', 'status', 'designs_per_pdf', 'requested_pdfs',
+        'generated_pdfs', 'progress_percent', 'created_by', 'created_at'
+    ]
+    list_filter = ['status', 'created_at', 'updated_at']
+    search_fields = ['client__name', 'customer_name', 'customer_mobile', 'error_message']
+    readonly_fields = [
+        'generated_pdfs', 'total_designs_requested', 'total_designs_used',
+        'included_product_ids_by_pdf', 'pdf_file_paths', 'zip_file_path',
+        'progress_percent', 'created_at', 'updated_at'
+    ]
+    list_editable = ['status']
+    ordering = ['-created_at']
+    list_per_page = 25
+
+    fieldsets = (
+        ('Job Information', {
+            'fields': ('client', 'status', 'designs_per_pdf', 'requested_pdfs')
+        }),
+        ('Progress', {
+            'fields': (
+                'generated_pdfs', 'total_designs_requested', 'total_designs_used',
+                'progress_percent', 'error_message'
+            )
+        }),
+        ('Output', {
+            'fields': ('included_product_ids_by_pdf', 'pdf_file_paths', 'zip_file_path'),
+            'classes': ('collapse',)
+        }),
+        ('Customer (for PDF)', {
+            'fields': ('customer_name', 'customer_mobile', 'customer_logo')
+        }),
+        ('User Information', {
+            'fields': ('created_by', 'updated_by')
+        }),
+        ('Timestamps', {
+            'fields': ('created_at', 'updated_at'),
+            'classes': ('collapse',)
+        }),
+    )
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related('client', 'created_by', 'updated_by')
