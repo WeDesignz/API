@@ -550,17 +550,6 @@ def pinterest_oauth_callback(request):
             integration.created_by = request.user
         integration.save()
 
-        # Auto-retry failed Pinterest posts if any exist
-        try:
-            from .tasks import retry_failed_pinterest_posts
-            from .models import PinterestPost
-            failed_count = PinterestPost.objects.filter(status='failed').count()
-            if failed_count > 0:
-                retry_failed_pinterest_posts.delay()
-
-        except Exception as e:
-            pass
-
         # Try to get boards and auto-select or create one
         boards_info = ""
         auto_selected_board = None
@@ -2257,6 +2246,10 @@ def instagram_status(request):
         'last_successful_post': integration.last_successful_post.isoformat() if integration.last_successful_post else None,
         'last_error': integration.last_error,
         'last_error_at': integration.last_error_at.isoformat() if integration.last_error_at else None,
+        'rate_limit_remaining': integration.rate_limit_remaining,
+        'rate_limit_limit': integration.rate_limit_limit,
+        'rate_limit_reset_at': integration.rate_limit_reset_at.isoformat() if integration.rate_limit_reset_at else None,
+        'rate_limit_retry_after_at': integration.rate_limit_retry_after_at.isoformat() if integration.rate_limit_retry_after_at else None,
     }
     
     return JsonResponse(status_data)
@@ -2618,8 +2611,8 @@ def pinterest_posts_stats(request):
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def pinterest_post_retry(request, post_id):
-    """Queue a single Pinterest post for retry."""
-    from .tasks import post_design_to_pinterest
+    """Post to Pinterest synchronously (no task queued). Admin clicks "Post again" and it runs here."""
+    from .tasks import execute_pinterest_post_sync
 
     try:
         post = PinterestPost.objects.get(id=post_id)
@@ -2630,63 +2623,8 @@ def pinterest_post_retry(request, post_id):
     if not base_url.startswith('http'):
         base_url = f'https://{base_url}' if base_url else 'https://wedesignz.com'
 
-    post_design_to_pinterest.delay(post.id, base_url)
-    return JsonResponse({'success': True, 'message': 'Retry queued'})
-
-
-@api_view(['POST'])
-@permission_classes([AllowAny])
-def pinterest_posts_bulk_post(request):
-    """
-    Queue all designs that are not yet posted to Pinterest (pending, retrying, or failed).
-    Also creates PinterestPost for approved products that don't have one yet.
-    """
-    from Catalog.models import Product
-    from .tasks import post_design_to_pinterest
-
-    integration = PinterestIntegration.get_instance()
-    if not integration.is_enabled or not integration.is_token_valid() or not integration.board_id:
-        return JsonResponse({
-            'success': False,
-            'error': 'Pinterest is not configured or token is invalid. Configure in Settings first.',
-        }, status=400)
-
-    base_url = getattr(settings, 'SITE_DOMAIN', None) or ''
-    if not base_url.startswith('http'):
-        base_url = f'https://{base_url}' if base_url else 'https://wedesignz.com'
-
-    # Stagger delay in seconds between each queued task to avoid Pinterest rate limits (429).
-    PINTEREST_BULK_POST_DELAY_SECONDS = 30
-
-    approved = Product.objects.filter(status='active', visibility_status='show')
-    to_queue = []  # (pinterest_post_id, countdown_seconds)
-    for product in approved:
-        media_files = product.get_media().filter(media_type='image') if hasattr(product.get_media(), 'filter') else []
-        if not (hasattr(media_files, 'exists') and media_files.exists()) and not (isinstance(media_files, (list, tuple)) and media_files):
-            continue
-        try:
-            pinterest_post, created = PinterestPost.objects.get_or_create(
-                product=product,
-                defaults={'status': 'pending'},
-            )
-            if pinterest_post.status == 'success':
-                continue
-            to_queue.append((pinterest_post.id, base_url))
-        except Exception as e:
-            logger.warning('Failed to queue Pinterest post for product %s: %s', product.id, e)
-
-    queued = 0
-    for idx, (post_id, base_url) in enumerate(to_queue):
-        try:
-            countdown = idx * PINTEREST_BULK_POST_DELAY_SECONDS
-            post_design_to_pinterest.apply_async(
-                args=[post_id],
-                kwargs={'base_url': base_url},
-                countdown=countdown,
-            )
-            queued += 1
-        except Exception as e:
-            logger.warning('Failed to queue Pinterest post id %s: %s', post_id, e)
-
-    return JsonResponse({'success': True, 'queued': queued})
+    success, error_message = execute_pinterest_post_sync(post.id, base_url)
+    if success:
+        return JsonResponse({'success': True, 'message': 'Posted to Pinterest'})
+    return JsonResponse({'success': False, 'error': error_message or 'Post failed'}, status=400)
 

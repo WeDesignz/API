@@ -23,8 +23,6 @@ urlpatterns = [
     path('posts', views.pinterest_posts_list, name='pinterest_posts_list_no_slash'),
     path('posts/stats/', views.pinterest_posts_stats, name='pinterest_posts_stats'),
     path('posts/stats', views.pinterest_posts_stats, name='pinterest_posts_stats_no_slash'),
-    path('posts/bulk-post/', views.pinterest_posts_bulk_post, name='pinterest_posts_bulk_post'),
-    path('posts/bulk-post', views.pinterest_posts_bulk_post, name='pinterest_posts_bulk_post_no_slash'),
     path('posts/<int:post_id>/retry/', views.pinterest_post_retry, name='pinterest_post_retry'),
     path('posts/<int:post_id>/retry', views.pinterest_post_retry, name='pinterest_post_retry_no_slash'),
     # Instagram endpoints

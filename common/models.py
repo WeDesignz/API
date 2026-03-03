@@ -239,6 +239,12 @@ class InstagramIntegration(models.Model):
     last_successful_post = models.DateTimeField(null=True, blank=True, help_text="Last successful Instagram post")
     last_error = models.TextField(null=True, blank=True, help_text="Last error message if any")
     last_error_at = models.DateTimeField(null=True, blank=True, help_text="When the last error occurred")
+
+    # Rate limit (from Instagram/Facebook Graph API response headers)
+    rate_limit_remaining = models.IntegerField(null=True, blank=True, help_text="Remaining API requests in current window")
+    rate_limit_limit = models.IntegerField(null=True, blank=True, help_text="Max API requests per window")
+    rate_limit_reset_at = models.DateTimeField(null=True, blank=True, help_text="When the rate limit window resets")
+    rate_limit_retry_after_at = models.DateTimeField(null=True, blank=True, help_text="When safe to retry after 429")
     
     # Metadata
     created_at = models.DateTimeField(auto_now_add=True)
@@ -286,6 +292,52 @@ class InstagramIntegration(models.Model):
         self.last_error = None
         self.last_error_at = None
         self.save(update_fields=['last_successful_post', 'last_error', 'last_error_at'])
+
+    def update_rate_limit_from_response(self, response):
+        """
+        Update rate limit fields from Instagram/Facebook Graph API response headers.
+        Call after every Graph API request (success or 429).
+        Supports X-Ratelimit-*, x-app-usage, and Retry-After.
+        """
+        if response is None:
+            return
+        headers = getattr(response, 'headers', {})
+        if not headers:
+            return
+        # Graph API: X-Ratelimit-Limit, X-Ratelimit-Remaining; some endpoints use x-app-usage
+        remaining = headers.get('X-Ratelimit-Remaining') or headers.get('x-ratelimit-remaining')
+        limit = headers.get('X-Ratelimit-Limit') or headers.get('x-ratelimit-limit')
+        reset_seconds = headers.get('X-Ratelimit-Reset') or headers.get('x-ratelimit-reset')
+        retry_after = headers.get('Retry-After') or headers.get('retry-after')
+        update_fields = []
+        if remaining is not None:
+            try:
+                self.rate_limit_remaining = int(remaining)
+                update_fields.append('rate_limit_remaining')
+            except (TypeError, ValueError):
+                pass
+        if limit is not None:
+            try:
+                self.rate_limit_limit = int(limit)
+                update_fields.append('rate_limit_limit')
+            except (TypeError, ValueError):
+                pass
+        if reset_seconds is not None:
+            try:
+                from datetime import timedelta
+                self.rate_limit_reset_at = timezone.now() + timedelta(seconds=int(reset_seconds))
+                update_fields.append('rate_limit_reset_at')
+            except (TypeError, ValueError):
+                pass
+        if retry_after is not None and getattr(response, 'status_code', None) == 429:
+            try:
+                from datetime import timedelta
+                self.rate_limit_retry_after_at = timezone.now() + timedelta(seconds=int(retry_after))
+                update_fields.append('rate_limit_retry_after_at')
+            except (TypeError, ValueError):
+                pass
+        if update_fields:
+            self.save(update_fields=update_fields)
 
 
 class InstagramPost(models.Model):
