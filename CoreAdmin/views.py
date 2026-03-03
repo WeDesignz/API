@@ -943,24 +943,26 @@ def _redis_queue_length():
         return (queue_name, None)
 
 
-def _redis_queue_preview(limit=50, task_name_filter=None):
+def _redis_queue_preview(limit=50, task_name_filter=None, offset=0):
     """
-    Peek at up to `limit` messages in the Redis broker queue (read-only).
-    If task_name_filter is set, scan up to 5000 messages and filter by task name (case-insensitive substring).
-    Returns (queue_name, total, sample) where sample is list of dicts with task_id, task_name.
+    Peek at up to `limit` messages in the Redis broker queue (read-only), starting at offset.
+    If task_name_filter is set, scan up to 5000 messages and filter by task name (case-insensitive substring),
+    then return total_matching and page slice [offset:offset+limit].
+    Returns (queue_name, total, total_matching, sample) where total_matching is None when not filtering.
     """
     client, queue_name = _get_redis_queue_connection()
     if client is None:
-        return None, 0, []
+        return None, 0, None, []
     import json
     try:
         total = client.llen(queue_name)
         filter_substring = (task_name_filter or '').strip().lower()
+        offset = max(0, offset)
         if filter_substring:
-            # Scan more messages to find matches; cap at 5000 to avoid heavy load
+            # Scan first 5000 messages, filter, then slice for pagination
             max_scan = 5000
             raw_list = client.lrange(queue_name, 0, max_scan - 1)
-            sample = []
+            matched = []
             for raw in raw_list:
                 entry = {'task_id': None, 'task_name': None}
                 try:
@@ -973,12 +975,13 @@ def _redis_queue_preview(limit=50, task_name_filter=None):
                     pass
                 name = (entry.get('task_name') or '') or ''
                 if filter_substring in name.lower():
-                    sample.append(entry)
-                    if len(sample) >= limit:
-                        break
-            sample = sample[:limit]
+                    matched.append(entry)
+            total_matching = len(matched)
+            sample = matched[offset:offset + limit]
         else:
-            raw_list = client.lrange(queue_name, 0, max(0, limit - 1))
+            # No filter: direct LRANGE with offset
+            end = offset + max(0, limit) - 1
+            raw_list = client.lrange(queue_name, offset, end)
             sample = []
             for raw in raw_list:
                 entry = {'task_id': None, 'task_name': None}
@@ -991,9 +994,10 @@ def _redis_queue_preview(limit=50, task_name_filter=None):
                 except Exception:
                     pass
                 sample.append(entry)
-        return queue_name, total, sample
+            total_matching = None
+        return queue_name, total, total_matching, sample
     except Exception:
-        return queue_name, None, []
+        return queue_name, None, None, []
 
 
 def _scheduled_tasks_superuser_required(request):
@@ -1123,18 +1127,20 @@ def registered_task_detail(request):
         return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-QUEUE_PREVIEW_LIMIT_CHOICES = (25, 50, 100, 500, 1000)
+QUEUE_PREVIEW_LIMIT_CHOICES = (25, 50, 100, 500, 1000, 10000)
+QUEUE_PREVIEW_MAX_LIMIT = 10000
 
 
 @swagger_auto_schema(
     method='get',
     operation_summary="Redis queue preview",
-    operation_description="Peek at messages in the Celery broker queue (Redis only). Read-only; returns total count and a sample of task_id/task_name. Limit can be 25, 50, 100, 500, or 1000. Optional task_name filter (case-insensitive substring).",
+    operation_description="Peek at messages in the Celery broker queue (Redis only). Read-only; returns total count and a sample. Supports limit (25, 50, 100, 500, 1000, or up to 10000 for 'show all'), offset for pagination, and optional task_name filter.",
     manual_parameters=[
-        openapi.Parameter('limit', openapi.IN_QUERY, description='Number of messages to return (25, 50, 100, 500, 1000; default 50)', type=openapi.TYPE_INTEGER),
+        openapi.Parameter('limit', openapi.IN_QUERY, description='Number of messages to return (default 50; max 10000)', type=openapi.TYPE_INTEGER),
+        openapi.Parameter('offset', openapi.IN_QUERY, description='Skip this many messages (for pagination)', type=openapi.TYPE_INTEGER),
         openapi.Parameter('task_name', openapi.IN_QUERY, description='Filter by task name (substring, case-insensitive). When set, scans first 5000 messages.', type=openapi.TYPE_STRING),
     ],
-    responses={200: openapi.Response(description="Queue name, total count, and sample of tasks"), 403: openapi.Response(description="Access denied"), 503: openapi.Response(description="Broker is not Redis or unavailable")},
+    responses={200: openapi.Response(description="Queue name, total count, total_matching when filtered, and sample of tasks"), 403: openapi.Response(description="Access denied"), 503: openapi.Response(description="Broker is not Redis or unavailable")},
     tags=['Scheduled Tasks']
 )
 @api_view(['GET'])
@@ -1151,21 +1157,33 @@ def scheduled_tasks_queue_preview(request):
             if n in QUEUE_PREVIEW_LIMIT_CHOICES:
                 limit = n
             else:
-                limit = min(1000, max(1, n))
+                limit = min(QUEUE_PREVIEW_MAX_LIMIT, max(1, n))
+        except (ValueError, TypeError):
+            pass
+    raw_offset = request.GET.get('offset', '').strip()
+    offset = 0
+    if raw_offset:
+        try:
+            offset = max(0, int(raw_offset))
         except (ValueError, TypeError):
             pass
     task_name_filter = request.GET.get('task_name', '').strip() or None
-    queue_name, total, sample = _redis_queue_preview(limit=limit, task_name_filter=task_name_filter)
+    queue_name, total, total_matching, sample = _redis_queue_preview(
+        limit=limit, task_name_filter=task_name_filter, offset=offset
+    )
     if queue_name is None:
         return Response(
             {'error': 'Queue preview is only available when Celery broker is Redis.'},
             status=status.HTTP_503_SERVICE_UNAVAILABLE
         )
-    return Response({
+    payload = {
         'queue_name': queue_name,
         'total': total,
         'sample': sample,
-    }, status=status.HTTP_200_OK)
+    }
+    if total_matching is not None:
+        payload['total_matching'] = total_matching
+    return Response(payload, status=status.HTTP_200_OK)
 
 
 @swagger_auto_schema(

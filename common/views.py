@@ -1006,8 +1006,12 @@ def pinterest_status(request):
         'last_successful_post': integration.last_successful_post.isoformat() if integration.last_successful_post else None,
         'last_error': integration.last_error,
         'last_error_at': integration.last_error_at.isoformat() if integration.last_error_at else None,
+        'rate_limit_remaining': integration.rate_limit_remaining,
+        'rate_limit_limit': integration.rate_limit_limit,
+        'rate_limit_reset_at': integration.rate_limit_reset_at.isoformat() if integration.rate_limit_reset_at else None,
+        'rate_limit_retry_after_at': integration.rate_limit_retry_after_at.isoformat() if integration.rate_limit_retry_after_at else None,
     }
-    
+
     return JsonResponse(status_data)
 
 @api_view(['GET'])

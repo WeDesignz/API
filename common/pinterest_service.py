@@ -96,21 +96,60 @@ class PinterestService:
 
         try:
             response = requests.post(url, json=payload, headers=headers, timeout=30)
-            response.raise_for_status()
-            
-            pin_data = response.json()
-            pin_id = pin_data.get('id')
-            pin_url = pin_data.get('url', '')
+            # Update rate limit from headers (before raising) so we always have latest stats
+            self.integration.update_rate_limit_from_response(response)
 
-            # Update integration success tracking
-            self.integration.update_success()
-            
-            return {
-                'id': pin_id,
-                'url': pin_url,
-                'data': pin_data
-            }
-            
+            if response.ok:
+                pin_data = response.json()
+                pin_id = pin_data.get('id')
+                pin_url = pin_data.get('url', '')
+
+                # Update integration success tracking
+                self.integration.update_success()
+
+                return {
+                    'id': pin_id,
+                    'url': pin_url,
+                    'data': pin_data
+                }
+
+            # Non-2xx: build error and return (don't raise so we already updated rate limit)
+            status_code = response.status_code
+            error_msg = f"HTTP {status_code}"
+            error_details = None
+            try:
+                error_data = response.json()
+                error_msg = error_data.get('message', error_data.get('error_description', error_msg))
+                error_details = error_data
+                if status_code == 401:
+                    error_msg = f"Authentication failed (401): {error_msg}. Access token may be expired or invalid."
+                elif status_code == 403:
+                    error_msg = f"Permission denied (403): {error_msg}. Token may lack required permissions or board access."
+                elif status_code == 404:
+                    error_msg = f"Not found (404): {error_msg}. Board ID '{self.integration.board_id}' may not exist or be inaccessible."
+                elif status_code == 400:
+                    error_msg = f"Bad request (400): {error_msg}. Invalid image URL, board ID, or pin parameters."
+                elif status_code == 429:
+                    error_msg = f"Rate limit exceeded (429): {error_msg}. Too many requests to Pinterest API."
+                elif status_code >= 500:
+                    error_msg = f"Pinterest server error ({status_code}): {error_msg}. Pinterest API is experiencing issues."
+            except Exception:
+                response_text = response.text[:500] if response.text else "No error details"
+                error_msg = f"HTTP {status_code}: {response_text}"
+
+            full_error_msg = f"[{status_code}] {error_msg}"
+            if error_details and isinstance(error_details, dict):
+                additional_info = []
+                if error_details.get('code'):
+                    additional_info.append(f"Error code: {error_details['code']}")
+                if error_details.get('parameters'):
+                    additional_info.append(f"Parameters: {error_details['parameters']}")
+                if additional_info:
+                    full_error_msg += f" ({', '.join(additional_info)})"
+
+            self.integration.update_error(full_error_msg)
+            return {'error': full_error_msg, 'type': 'http_error', 'status_code': status_code, 'details': error_details}
+
         except requests.exceptions.Timeout as e:
             error_msg = f"Request timeout: Pinterest API did not respond within 30 seconds"
             status_code = None
@@ -120,66 +159,13 @@ class PinterestService:
             self.integration.update_error(error_msg)
 
             return {'error': error_msg, 'type': 'timeout', 'status_code': status_code}
-            
+
         except requests.exceptions.ConnectionError as e:
             error_msg = f"Connection error: Could not connect to Pinterest API. Check network connectivity."
             status_code = None
-            
-            # Update integration error tracking
             self.integration.update_error(error_msg)
-
             return {'error': error_msg, 'type': 'connection_error', 'status_code': status_code}
-            
-        except requests.exceptions.HTTPError as e:
-            # HTTP error (4xx, 5xx)
-            error_msg = str(e)
-            status_code = None
-            error_details = None
-            
-            if hasattr(e, 'response') and e.response is not None:
-                status_code = e.response.status_code
-                try:
-                    error_data = e.response.json()
-                    error_msg = error_data.get('message', error_data.get('error_description', str(e)))
-                    error_details = error_data
-                    
-                    # Add more context based on status code
-                    if status_code == 401:
-                        error_msg = f"Authentication failed (401): {error_msg}. Access token may be expired or invalid."
-                    elif status_code == 403:
-                        error_msg = f"Permission denied (403): {error_msg}. Token may lack required permissions or board access."
-                    elif status_code == 404:
-                        error_msg = f"Not found (404): {error_msg}. Board ID '{self.integration.board_id}' may not exist or be inaccessible."
-                    elif status_code == 400:
-                        error_msg = f"Bad request (400): {error_msg}. Invalid image URL, board ID, or pin parameters."
-                    elif status_code == 429:
-                        error_msg = f"Rate limit exceeded (429): {error_msg}. Too many requests to Pinterest API."
-                    elif status_code >= 500:
-                        error_msg = f"Pinterest server error ({status_code}): {error_msg}. Pinterest API is experiencing issues."
 
-                except:
-                    response_text = e.response.text[:500] if e.response.text else "No error details"
-                    error_msg = f"HTTP {status_code}: {response_text}"
-
-            # Build comprehensive error message
-            full_error_msg = error_msg
-            if status_code:
-                full_error_msg = f"[{status_code}] {error_msg}"
-            if error_details and isinstance(error_details, dict):
-                # Add additional error context if available
-                additional_info = []
-                if 'code' in error_details:
-                    additional_info.append(f"Error code: {error_details['code']}")
-                if 'parameters' in error_details:
-                    additional_info.append(f"Parameters: {error_details['parameters']}")
-                if additional_info:
-                    full_error_msg += f" ({', '.join(additional_info)})"
-            
-            # Update integration error tracking
-            self.integration.update_error(full_error_msg)
-
-            return {'error': full_error_msg, 'type': 'http_error', 'status_code': status_code, 'details': error_details}
-            
         except requests.exceptions.RequestException as e:
             # Other request exceptions
             error_msg = f"Request error: {str(e)}"
