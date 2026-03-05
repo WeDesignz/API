@@ -22,6 +22,10 @@ from MediaFiles.models import Media
 logger = logging.getLogger(__name__)
 
 
+# JPG-only extensions for admin client PDFs (prefer PRODUCT_NUMBER.jpg)
+CLIENT_PDF_IMAGE_EXTENSIONS = (".jpg", ".jpeg")
+
+
 def generate_client_pdf_for_products(
     pdf_file_path,
     products,
@@ -32,6 +36,8 @@ def generate_client_pdf_for_products(
     """
     Generate a PDF file for a given list of products for admin PDF clients.
     Layout matches the customer mock PDF style (logo + name/number + design image).
+    Uses only JPG images; prefers media whose filename is PRODUCT_NUMBER.jpg.
+    Supports remote storage (S3 etc.) via default_storage fallback.
 
     Returns the created file size in bytes.
     """
@@ -46,14 +52,19 @@ def generate_client_pdf_for_products(
 
     # Create PDF canvas
     c = canvas.Canvas(pdf_file_path, pagesize=letter)
+    temp_files_to_cleanup = []
 
     # Generate one page per product
     for idx, product in enumerate(products, 1):
         if idx > 1:
             c.showPage()
 
-        # Resolve image path (first available media image, if any)
-        image_path = None
+        product_number = product.product_number or f"WD{product.id}"
+        product_number_lower = product_number.lower()
+
+        # Pick only JPG; prefer media whose base name is PRODUCT_NUMBER.jpg
+        chosen_media = None
+        fallback_media = None
         try:
             media_list = product.get_media()
             for media in media_list:
@@ -62,16 +73,44 @@ def generate_client_pdf_for_products(
                 file_name = getattr(media.file, "name", "") or ""
                 if not file_name:
                     continue
-                # Try absolute path first
-                if hasattr(media.file, "path"):
-                    candidate = media.file.path
+                file_name_lower = file_name.lower()
+                ext = os.path.splitext(file_name_lower)[1]
+                if ext not in CLIENT_PDF_IMAGE_EXTENSIONS:
+                    continue
+                base_name = os.path.splitext(os.path.basename(file_name_lower))[0]
+                if base_name == product_number_lower:
+                    chosen_media = media
+                    break
+                if fallback_media is None:
+                    fallback_media = media
+            if chosen_media is None:
+                chosen_media = fallback_media
+        except Exception:
+            chosen_media = None
+
+        # Resolve image path (local or via default_storage for remote/S3)
+        image_path = None
+        if chosen_media and getattr(chosen_media, "file", None):
+            try:
+                file_name = getattr(chosen_media.file, "name", "") or ""
+                if hasattr(chosen_media.file, "path"):
+                    candidate = chosen_media.file.path
                 else:
                     candidate = os.path.join(settings.MEDIA_ROOT, file_name)
                 if os.path.exists(candidate):
                     image_path = candidate
-                    break
-        except Exception:
-            image_path = None
+                elif file_name and default_storage.exists(file_name):
+                    with default_storage.open(file_name, "rb") as src:
+                        suffix = os.path.splitext(file_name)[1].lower()
+                        if suffix not in CLIENT_PDF_IMAGE_EXTENSIONS:
+                            suffix = ".jpg"
+                        fd, image_path = tempfile.mkstemp(suffix=suffix, prefix="pdf_img_")
+                        os.close(fd)
+                        with open(image_path, "wb") as dst:
+                            dst.write(src.read())
+                        temp_files_to_cleanup.append(image_path)
+            except Exception:
+                image_path = None
 
         page_w, page_h = page_width, page_height
         m = margin
@@ -104,7 +143,6 @@ def generate_client_pdf_for_products(
         c.drawString(center_x - num_width / 2, page_h - m - 46, number_text[:20] or " ")
 
         # Bottom design number
-        product_number = product.product_number or f"WD{product.id}"
         c.setFont("Helvetica", 11)
         c.setFillColorRGB(0.35, 0.35, 0.4)
         c.drawString(m, m + 8, f"Design: {product_number}")
@@ -144,6 +182,13 @@ def generate_client_pdf_for_products(
             c.drawString(center_x - 60, page_h / 2 - 20, "Image not available")
 
     c.save()
+
+    for tmp in temp_files_to_cleanup:
+        try:
+            if tmp and os.path.exists(tmp):
+                os.unlink(tmp)
+        except Exception:
+            pass
 
     if not os.path.exists(pdf_file_path):
         raise Exception(f"PDF file was not created at {pdf_file_path}")
