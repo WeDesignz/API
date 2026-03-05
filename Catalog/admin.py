@@ -280,7 +280,7 @@ class PDFClientJobAdmin(admin.ModelAdmin):
             'fields': ('customer_name', 'customer_mobile', 'customer_logo')
         }),
         ('User Information', {
-            'fields': ('created_by', 'updated_by')
+            'fields': ('created_by',)
         }),
         ('Timestamps', {
             'fields': ('created_at', 'updated_at'),
@@ -289,4 +289,4 @@ class PDFClientJobAdmin(admin.ModelAdmin):
     )
 
     def get_queryset(self, request):
-        return super().get_queryset(request).select_related('client', 'created_by', 'updated_by')
+        return super().get_queryset(request).select_related('client', 'created_by')
