@@ -1,6 +1,6 @@
 from django.db import models
 from django.contrib.auth.models import User
-from django.db.models.signals import pre_save
+from django.db.models.signals import pre_save, post_delete
 from django.dispatch import receiver
 from common.relations import attach_relation, get_related_ids, get_related, detach_relation
 from MediaFiles.models import Media
@@ -464,6 +464,41 @@ class PDFClientJob(models.Model):
 
     def __str__(self) -> str:
         return f"PDF Client Job {self.pk} - {self.client.name}"
+
+
+def _delete_pdf_client_job_files(sender, instance, **kwargs):
+    """
+    On PDFClientJob delete, remove associated PDF and zip files from disk.
+    Only deletes paths under admin_pdf_clients/ and within MEDIA_ROOT.
+    """
+    from django.conf import settings
+    import os
+
+    media_root = getattr(settings, 'MEDIA_ROOT', None)
+    if not media_root or not os.path.isdir(media_root):
+        return
+
+    media_norm = os.path.normpath(media_root)
+    paths = list(instance.pdf_file_paths or [])
+    if instance.zip_file_path:
+        paths.append(instance.zip_file_path)
+
+    for rel_path in paths:
+        rel_path_str = (rel_path or '').strip()
+        if not rel_path_str or not rel_path_str.startswith('admin_pdf_clients/'):
+            continue
+        full_path = os.path.normpath(os.path.join(media_root, rel_path_str))
+        if not full_path.startswith(media_norm) or not os.path.isfile(full_path):
+            continue
+        try:
+            os.unlink(full_path)
+        except OSError:
+            pass  # Log and skip; avoid breaking the delete transaction
+
+
+@receiver(post_delete, sender=PDFClientJob)
+def delete_pdf_client_job_files_signal(sender, instance, **kwargs):
+    _delete_pdf_client_job_files(sender, instance, **kwargs)
 
 
 # ==================== DESIGN NUMBER GENERATION ====================
