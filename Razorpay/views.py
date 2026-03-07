@@ -259,6 +259,16 @@ def capture_payment(request):
                         import logging
                         logger = logging.getLogger(__name__)
 
+                # Deduct one-time free designs from user's allowance (cart orders)
+                if payment.order.order_type == 'cart' and getattr(payment.order, 'one_time_free_designs_used', 0) > 0:
+                    try:
+                        from Orders.models import UserOneTimeFreeDesignUsage
+                        usage, _ = UserOneTimeFreeDesignUsage.objects.get_or_create(user=payment.order.created_by, defaults={'designs_used': 0})
+                        usage.designs_used += payment.order.one_time_free_designs_used
+                        usage.save(update_fields=['designs_used', 'updated_at'])
+                    except Exception as e:
+                        import logging
+                        logging.getLogger(__name__).exception("Failed to update one-time free design usage")
                 # If this order is for subscription purchase, activate subscription
                 if payment.order.subscription:
                     subscription = payment.order.subscription
@@ -355,6 +365,16 @@ def capture_payment(request):
                     import logging
                     logger = logging.getLogger(__name__)
 
+            # Deduct one-time free designs from user's allowance (cart orders)
+            if payment.order.order_type == 'cart' and getattr(payment.order, 'one_time_free_designs_used', 0) > 0:
+                try:
+                    from Orders.models import UserOneTimeFreeDesignUsage
+                    usage, _ = UserOneTimeFreeDesignUsage.objects.get_or_create(user=payment.order.created_by, defaults={'designs_used': 0})
+                    usage.designs_used += payment.order.one_time_free_designs_used
+                    usage.save(update_fields=['designs_used', 'updated_at'])
+                except Exception as e:
+                    import logging
+                    logging.getLogger(__name__).exception("Failed to update one-time free design usage")
             # If this order is for subscription purchase, activate subscription
             if payment.order.subscription:
                 subscription = payment.order.subscription
@@ -454,6 +474,16 @@ def capture_payment(request):
                             import logging
                             logger = logging.getLogger(__name__)
 
+                    # Deduct one-time free designs from user's allowance (cart orders)
+                    if payment.order.order_type == 'cart' and getattr(payment.order, 'one_time_free_designs_used', 0) > 0:
+                        try:
+                            from Orders.models import UserOneTimeFreeDesignUsage
+                            usage, _ = UserOneTimeFreeDesignUsage.objects.get_or_create(user=payment.order.created_by, defaults={'designs_used': 0})
+                            usage.designs_used += payment.order.one_time_free_designs_used
+                            usage.save(update_fields=['designs_used', 'updated_at'])
+                        except Exception as e:
+                            import logging
+                            logging.getLogger(__name__).exception("Failed to update one-time free design usage")
                     # If this order is for subscription purchase, activate subscription
                     if payment.order.subscription:
                         subscription = payment.order.subscription
@@ -771,6 +801,16 @@ def webhook_handler(request):
                                 import logging
                                 logger = logging.getLogger(__name__)
 
+                        # Deduct one-time free designs from user's allowance (cart orders)
+                        if payment.order.order_type == 'cart' and getattr(payment.order, 'one_time_free_designs_used', 0) > 0:
+                            try:
+                                from Orders.models import UserOneTimeFreeDesignUsage
+                                usage, _ = UserOneTimeFreeDesignUsage.objects.get_or_create(user=payment.order.created_by, defaults={'designs_used': 0})
+                                usage.designs_used += payment.order.one_time_free_designs_used
+                                usage.save(update_fields=['designs_used', 'updated_at'])
+                            except Exception as e:
+                                import logging
+                                logging.getLogger(__name__).exception("Failed to update one-time free design usage")
                         # If this order is for subscription purchase, activate subscription
                         if payment.order.subscription:
                             subscription = payment.order.subscription
