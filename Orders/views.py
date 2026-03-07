@@ -7,7 +7,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from django.db.models import Q, Sum
 from django.utils import timezone
-from .models import Cart, Order, OrderTransaction, OrderComment, OrderCommentReadReceipt, Invoice
+from .models import Cart, Order, OrderTransaction, OrderComment, OrderCommentReadReceipt, Invoice, UserOneTimeFreeDesignUsage
 from .serializers import (
     CartSerializer, OrderSerializer, OrderTransactionSerializer,
     OrderCommentSerializer, OrderCommentCreateSerializer, OrderCommentListSerializer,
@@ -682,7 +682,8 @@ def create_order(request):
             'error': 'product_ids is required and must be a list'
         }, status=status.HTTP_400_BAD_REQUEST)
     
-    if not total_amount:
+    # total_amount is required; 0 is valid for free orders (one-time free designs or subscription)
+    if total_amount is None:
         return Response({
             'error': 'total_amount is required'
         }, status=status.HTTP_400_BAD_REQUEST)
@@ -722,7 +723,20 @@ def create_order(request):
             'error': f'Error validating products: {str(e)}'
         }, status=status.HTTP_400_BAD_REQUEST)
     
-    # Calculate total from products
+    # Exclude already-purchased products (in My Downloads) so we don't charge for them again
+    original_product_ids = list(product_ids)
+    product_ids_to_charge = [pid for pid in product_ids if not check_user_has_purchased_product(request.user, pid)]
+    if not product_ids_to_charge:
+        return Response({
+            'error': 'All items in your cart are already in your Downloads. You do not need to purchase them again.',
+            'already_purchased': True,
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    # Use filtered list for order and totals
+    product_ids = product_ids_to_charge
+    products = Product.objects.filter(id__in=product_ids, status='active')
+    
+    # Calculate total from products (only those being charged)
     calculated_total = sum([float(p.price) if p.price else 0 for p in products])
     number_of_products = len(products)
     
@@ -734,6 +748,7 @@ def create_order(request):
     
     # Handle free downloads - calculate but don't decrement until payment succeeds
     free_downloads_used = 0
+    use_one_time = 0  # One-time free designs (per account, once only)
     if active_subscription:
         remaining_free = active_subscription.get_remaining_free_downloads()
         
@@ -854,6 +869,19 @@ def create_order(request):
         order_type = 'cart'
         order_status = 'pending'
     
+    # One-time free designs (per account, once only) - apply after subscription free
+    from common.business_config import BusinessConfig
+    one_time_limit = BusinessConfig.get_free_designs_per_account_one_time()
+    usage, _ = UserOneTimeFreeDesignUsage.objects.get_or_create(user=request.user, defaults={'designs_used': 0})
+    remaining_one_time = max(0, one_time_limit - usage.designs_used)
+    paid_after_subscription = number_of_products - free_downloads_used
+    use_one_time = min(remaining_one_time, paid_after_subscription) if paid_after_subscription > 0 else 0
+    paid_finally = paid_after_subscription - use_one_time
+    if paid_after_subscription > 0 and use_one_time > 0:
+        final_amount = final_amount * (paid_finally / paid_after_subscription)
+    if paid_finally == 0 and number_of_products > 0:
+        order_status = 'success'
+    
     # Handle coupon if provided (only if not already using free downloads for all items)
     discount_amount = 0
     coupon = None
@@ -945,8 +973,14 @@ def create_order(request):
         status=order_status,
         subscription=active_subscription if (active_subscription and free_downloads_used > 0) else None,
         free_downloads_used=free_downloads_used,  # Store count - will be decremented on payment success
+        one_time_free_designs_used=use_one_time,
         created_by=request.user
     )
+    
+    # When order is free (success), deduct one-time free designs from user's allowance
+    if order_status == 'success' and use_one_time > 0:
+        usage.designs_used += use_one_time
+        usage.save(update_fields=['designs_used', 'updated_at'])
     
     # Create coupon usage if coupon was applied
     if coupon and discount_amount > 0:
@@ -958,12 +992,12 @@ def create_order(request):
             created_by=request.user
         )
     
-    # If successful (free with subscription), remove items from cart
-    if order_status == 'success':
+    # If successful (free with subscription), remove from cart all items that were in the checkout (both charged and already-owned)
+    if order_status == 'success' and original_product_ids:
         Cart.objects.filter(
             created_by=request.user,
             cart_type='cart',
-            product_id__in=product_ids
+            product_id__in=original_product_ids
         ).delete()
     
     return Response({
@@ -974,8 +1008,10 @@ def create_order(request):
         'original_amount': sum([float(p.price) if p.price else 0 for p in products]),
         'discount_applied': discount_amount if 'discount_amount' in locals() else 0,
         'free_downloads_used': free_downloads_used,
-        'free_purchase': bool(free_downloads_used > 0),
-        'remaining_free_downloads': active_subscription.get_remaining_free_downloads() if active_subscription else 0
+        'one_time_free_designs_used': use_one_time,
+        'free_purchase': bool(free_downloads_used > 0 or use_one_time > 0),
+        'remaining_free_downloads': active_subscription.get_remaining_free_downloads() if active_subscription else 0,
+        'one_time_free_designs_remaining': max(0, one_time_limit - usage.designs_used),
     }, status=status.HTTP_201_CREATED)
 
 
@@ -1487,6 +1523,53 @@ def add_bundle_to_cart(request):
 
 @swagger_auto_schema(
     method='get',
+    operation_summary='Free Benefits',
+    operation_description='Get logged-in user\'s free benefits: one-time free designs and free custom orders remaining.',
+    responses={
+        200: openapi.Response(
+            description='Free benefits for the current user',
+            examples={
+                'application/json': {
+                    'one_time_free_designs_remaining': 10,
+                    'one_time_free_designs_total': 10,
+                    'free_custom_orders_remaining': 2,
+                    'free_custom_orders_total': 2,
+                }
+            }
+        ),
+        401: openapi.Response(description='Unauthorized')
+    },
+    tags=['Orders']
+)
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def free_benefits(request):
+    """
+    Get free benefits for the logged-in user: one-time free designs and free custom orders (remaining and total).
+    """
+    from common.business_config import BusinessConfig
+    from CustomRequests.models import CustomOrderRequest
+    one_time_limit = BusinessConfig.get_free_designs_per_account_one_time()
+    free_custom_limit = BusinessConfig.get_free_custom_orders_per_account()
+    usage, _ = UserOneTimeFreeDesignUsage.objects.get_or_create(user=request.user, defaults={'designs_used': 0})
+    one_time_remaining = max(0, one_time_limit - usage.designs_used)
+    free_custom_used = CustomOrderRequest.objects.filter(
+        created_by=request.user,
+        used_free_custom_order_allowance=True
+    ).count()
+    free_custom_remaining = max(0, free_custom_limit - free_custom_used)
+    return Response({
+        'one_time_free_designs_remaining': one_time_remaining,
+        'one_time_free_designs_total': one_time_limit,
+        'one_time_free_designs_used': usage.designs_used,
+        'free_custom_orders_remaining': free_custom_remaining,
+        'free_custom_orders_total': free_custom_limit,
+        'free_custom_orders_used': free_custom_used,
+    })
+
+
+@swagger_auto_schema(
+    method='get',
     operation_summary='Cart Summary',
     operation_description='Cart Summary endpoint',
     responses={
@@ -1515,14 +1598,29 @@ def cart_summary(request):
         cart_type='cart'
     ).select_related('product')
     
+    # Exclude already-purchased items from totals (they are in My Downloads, no need to pay again)
+    items_to_pay = [item for item in cart_items if not check_user_has_purchased_product(request.user, item.product_id)]
+    total_amount = sum(float(item.product.price or 0) for item in items_to_pay)
+    number_of_items = len(items_to_pay)
+    
     # Check for active subscription
     active_subscription = Subscription.objects.filter(
         created_by=request.user,
         status='active'
     ).select_related('plan').first()
     
-    total_amount = sum(float(item.product.price or 0) for item in cart_items)
-    number_of_items = cart_items.count()
+    # One-time free designs and free custom orders (per account)
+    from common.business_config import BusinessConfig
+    one_time_designs_limit = BusinessConfig.get_free_designs_per_account_one_time()
+    free_custom_orders_limit = BusinessConfig.get_free_custom_orders_per_account()
+    usage, _ = UserOneTimeFreeDesignUsage.objects.get_or_create(user=request.user, defaults={'designs_used': 0})
+    one_time_designs_remaining = max(0, one_time_designs_limit - usage.designs_used)
+    from CustomRequests.models import CustomOrderRequest
+    free_custom_orders_used = CustomOrderRequest.objects.filter(
+        created_by=request.user,
+        used_free_custom_order_allowance=True
+    ).count()
+    free_custom_orders_remaining = max(0, free_custom_orders_limit - free_custom_orders_used)
     
     # Initialize response data
     response_data = {
@@ -1538,6 +1636,10 @@ def cart_summary(request):
         'free_items_count': 0,
         'paid_items_count': number_of_items,
         'discounted_amount': total_amount,
+        'one_time_free_designs_remaining': one_time_designs_remaining,
+        'one_time_free_designs_total': one_time_designs_limit,
+        'free_custom_orders_remaining': free_custom_orders_remaining,
+        'free_custom_orders_total': free_custom_orders_limit,
     }
     
     if active_subscription:
@@ -1549,32 +1651,27 @@ def cart_summary(request):
         if plan and hasattr(plan, 'discount'):
             plan_discount = float(plan.discount) if plan.discount else 0.0
         
-        # Calculate how many items can be free
-        free_items_count = min(remaining_free, number_of_items)
-        paid_items_count = max(0, number_of_items - remaining_free)
+        # Calculate how many items can be free from subscription
+        subscription_free_count = min(remaining_free, number_of_items)
+        paid_after_subscription = max(0, number_of_items - subscription_free_count)
+        
+        # Apply one-time free designs on top of subscription (covers remaining paid items)
+        one_time_use = min(one_time_designs_remaining, paid_after_subscription) if paid_after_subscription > 0 else 0
+        free_items_count = subscription_free_count + one_time_use
+        paid_items_count = number_of_items - free_items_count
         
         # Check if order will be completely free
-        will_be_free = remaining_free >= number_of_items
+        will_be_free = paid_items_count == 0
         
-        # Calculate discounted amount for paid items
+        # Calculate discounted amount for paid items only
         if paid_items_count > 0:
-            # Calculate price for paid items based on actual item prices
-            # Sort items by price (or use first N items for free, rest for paid)
-            # For simplicity, we'll calculate proportionally, but in a real scenario,
-            # you might want to prioritize cheaper items for free downloads
             paid_items_amount = total_amount * (paid_items_count / number_of_items) if number_of_items > 0 else 0
-            
-            # Apply plan discount to paid items
             if plan_discount > 0:
                 discount_from_plan = (paid_items_amount * plan_discount) / 100
-                discounted_paid_amount = paid_items_amount - discount_from_plan
+                discounted_amount = paid_items_amount - discount_from_plan
             else:
-                discounted_paid_amount = paid_items_amount
-            
-            # Free items amount is 0
-            discounted_amount = discounted_paid_amount
+                discounted_amount = paid_items_amount
         else:
-            # All items are free
             discounted_amount = 0
         
         response_data.update({
@@ -1586,6 +1683,22 @@ def cart_summary(request):
             'free_items_count': free_items_count,
             'paid_items_count': paid_items_count,
             'discounted_amount': discounted_amount,
+            'one_time_free_items_count': one_time_use,
+        })
+    else:
+        # No subscription: apply one-time free designs only
+        one_time_free_count = min(one_time_designs_remaining, number_of_items)
+        paid_items_count = number_of_items - one_time_free_count
+        free_items_count = one_time_free_count
+        will_be_free = paid_items_count == 0
+        discounted_amount = total_amount * (paid_items_count / number_of_items) if number_of_items > 0 else 0
+        
+        response_data.update({
+            'will_be_free': will_be_free,
+            'free_items_count': free_items_count,
+            'paid_items_count': paid_items_count,
+            'discounted_amount': discounted_amount,
+            'one_time_free_items_count': one_time_free_count,
         })
     
     return Response(response_data)

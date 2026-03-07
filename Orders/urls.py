@@ -21,6 +21,7 @@ urlpatterns = [
     # Purchase and downloads
     path('create/', views.create_order, name='create_order'),
     path('check-free-downloads/', views.check_free_downloads_availability, name='check_free_downloads_availability'),
+    path('free-benefits/', views.free_benefits, name='free_benefits'),
     path('purchase/', views.purchase_cart, name='purchase_cart'),
     path('downloads/', views.my_downloads, name='my_downloads'),
     path('downloads/product/<int:product_id>/zip/', views.download_product_zip, name='download_product_zip'),

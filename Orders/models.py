@@ -31,6 +31,21 @@ class Cart(models.Model):
         return f"Cart {self.pk} - {self.product.title} ({self.cart_type})"
 
 
+class UserOneTimeFreeDesignUsage(models.Model):
+    """Tracks how many one-time free design downloads a user has used (per-account, once only)."""
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='one_time_free_design_usage')
+    designs_used = models.PositiveIntegerField(default=0, help_text="Number of one-time free designs already used by this user")
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'user_one_time_free_design_usage'
+        verbose_name = 'User One-Time Free Design Usage'
+        verbose_name_plural = 'User One-Time Free Design Usage'
+
+    def __str__(self):
+        return f"{self.user.username}: {self.designs_used} one-time free designs used"
+
+
 class Order(models.Model):
     STATUS_CHOICES = [
         ('pending', 'Pending'),
@@ -77,6 +92,11 @@ class Order(models.Model):
     free_downloads_used = models.IntegerField(
         default=0,
         help_text="Number of free downloads used from subscription for this order (decremented on payment success)"
+    )
+    # Track one-time free designs used for this order (deducted from user's one-time allowance on success)
+    one_time_free_designs_used = models.IntegerField(
+        default=0,
+        help_text="Number of designs covered by one-time free designs allowance (per-account, once only)"
     )
     
     # Transaction fields (merged from OrderTransaction)

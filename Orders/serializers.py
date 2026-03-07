@@ -129,6 +129,7 @@ class OrderSerializer(serializers.ModelSerializer):
             'id', 'order_type', 'product_ids', 'total_amount', 'status',
             'order_transaction_number', 'order_transaction_type',
             'custom_order_request', 'subscription',
+            'free_downloads_used', 'one_time_free_designs_used',
             'created_by', 'created_at', 'updated_by', 'updated_at',
             'created_by_id', 'updated_by_id', 'products',
             'custom_order_details', 'subscription_details'
