@@ -6745,6 +6745,7 @@ def custom_order_upload_files(request, order_id):
     admin_notes = serializer.validated_data.get('admin_notes', '')
     
     try:
+        from MediaFiles.models import Media
         # Upload files to Media model
         # Files should be stored in the customer's folder (order.created_by), not admin's folder
         customer_user = order.created_by
@@ -6754,7 +6755,6 @@ def custom_order_upload_files(request, order_id):
         Media.set_order_context(order.id)
         try:
             for file in files:
-                from MediaFiles.models import Media
                 # Create Media object with customer as created_by so it goes to customer's folder
                 media_obj = Media.objects.create(
                     file=file,
@@ -7880,6 +7880,8 @@ def get_system_config(request):
             'minimum_required_designs': config.minimum_required_designs,
             'free_mock_pdf_downloads_no_plan_per_month': getattr(config, 'free_mock_pdf_downloads_no_plan_per_month', 999),
             'paid_pdf_designs_options': paid_pdf_opts if paid_pdf_opts else [],
+            'free_designs_per_account_one_time': getattr(config, 'free_designs_per_account_one_time', 10),
+            'free_custom_orders_per_account': getattr(config, 'free_custom_orders_per_account', 2),
             'maintenance_mode': config.maintenance_mode,
             'hero_section_designs': config.hero_section_designs or [],
             'featured_designs': config.featured_designs or [],
@@ -7933,6 +7935,10 @@ def update_system_config(request):
                 config.paid_pdf_designs_options = filtered if filtered else [20, 50, 100]
             else:
                 config.paid_pdf_designs_options = []
+        if 'free_designs_per_account_one_time' in request.data:
+            config.free_designs_per_account_one_time = int(request.data['free_designs_per_account_one_time'])
+        if 'free_custom_orders_per_account' in request.data:
+            config.free_custom_orders_per_account = int(request.data['free_custom_orders_per_account'])
         if 'maintenance_mode' in request.data:
             config.maintenance_mode = bool(request.data['maintenance_mode'])
         if 'hero_section_designs' in request.data:
