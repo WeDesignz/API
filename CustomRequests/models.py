@@ -31,7 +31,10 @@ class CustomOrderRequest(models.Model):
     description = models.TextField()
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     payment_status = models.CharField(max_length=20, choices=PAYMENT_STATUS_CHOICES, default='pending', help_text="Payment status: pending (payment not yet processed), success (payment successful), failed (payment failed)")
-
+    used_free_custom_order_allowance = models.BooleanField(
+        default=False,
+        help_text="True if this custom order used the user's free custom order allowance (no payment)."
+    )
     budget = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     
     # SLA and Delivery Tracking

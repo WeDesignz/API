@@ -94,7 +94,7 @@ def home_feed(request):
     """
     try:
         page = int(request.GET.get('page', 1))
-        page_size = 20
+        page_size = 24
         
         # Optional: exclude product IDs (e.g. from user's previous PDFs when "only new designs" is on)
         exclude_ids = []
@@ -993,7 +993,7 @@ def search_and_filter(request):
         products = products.filter(created_at__lte=date_to)
     
     # Pagination
-    paginator = Paginator(products, 20)
+    paginator = Paginator(products, 24)
     page_obj = paginator.get_page(page)
     
     return Response({

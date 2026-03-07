@@ -218,17 +218,25 @@ def submit_custom_request(request):
             'error': 'Budget must be a positive amount'
         }, status=status.HTTP_400_BAD_REQUEST)
     
-    # Validate against minimum price from config
-    if budget < default_price:
+    # Validate against minimum price from config (skip if using free allowance)
+    free_custom_order_limit = BusinessConfig.get_free_custom_orders_per_account()
+    used_free_custom_orders = CustomOrderRequest.objects.filter(
+        created_by=request.user,
+        used_free_custom_order_allowance=True
+    ).count()
+    use_free_allowance = used_free_custom_orders < free_custom_order_limit
+    
+    if not use_free_allowance and budget < default_price:
         return Response({
             'error': f'Minimum budget is ₹{default_price}'
         }, status=status.HTTP_400_BAD_REQUEST)
     
-    # Create custom request
+    # Create custom request (budget=0 when using free allowance; order amount will be 0)
     custom_request = CustomOrderRequest.objects.create(
         title=title,
         description=description,
-        budget=budget,
+        budget=Decimal('0') if use_free_allowance else Decimal(str(budget)),
+        used_free_custom_order_allowance=use_free_allowance,
         created_by=request.user
     )
     
@@ -298,6 +306,32 @@ def submit_custom_request(request):
                 logger = logging.getLogger(__name__)
 
                 continue
+    
+    # If user used free custom order allowance, create order immediately with success (no payment)
+    if use_free_allowance:
+        from Orders.models import Order
+        order = Order.objects.create(
+            order_type='custom',
+            product_ids='',
+            total_amount=Decimal('0'),
+            status='success',
+            custom_order_request=custom_request,
+            created_by=request.user
+        )
+        custom_request.payment_status = 'success'
+        custom_request.save(update_fields=['payment_status'])
+        return Response({
+            'message': 'Custom request submitted successfully (free - using your free custom order allowance)',
+            'custom_request': CustomOrderRequestSerializer(custom_request).data,
+            'custom_request_id': custom_request.id,
+            'order_id': order.id,
+            'payment_required': False,
+            'amount': 0,
+            'free_custom_order_used': True,
+            'free_custom_orders_remaining': free_custom_order_limit - used_free_custom_orders - 1,
+            'payment_message': None,
+            'uploaded_files': uploaded_files
+        }, status=status.HTTP_201_CREATED)
     
     # Order is created only after successful payment capture (see Razorpay capture_payment).
     return Response({

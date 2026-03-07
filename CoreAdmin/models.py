@@ -1872,6 +1872,14 @@ class SystemConfig(models.Model):
         blank=True,
         help_text="PDF download design count options (e.g. [20, 50, 100]). First value is used for free PDFs. Managed via .env PAID_PDF_DESIGNS_OPTIONS or Admin panel."
     )
+    free_designs_per_account_one_time = models.IntegerField(
+        default=10,
+        help_text="Number of free design downloads per account, once only (one-time). User gets this many free designs after login regardless of plan. If admin increases (e.g. to 12), users who used 10 get 2 more."
+    )
+    free_custom_orders_per_account = models.IntegerField(
+        default=2,
+        help_text="Number of free custom orders per account. Each user gets this many custom orders for free (once per account)."
+    )
     maintenance_mode = models.BooleanField(default=False)
     
     # Landing page settings - Different sections need different designs

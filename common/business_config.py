@@ -76,6 +76,22 @@ class BusinessConfig:
         return getattr(settings, 'FREE_MOCK_PDF_DOWNLOADS_NO_PLAN_PER_MONTH', 999)
 
     @staticmethod
+    def get_free_designs_per_account_one_time():
+        """Get number of free design downloads per account (one-time only). Default 10."""
+        config = BusinessConfig._get_system_config()
+        if config and hasattr(config, 'free_designs_per_account_one_time') and config.free_designs_per_account_one_time is not None:
+            return int(config.free_designs_per_account_one_time)
+        return getattr(settings, 'FREE_DESIGNS_PER_ACCOUNT_ONE_TIME', 10)
+
+    @staticmethod
+    def get_free_custom_orders_per_account():
+        """Get number of free custom orders per account. Default 2."""
+        config = BusinessConfig._get_system_config()
+        if config and hasattr(config, 'free_custom_orders_per_account') and config.free_custom_orders_per_account is not None:
+            return int(config.free_custom_orders_per_account)
+        return getattr(settings, 'FREE_CUSTOM_ORDERS_PER_ACCOUNT', 2)
+
+    @staticmethod
     def get_paid_pdf_designs_options():
         """Get PDF download design count options (e.g. [20, 50, 100]).
         First value is used for free PDFs. Only 20, 50, 100 allowed (values > 100 filtered out).

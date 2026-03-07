@@ -545,6 +545,8 @@ COMMISSION_RATE = config('COMMISSION_RATE', default=10.0, cast=float)
 GST_PERCENTAGE = config('GST_PERCENTAGE', default=18.0, cast=float)
 CUSTOM_ORDER_TIME_SLOT_HOURS = config('CUSTOM_ORDER_TIME_SLOT_HOURS', default=1, cast=int)
 MINIMUM_REQUIRED_DESIGNS_ONBOARD = config('MINIMUM_REQUIRED_DESIGNS_ONBOARD', default=50, cast=int)
+FREE_DESIGNS_PER_ACCOUNT_ONE_TIME = config('FREE_DESIGNS_PER_ACCOUNT_ONE_TIME', default=10, cast=int)
+FREE_CUSTOM_ORDERS_PER_ACCOUNT = config('FREE_CUSTOM_ORDERS_PER_ACCOUNT', default=2, cast=int)
 
 # PDF Download Configuration - only 20, 50, 100 allowed (values > 100 are filtered out)
 _raw_pdf_opts = [int(x.strip()) for x in config('PAID_PDF_DESIGNS_OPTIONS', default='20,50,100').split(',')]
@@ -648,23 +650,23 @@ LOGGING = {
             'class': 'logging.StreamHandler',
             'formatter': 'verbose',
             'stream': 'ext://sys.stderr',  # Output to stderr so Gunicorn/journalctl can capture it reliably
-            'level': 'INFO',  # Show INFO and above in console
+            'level': 'WARNING',  # Only WARNING+ in terminal (no per-request API logs)
         },
     },
     'root': {
         'handlers': ['console'],
-        'level': 'INFO',
+        'level': 'WARNING',  # No terminal output unless WARNING or higher
     },
     'loggers': {
-        # Django framework loggers - keep HTTP request/response logs visible
+        # Django framework loggers - no terminal output for API (only WARNING+ to console)
         'django': {
             'handlers': ['console'],
-            'level': 'INFO',
+            'level': 'WARNING',
             'propagate': False,
         },
         'django.server': {
             'handlers': ['console'],
-            'level': 'INFO',  # Show HTTP request/response logs (which page was requested, status codes)
+            'level': 'WARNING',  # Suppress per-request HTTP logs in terminal (still logged to file if enabled)
             'propagate': False,
         },
         'django.utils.autoreload': {

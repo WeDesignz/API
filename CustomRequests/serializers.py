@@ -20,7 +20,7 @@ class CustomOrderRequestSerializer(serializers.ModelSerializer):
     class Meta:
         model = CustomOrderRequest
         fields = [
-            'id', 'title', 'description', 'status', 'payment_status', 'budget',
+            'id', 'title', 'description', 'status', 'payment_status', 'used_free_custom_order_allowance', 'budget',
             'created_by', 'created_at', 'updated_by', 'updated_at',
             'created_by_id', 'updated_by_id', 'media', 'deliverables', 'sla_deadline',
             'delivery_files_uploaded', 'delivery_message'

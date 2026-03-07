@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Cart, Order, OrderComment, OrderCommentReadReceipt, Invoice, OrderTransaction
+from .models import Cart, Order, OrderComment, OrderCommentReadReceipt, Invoice, OrderTransaction, UserOneTimeFreeDesignUsage
 
 
 @admin.register(Cart)
@@ -40,11 +40,11 @@ class OrderAdmin(admin.ModelAdmin):
     Manages customer orders and purchase transactions.
     Supports three order types: cart, subscription, and custom orders.
     """
-    list_display = ['id', 'order_number', 'order_type', 'total_amount', 'status', 'free_downloads_used', 'subscription', 'pdf_download', 'created_by', 'created_at']
+    list_display = ['id', 'order_number', 'order_type', 'total_amount', 'status', 'free_downloads_used', 'one_time_free_designs_used', 'subscription', 'pdf_download', 'created_by', 'created_at']
     list_display_links = ['order_number', 'id']  # Use order_number as primary link, fallback to id
     list_filter = ['order_type', 'status', 'created_at', 'updated_at']
     search_fields = ['id', 'order_number', 'created_by__username', 'created_by__email', 'product_ids', 'pdf_download__id']
-    readonly_fields = ['id', 'order_number', 'free_downloads_used', 'created_at', 'updated_at']
+    readonly_fields = ['id', 'order_number', 'free_downloads_used', 'one_time_free_designs_used', 'created_at', 'updated_at']
     list_editable = ['status']
     ordering = ['-created_at']
     list_per_page = 25
@@ -61,9 +61,9 @@ class OrderAdmin(admin.ModelAdmin):
             'fields': ('custom_order_request', 'subscription', 'pdf_download'),
             'description': 'Custom order request (for custom orders), subscription (for subscription orders), or PDF download (for mock_pdf orders)'
         }),
-        ('Subscription Information', {
-            'fields': ('free_downloads_used',),
-            'description': 'Number of free downloads used from subscription for this order (decremented on payment success)',
+        ('Subscription & Free Benefits', {
+            'fields': ('free_downloads_used', 'one_time_free_designs_used'),
+            'description': 'Free downloads from subscription; one-time free designs used in this order',
             'classes': ('collapse',)
         }),
         ('Transaction Information', {
@@ -236,4 +236,14 @@ class OrderTransactionAdmin(admin.ModelAdmin):
 
     def has_add_permission(self, request):
         return False  # Deprecated model - no new records
+
+
+@admin.register(UserOneTimeFreeDesignUsage)
+class UserOneTimeFreeDesignUsageAdmin(admin.ModelAdmin):
+    """Admin for one-time free design usage per user."""
+    list_display = ['user', 'designs_used', 'updated_at']
+    list_filter = ['updated_at']
+    search_fields = ['user__username', 'user__email']
+    readonly_fields = ['updated_at']
+    ordering = ['-updated_at']
 
