@@ -760,7 +760,7 @@ class PDFClientSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = PDFClient
-        fields = ["id", "name", "created_at", "created_by"]
+        fields = ["id", "name", "customer_mobile", "created_at", "created_by"]
         read_only_fields = ["id", "created_at", "created_by"]
 
 

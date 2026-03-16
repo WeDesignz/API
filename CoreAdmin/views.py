@@ -9342,11 +9342,42 @@ def pdf_clients_list_create(request):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     client = PDFClient.objects.create(
         name=serializer.validated_data["name"],
+        customer_mobile=serializer.validated_data.get("customer_mobile", "").strip(),
         created_by=request.user,
         updated_by=request.user,
     )
     out = PDFClientSerializer(client)
     return Response(out.data, status=status.HTTP_201_CREATED)
+
+
+@api_view(["GET", "PATCH", "DELETE"])
+@permission_classes([IsAuthenticated])
+def pdf_clients_detail(request, client_id: int):
+    """Retrieve, update, or delete a single PDF client."""
+    try:
+        _ = request.user.admin_profile
+    except AdminUserProfile.DoesNotExist:
+        return Response({"error": "Admin access required"}, status=status.HTTP_403_FORBIDDEN)
+
+    try:
+        client = PDFClient.objects.get(pk=client_id)
+    except PDFClient.DoesNotExist:
+        return Response({"error": "PDF client not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    if request.method == "GET":
+        serializer = PDFClientSerializer(client)
+        return Response(serializer.data)
+
+    if request.method in ["PATCH", "PUT"]:
+        serializer = PDFClientSerializer(client, data=request.data, partial=True)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        serializer.save(updated_by=request.user)
+        return Response(serializer.data)
+
+    # DELETE
+    client.delete()
+    return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 @swagger_auto_schema(
