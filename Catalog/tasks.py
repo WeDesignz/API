@@ -23,8 +23,9 @@ logger = logging.getLogger(__name__)
 
 
 # Image extensions for admin client PDFs.
-# We strongly prefer JPG mockups (PRODUCT_NUMBER.jpg), but allow PNG/WEBP etc. as fallback.
-CLIENT_PDF_IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".webp")
+# For client PDFs we ONLY use JPG mockups.
+# Designs without a usable JPG are skipped entirely.
+CLIENT_PDF_IMAGE_EXTENSIONS = (".jpg", ".jpeg")
 CLIENT_PDF_JPG_EXTENSIONS = (".jpg", ".jpeg")
 
 
@@ -56,16 +57,14 @@ def generate_client_pdf_for_products(
     c = canvas.Canvas(pdf_file_path, pagesize=letter)
     temp_files_to_cleanup = []
 
-    # Generate one page per product
-    for idx, product in enumerate(products, 1):
-        if idx > 1:
-            c.showPage()
+    # Generate one page per product that has a JPG mockup.
+    page_index = 0
+    for product in products:
 
         product_number = product.product_number or f"WD{product.id}"
         product_number_lower = product_number.lower()
 
-        # Prefer JPG mockup: PRODUCT_NUMBER.jpg/.jpeg (or PRODUCT_NUMBER_JPG.avif),
-        # then other JPGs, then PNG/WEBP fallback (including *_PNG.avif).
+        # Prefer JPG mockup: PRODUCT_NUMBER.jpg/.jpeg (or PRODUCT_NUMBER_JPG.avif).
         chosen_media = None
         preferred_jpg = None
         fallback_media = None
@@ -81,32 +80,26 @@ def generate_client_pdf_for_products(
                 base_name_with_ext = os.path.basename(file_name_lower)
                 base_no_ext, ext = os.path.splitext(base_name_with_ext)
 
-                # Handle AVIF wrappers like WDG00000001_JPG.avif / WDG00000001_PNG.avif
+                # Handle AVIF wrappers like WDG00000001_JPG.avif
                 logical_ext = ext
                 core_base = base_no_ext
                 if ext == ".avif":
                     if base_no_ext.endswith("_jpg"):
                         logical_ext = ".jpg"
                         core_base = base_no_ext[:-4]
-                    elif base_no_ext.endswith("_png"):
-                        logical_ext = ".png"
-                        core_base = base_no_ext[:-4]
 
-                if logical_ext not in CLIENT_PDF_IMAGE_EXTENSIONS:
+                if logical_ext not in CLIENT_PDF_JPG_EXTENSIONS:
                     continue
                 base_name = core_base
                 # 1) Exact JPG mockup match: PRODUCT_NUMBER.jpg
                 if base_name == product_number_lower and logical_ext in CLIENT_PDF_JPG_EXTENSIONS:
                     chosen_media = media
                     break
-                # 2) Any other JPG as strong preference
-                if logical_ext in CLIENT_PDF_JPG_EXTENSIONS and preferred_jpg is None:
+                # 2) Any other JPG as fallback
+                if preferred_jpg is None:
                     preferred_jpg = media
-                # 3) Fallback PNG/WEBP/etc.
-                if fallback_media is None:
-                    fallback_media = media
             if chosen_media is None:
-                chosen_media = preferred_jpg or fallback_media
+                chosen_media = preferred_jpg
         except Exception:
             chosen_media = None
 
@@ -122,16 +115,14 @@ def generate_client_pdf_for_products(
                 if os.path.exists(candidate):
                     image_path = candidate
                 elif file_name and default_storage.exists(file_name):
-                    # Derive logical suffix for temp file (respect _JPG/_PNG AVIF wrappers)
+                    # Derive logical suffix for temp file (respect _JPG AVIF wrappers)
                     base_name_with_ext = os.path.basename(file_name.lower())
                     base_no_ext, ext = os.path.splitext(base_name_with_ext)
                     suffix = ext
                     if ext == ".avif":
                         if base_no_ext.endswith("_jpg"):
                             suffix = ".jpg"
-                        elif base_no_ext.endswith("_png"):
-                            suffix = ".png"
-                    if suffix not in CLIENT_PDF_IMAGE_EXTENSIONS:
+                    if suffix not in CLIENT_PDF_JPG_EXTENSIONS:
                         suffix = ".jpg"
                     with default_storage.open(file_name, "rb") as src:
                         fd, image_path = tempfile.mkstemp(suffix=suffix, prefix="pdf_img_")
@@ -162,11 +153,20 @@ def generate_client_pdf_for_products(
                     ]
                     for fname in preferred_names:
                         candidate = os.path.join(base_dir, fname)
-                        if os.path.exists(candidate):
-                            image_path = candidate
-                            break
+                            if os.path.exists(candidate):
+                                image_path = candidate
+                                break
         except Exception:
             pass
+
+        # If we still don't have a usable JPG, skip this design entirely.
+        if not image_path or not os.path.exists(image_path):
+            continue
+
+        # Start a new page only when we actually render a design.
+        if page_index > 0:
+            c.showPage()
+        page_index += 1
 
         page_w, page_h = page_width, page_height
         m = margin
