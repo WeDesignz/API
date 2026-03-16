@@ -354,6 +354,11 @@ class PDFClient(models.Model):
     Admin-configured PDF client for generating non-overlapping design PDFs.
     """
     name = models.CharField(max_length=255, unique=True)
+    customer_mobile = models.CharField(
+        max_length=32,
+        blank=True,
+        help_text="Optional default customer mobile number for this client.",
+    )
     used_product_ids = models.JSONField(
         default=list,
         blank=True,

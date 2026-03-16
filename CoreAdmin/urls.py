@@ -129,6 +129,7 @@ urlpatterns = [
 
     # Admin PDF clients
     path('pdf-clients/', views.pdf_clients_list_create, name='pdf_clients_list_create'),
+    path('pdf-clients/<int:client_id>/', views.pdf_clients_detail, name='pdf_clients_detail'),
     path('pdf-clients/jobs/', views.pdf_client_jobs_create, name='pdf_client_jobs_create'),
     path('pdf-clients/jobs/<int:job_id>/status/', views.pdf_client_job_status, name='pdf_client_job_status'),
     path('pdf-clients/jobs/<int:job_id>/download/', views.pdf_client_job_download, name='pdf_client_job_download'),
