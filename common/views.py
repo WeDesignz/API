@@ -2,6 +2,7 @@ from django.shortcuts import redirect
 from django.http import JsonResponse, HttpResponse
 from django.conf import settings
 from django.views.decorators.csrf import csrf_exempt
+from django.core.files.storage import default_storage
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
 from django.utils import timezone
@@ -11,6 +12,37 @@ import requests
 import logging
 
 from .models import PinterestIntegration, PinterestPost, InstagramIntegration, InstagramPost
+
+# Meta/Instagram rate limits
+INSTAGRAM_POSTS_PER_DAY_LIMIT = 25
+INSTAGRAM_MIN_DELAY_SECONDS = 10
+INSTAGRAM_MAX_IMAGE_BYTES = 8 * 1024 * 1024  # 8 MB
+
+
+def _get_instagram_image_storage_path(product, media_type):
+    """
+    Resolve storage path for a product's Instagram image (same logic as post_to_instagram task).
+    Returns (storage_path, error_message). error_message is None on success.
+    """
+    from Catalog.models import Product
+    if not isinstance(product, Product):
+        return None, "Invalid product"
+    product_number = (getattr(product, 'product_number', None) or '').strip()
+    if not product_number:
+        return None, "Product has no product number."
+    requested_media_type = (media_type or 'jpg').lower().strip()
+    if requested_media_type == 'mockup':
+        filename = f"{product_number}_MOCKUP.jpg"
+    elif requested_media_type == 'png':
+        filename = f"{product_number}_PNG.png"
+    else:
+        filename = f"{product_number}_JPG.jpg"
+    created_by_id = getattr(product.created_by, 'id', None) if getattr(product, 'created_by', None) else None
+    if not created_by_id:
+        return None, "Product has no creator (created_by)."
+    dir_prefix = f"{created_by_id}/designs/{product.id}/".replace('\\', '/')
+    storage_path = f"{dir_prefix}{filename}".replace('\\', '/')
+    return storage_path, None
 
 logger = logging.getLogger(__name__)
 
@@ -2234,10 +2266,14 @@ def instagram_oauth_callback(request):
 def instagram_status(request):
     """
     Check Instagram integration status.
-    Returns JSON with current status.
+    Returns JSON with current status and Meta rate limit info.
     """
     integration = InstagramIntegration.get_instance()
-    
+    today = timezone.now().date()
+    posts_today = InstagramPost.objects.filter(created_at__date=today).count()
+    last_post = InstagramPost.objects.order_by('-created_at').first()
+    last_post_created_at = last_post.created_at.isoformat() if last_post and last_post.created_at else None
+
     status_data = {
         'is_enabled': integration.is_enabled,
         'is_configured': bool(integration.access_token),
@@ -2250,8 +2286,14 @@ def instagram_status(request):
         'rate_limit_limit': integration.rate_limit_limit,
         'rate_limit_reset_at': integration.rate_limit_reset_at.isoformat() if integration.rate_limit_reset_at else None,
         'rate_limit_retry_after_at': integration.rate_limit_retry_after_at.isoformat() if integration.rate_limit_retry_after_at else None,
+        # Meta rate limits
+        'posts_today': posts_today,
+        'posts_today_limit': INSTAGRAM_POSTS_PER_DAY_LIMIT,
+        'last_post_created_at': last_post_created_at,
+        'min_delay_seconds': INSTAGRAM_MIN_DELAY_SECONDS,
+        'max_image_bytes': INSTAGRAM_MAX_IMAGE_BYTES,
     }
-    
+
     return JsonResponse(status_data)
 
 @api_view(['POST'])
@@ -2335,6 +2377,48 @@ def instagram_post(request):
             return JsonResponse({
                 'error': f'Product {product_id} not found'
             }, status=404)
+
+        # Meta rate limit: 25 posts per day
+        today = timezone.now().date()
+        posts_today = InstagramPost.objects.filter(created_at__date=today).count()
+        if posts_today >= INSTAGRAM_POSTS_PER_DAY_LIMIT:
+            return JsonResponse({
+                'error': f'Daily limit reached. Meta allows up to {INSTAGRAM_POSTS_PER_DAY_LIMIT} posts per day. Try again tomorrow.',
+                'retry_after_seconds': None,
+            }, status=429)
+
+        # Meta rate limit: minimum 10 seconds between posts
+        last_post = InstagramPost.objects.order_by('-created_at').first()
+        if last_post and last_post.created_at:
+            elapsed = (timezone.now() - last_post.created_at).total_seconds()
+            if elapsed < INSTAGRAM_MIN_DELAY_SECONDS:
+                retry_after = int(INSTAGRAM_MIN_DELAY_SECONDS - elapsed)
+                return JsonResponse({
+                    'error': f'Please wait {retry_after} second(s) before posting again (Meta limit: {INSTAGRAM_MIN_DELAY_SECONDS}s between posts).',
+                    'retry_after_seconds': retry_after,
+                }, status=429)
+
+        # Meta limit: single image must be less than 8 MB
+        storage_path, path_error = _get_instagram_image_storage_path(product, media_type)
+        if path_error or not storage_path:
+            return JsonResponse({
+                'error': path_error or 'Could not resolve image path for this product.'
+            }, status=400)
+        if not default_storage.exists(storage_path):
+            return JsonResponse({
+                'error': 'Image file not found for this product. Ensure the design file exists.'
+            }, status=400)
+        try:
+            file_size = default_storage.size(storage_path)
+        except Exception:
+            file_size = 0
+        if file_size > INSTAGRAM_MAX_IMAGE_BYTES:
+            size_mb = round(file_size / (1024 * 1024), 2)
+            return JsonResponse({
+                'error': f'Image size ({size_mb} MB) exceeds Meta limit of 8 MB. Please use a smaller image.',
+                'size_bytes': file_size,
+                'max_bytes': INSTAGRAM_MAX_IMAGE_BYTES,
+            }, status=400)
         
         # Create InstagramPost record
         try:
@@ -2407,6 +2491,53 @@ def instagram_post(request):
         return JsonResponse({
             'error': f'Error creating post: {str(e)}'
         }, status=500)
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def instagram_check_image(request):
+    """
+    Check if a product's image for Instagram is under the size limit (8 MB).
+    Query params: product_id, media_type (mockup | jpg | png).
+    Returns: size_bytes, ok (bool), max_bytes, error (optional).
+    """
+    from Catalog.models import Product
+    product_id = request.GET.get('product_id')
+    media_type = request.GET.get('media_type', 'jpg').lower().strip()
+    if not product_id:
+        return JsonResponse({'ok': False, 'error': 'product_id is required', 'max_bytes': INSTAGRAM_MAX_IMAGE_BYTES}, status=400)
+    if media_type not in ('mockup', 'jpg', 'png'):
+        return JsonResponse({'ok': False, 'error': 'media_type must be mockup, jpg, or png', 'max_bytes': INSTAGRAM_MAX_IMAGE_BYTES}, status=400)
+    try:
+        product = Product.objects.get(id=product_id)
+    except Product.DoesNotExist:
+        return JsonResponse({'ok': False, 'error': 'Product not found', 'max_bytes': INSTAGRAM_MAX_IMAGE_BYTES}, status=404)
+    storage_path, path_error = _get_instagram_image_storage_path(product, media_type)
+    if path_error or not storage_path:
+        return JsonResponse({
+            'ok': False,
+            'error': path_error or 'Could not resolve image path.',
+            'size_bytes': None,
+            'max_bytes': INSTAGRAM_MAX_IMAGE_BYTES,
+        })
+    if not default_storage.exists(storage_path):
+        return JsonResponse({
+            'ok': False,
+            'error': 'Image file not found.',
+            'size_bytes': None,
+            'max_bytes': INSTAGRAM_MAX_IMAGE_BYTES,
+        })
+    try:
+        size_bytes = default_storage.size(storage_path)
+    except Exception:
+        size_bytes = None
+    ok = size_bytes is not None and size_bytes <= INSTAGRAM_MAX_IMAGE_BYTES
+    return JsonResponse({
+        'ok': ok,
+        'size_bytes': size_bytes,
+        'max_bytes': INSTAGRAM_MAX_IMAGE_BYTES,
+        'error': None if ok else f'Image exceeds 8 MB limit ({round((size_bytes or 0) / (1024 * 1024), 2)} MB).',
+    })
+
 
 @api_view(['GET'])
 @permission_classes([AllowAny])
