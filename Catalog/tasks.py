@@ -122,16 +122,18 @@ def generate_client_pdf_for_products(
                 if os.path.exists(candidate):
                     image_path = candidate
                 elif file_name and default_storage.exists(file_name):
-                    with default_storage.open(file_name, "rb") as src:
-                        # Use logical extension when writing temp file so ReportLab handles it correctly
-                        suffix = os.path.splitext(file_name)[1].lower()
-                        if suffix == ".avif":
-                            if base_no_ext.endswith("_jpg"):
-                                suffix = ".jpg"
-                            elif base_no_ext.endswith("_png"):
-                                suffix = ".png"
-                        if suffix not in CLIENT_PDF_IMAGE_EXTENSIONS:
+                    # Derive logical suffix for temp file (respect _JPG/_PNG AVIF wrappers)
+                    base_name_with_ext = os.path.basename(file_name.lower())
+                    base_no_ext, ext = os.path.splitext(base_name_with_ext)
+                    suffix = ext
+                    if ext == ".avif":
+                        if base_no_ext.endswith("_jpg"):
                             suffix = ".jpg"
+                        elif base_no_ext.endswith("_png"):
+                            suffix = ".png"
+                    if suffix not in CLIENT_PDF_IMAGE_EXTENSIONS:
+                        suffix = ".jpg"
+                    with default_storage.open(file_name, "rb") as src:
                         fd, image_path = tempfile.mkstemp(suffix=suffix, prefix="pdf_img_")
                         os.close(fd)
                         with open(image_path, "wb") as dst:
@@ -139,6 +141,32 @@ def generate_client_pdf_for_products(
                         temp_files_to_cleanup.append(image_path)
             except Exception:
                 image_path = None
+
+        # If we still don't have a JPG mockup, fall back to direct filesystem lookup
+        # in the design folder: MEDIA_ROOT/{user_id}/designs/{product_id}/PRODUCT_NUMBER.jpg/jpeg.
+        if not image_path:
+            try:
+                from django.conf import settings as _settings
+
+                user_id = getattr(product, "created_by_id", None)
+                if user_id:
+                    base_dir = os.path.join(
+                        getattr(_settings, "MEDIA_ROOT", ""), str(user_id), "designs", str(product.id)
+                    )
+                    if os.path.isdir(base_dir):
+                        preferred_names = [
+                            f"{product_number}.jpg",
+                            f"{product_number}.jpeg",
+                            f"{product_number.upper()}.jpg",
+                            f"{product_number.upper()}.jpeg",
+                        ]
+                        for fname in preferred_names:
+                            candidate = os.path.join(base_dir, fname)
+                            if os.path.exists(candidate):
+                                image_path = candidate
+                                break
+            except Exception:
+                pass
 
         page_w, page_h = page_width, page_height
         m = margin
