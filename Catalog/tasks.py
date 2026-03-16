@@ -22,8 +22,10 @@ from MediaFiles.models import Media
 logger = logging.getLogger(__name__)
 
 
-# JPG-only extensions for admin client PDFs (prefer PRODUCT_NUMBER.jpg)
-CLIENT_PDF_IMAGE_EXTENSIONS = (".jpg", ".jpeg")
+# Image extensions for admin client PDFs.
+# We strongly prefer JPG mockups (PRODUCT_NUMBER.jpg), but allow PNG/WEBP etc. as fallback.
+CLIENT_PDF_IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".webp")
+CLIENT_PDF_JPG_EXTENSIONS = (".jpg", ".jpeg")
 
 
 def generate_client_pdf_for_products(
@@ -62,8 +64,9 @@ def generate_client_pdf_for_products(
         product_number = product.product_number or f"WD{product.id}"
         product_number_lower = product_number.lower()
 
-        # Pick only JPG; prefer media whose base name is PRODUCT_NUMBER.jpg
+        # Prefer JPG mockup: PRODUCT_NUMBER.jpg/.jpeg, then other JPGs, then PNG/WEBP fallback.
         chosen_media = None
+        preferred_jpg = None
         fallback_media = None
         try:
             media_list = product.get_media()
@@ -78,13 +81,18 @@ def generate_client_pdf_for_products(
                 if ext not in CLIENT_PDF_IMAGE_EXTENSIONS:
                     continue
                 base_name = os.path.splitext(os.path.basename(file_name_lower))[0]
-                if base_name == product_number_lower:
+                # 1) Exact JPG mockup match: PRODUCT_NUMBER.jpg
+                if base_name == product_number_lower and ext in CLIENT_PDF_JPG_EXTENSIONS:
                     chosen_media = media
                     break
+                # 2) Any other JPG as strong preference
+                if ext in CLIENT_PDF_JPG_EXTENSIONS and preferred_jpg is None:
+                    preferred_jpg = media
+                # 3) Fallback PNG/WEBP/etc.
                 if fallback_media is None:
                     fallback_media = media
             if chosen_media is None:
-                chosen_media = fallback_media
+                chosen_media = preferred_jpg or fallback_media
         except Exception:
             chosen_media = None
 
