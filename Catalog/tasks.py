@@ -153,9 +153,9 @@ def generate_client_pdf_for_products(
                     ]
                     for fname in preferred_names:
                         candidate = os.path.join(base_dir, fname)
-                            if os.path.exists(candidate):
-                                image_path = candidate
-                                break
+                        if os.path.exists(candidate):
+                            image_path = candidate
+                            break
         except Exception:
             pass
 
