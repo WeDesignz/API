@@ -142,31 +142,31 @@ def generate_client_pdf_for_products(
             except Exception:
                 image_path = None
 
-        # If we still don't have a JPG mockup, fall back to direct filesystem lookup
-        # in the design folder: MEDIA_ROOT/{user_id}/designs/{product_id}/PRODUCT_NUMBER.jpg/jpeg.
-        if not image_path:
-            try:
-                from django.conf import settings as _settings
+        # Always prefer on-disk JPG mockup in the design folder if present:
+        # MEDIA_ROOT/{user_id}/designs/{product_id}/PRODUCT_NUMBER.jpg/jpeg.
+        # This overrides any previously selected PNG image.
+        try:
+            from django.conf import settings as _settings
 
-                user_id = getattr(product, "created_by_id", None)
-                if user_id:
-                    base_dir = os.path.join(
-                        getattr(_settings, "MEDIA_ROOT", ""), str(user_id), "designs", str(product.id)
-                    )
-                    if os.path.isdir(base_dir):
-                        preferred_names = [
-                            f"{product_number}.jpg",
-                            f"{product_number}.jpeg",
-                            f"{product_number.upper()}.jpg",
-                            f"{product_number.upper()}.jpeg",
-                        ]
-                        for fname in preferred_names:
-                            candidate = os.path.join(base_dir, fname)
-                            if os.path.exists(candidate):
-                                image_path = candidate
-                                break
-            except Exception:
-                pass
+            user_id = getattr(product, "created_by_id", None)
+            if user_id:
+                base_dir = os.path.join(
+                    getattr(_settings, "MEDIA_ROOT", ""), str(user_id), "designs", str(product.id)
+                )
+                if os.path.isdir(base_dir):
+                    preferred_names = [
+                        f"{product_number}.jpg",
+                        f"{product_number}.jpeg",
+                        f"{product_number.upper()}.jpg",
+                        f"{product_number.upper()}.jpeg",
+                    ]
+                    for fname in preferred_names:
+                        candidate = os.path.join(base_dir, fname)
+                        if os.path.exists(candidate):
+                            image_path = candidate
+                            break
+        except Exception:
+            pass
 
         page_w, page_h = page_width, page_height
         m = margin
