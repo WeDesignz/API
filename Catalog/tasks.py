@@ -159,8 +159,12 @@ def generate_client_pdf_for_products(
         except Exception:
             pass
 
-        # If we still don't have a usable JPG, skip this design entirely.
+        # Final guard: we only allow real JPG files.
+        # If there is no JPG on disk for this design, skip it.
         if not image_path or not os.path.exists(image_path):
+            continue
+        _, final_ext = os.path.splitext(image_path.lower())
+        if final_ext not in CLIENT_PDF_JPG_EXTENSIONS:
             continue
 
         # Start a new page only when we actually render a design.
