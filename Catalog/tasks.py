@@ -39,7 +39,7 @@ def generate_client_pdf_for_products(
     """
     Generate a PDF file for a given list of products for admin PDF clients.
     Layout matches the customer mock PDF style (logo + name/number + design image).
-    Uses only JPG images; prefers media whose filename is PRODUCT_NUMBER.jpg.
+    Uses only *_MOCKUP.jpg images (e.g. WDG00000001_MOCKUP.jpg); one image per product per page.
     Supports remote storage (S3 etc.) via default_storage fallback.
 
     Returns the created file size in bytes.
@@ -64,10 +64,8 @@ def generate_client_pdf_for_products(
         product_number = product.product_number or f"WD{product.id}"
         product_number_lower = product_number.lower()
 
-        # Prefer JPG mockup: PRODUCT_NUMBER.jpg/.jpeg (or PRODUCT_NUMBER_JPG.avif).
+        # Only use *_MOCKUP.jpg images (e.g. WDG00000001_MOCKUP.jpg).
         chosen_media = None
-        preferred_jpg = None
-        fallback_media = None
         try:
             media_list = product.get_media()
             for media in media_list:
@@ -91,15 +89,15 @@ def generate_client_pdf_for_products(
                 if logical_ext not in CLIENT_PDF_JPG_EXTENSIONS:
                     continue
                 base_name = core_base
-                # 1) Exact JPG mockup match: PRODUCT_NUMBER.jpg
-                if base_name == product_number_lower and logical_ext in CLIENT_PDF_JPG_EXTENSIONS:
+                # Only accept *_MOCKUP.jpg (base name ends with _mockup)
+                if not base_name.endswith("_mockup"):
+                    continue
+                # Prefer exact match: PRODUCT_NUMBER_MOCKUP.jpg
+                if base_name == f"{product_number_lower}_mockup":
                     chosen_media = media
                     break
-                # 2) Any other JPG as fallback
-                if preferred_jpg is None:
-                    preferred_jpg = media
-            if chosen_media is None:
-                chosen_media = preferred_jpg
+                if chosen_media is None:
+                    chosen_media = media
         except Exception:
             chosen_media = None
 
@@ -133,9 +131,8 @@ def generate_client_pdf_for_products(
             except Exception:
                 image_path = None
 
-        # Always prefer on-disk JPG mockup in the design folder if present:
-        # MEDIA_ROOT/{user_id}/designs/{product_id}/PRODUCT_NUMBER.jpg/jpeg.
-        # This overrides any previously selected PNG image.
+        # Prefer on-disk *_MOCKUP.jpg in the design folder if present:
+        # MEDIA_ROOT/{user_id}/designs/{product_id}/PRODUCT_NUMBER_MOCKUP.jpg
         try:
             from django.conf import settings as _settings
 
@@ -146,10 +143,10 @@ def generate_client_pdf_for_products(
                 )
                 if os.path.isdir(base_dir):
                     preferred_names = [
-                        f"{product_number}.jpg",
-                        f"{product_number}.jpeg",
-                        f"{product_number.upper()}.jpg",
-                        f"{product_number.upper()}.jpeg",
+                        f"{product_number}_MOCKUP.jpg",
+                        f"{product_number}_MOCKUP.jpeg",
+                        f"{product_number}_mockup.jpg",
+                        f"{product_number}_mockup.jpeg",
                     ]
                     for fname in preferred_names:
                         candidate = os.path.join(base_dir, fname)
