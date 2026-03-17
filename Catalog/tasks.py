@@ -865,16 +865,25 @@ def cleanup_design_pdf_files():
 @shared_task(bind=True, name="Catalog.tasks.generate_client_pdfs_task", max_retries=0)
 def generate_client_pdfs_task(self, job_id):
     """
-    Generate one or more PDFs for an admin PDF client job.
-    Uses non-overlapping designs per client and stores PDFs under MEDIA_ROOT/admin_pdf_clients/.
+    Monolithic admin PDF client job.
+
+    - Each PDF contains up to 100 designs.
+    - A single job can generate at most 10 PDFs.
+    - Designs are selected from all active/visible products, ordered by design number,
+      and rendered using JPG-only logic inside generate_client_pdf_for_products.
+    - All generated PDFs are stored under MEDIA_ROOT/admin_pdf_clients/<client_id>/jobs/<job_id>/
+      and downloaded together as a ZIP.
     """
     from django.conf import settings
     from zipfile import ZipFile
-    from Catalog.pdf_clients_service import select_products_for_client_pdfs
 
     logger.info(f"generate_client_pdfs_task: starting for job_id={job_id}")
 
+    MAX_DESIGNS_PER_PDF = 100
+    MAX_PDFS_PER_JOB = 10
+
     try:
+        # Lock the job row and mark it as processing.
         with transaction.atomic():
             job = (
                 PDFClientJob.objects.select_for_update()
@@ -895,34 +904,17 @@ def generate_client_pdfs_task(self, job_id):
 
             job.status = "processing"
             job.progress_percent = 0
-            job.save()
 
-        # Outside the select_for_update block
-        selection = select_products_for_client_pdfs(
-            client=job.client,
-            designs_per_pdf=job.designs_per_pdf,
-            requested_pdfs=job.requested_pdfs,
-        )
-
-        if selection["actual_pdfs"] == 0 or not selection["included_product_ids_by_pdf"]:
-            job.status = "failed"
-            job.error_message = "Not enough designs available to generate PDFs for this client."
-            job.progress_percent = 0
-            job.total_designs_requested = 0
+            # Normalize designs_per_pdf and requested_pdfs to enforce monolithic rules.
+            requested_pdfs = max(1, min(int(job.requested_pdfs or 1), MAX_PDFS_PER_JOB))
+            job.requested_pdfs = requested_pdfs
+            job.designs_per_pdf = MAX_DESIGNS_PER_PDF
+            job.total_designs_requested = requested_pdfs * MAX_DESIGNS_PER_PDF
+            job.generated_pdfs = 0
+            job.pdf_file_paths = []
+            job.included_product_ids_by_pdf = []
             job.total_designs_used = 0
             job.save()
-            return {"status": "failed", "reason": "no_designs"}
-
-        job.designs_per_pdf = selection["designs_per_pdf"]
-        job.requested_pdfs = selection["requested_pdfs"]
-        job.total_designs_requested = (
-            selection["designs_per_pdf"] * selection["requested_pdfs"]
-        )
-        job.included_product_ids_by_pdf = selection["included_product_ids_by_pdf"]
-        job.total_designs_used = selection["total_designs_used"]
-        job.generated_pdfs = 0
-        job.pdf_file_paths = []
-        job.save()
 
         media_root = getattr(settings, "MEDIA_ROOT", None)
         if not media_root or not os.path.isdir(media_root):
@@ -938,17 +930,38 @@ def generate_client_pdfs_task(self, job_id):
         )
         os.makedirs(base_dir, exist_ok=True)
 
+        # Select products globally for this job:
+        # active, visible, with a non-empty design number, ordered by product_number.
+        max_products = MAX_DESIGNS_PER_PDF * requested_pdfs
+        products_qs = (
+            Product.objects.filter(status="active", visibility_status="show")
+            .exclude(product_number__isnull=True)
+            .exclude(product_number="")
+            .order_by("product_number")
+        )
+        products = list(products_qs[:max_products])
+
+        if not products:
+            job.status = "failed"
+            job.error_message = "No designs available to generate PDFs for this client."
+            job.progress_percent = 0
+            job.total_designs_requested = 0
+            job.total_designs_used = 0
+            job.save()
+            return {"status": "failed", "reason": "no_designs"}
+
         pdf_paths = []
-        included_lists = job.included_product_ids_by_pdf or []
+        included_lists = []
 
-        for index, product_ids in enumerate(included_lists, start=1):
-            products = list(
-                Product.objects.filter(id__in=product_ids, status="active", visibility_status="show")
-            )
-            if not products:
-                continue
+        # Chunk products into sequential groups of 100 designs.
+        for index in range(requested_pdfs):
+            start = index * MAX_DESIGNS_PER_PDF
+            end = start + MAX_DESIGNS_PER_PDF
+            chunk = products[start:end]
+            if not chunk:
+                break
 
-            pdf_filename = f"client_{client_id}_job_{job.id}_part_{index}.pdf"
+            pdf_filename = f"client_{client_id}_job_{job.id}_part_{index + 1}.pdf"
             pdf_path = os.path.join(base_dir, pdf_filename)
 
             # Resolve logo path (customer_logo or default)
@@ -967,28 +980,36 @@ def generate_client_pdfs_task(self, job_id):
                     if os.path.exists(alt_default):
                         logo_path = alt_default
 
+            # This helper uses only JPG mockups and skips designs without a usable JPG.
             file_size = generate_client_pdf_for_products(
                 pdf_file_path=pdf_path,
-                products=products,
+                products=chunk,
                 customer_name=job.customer_name,
                 customer_mobile=job.customer_mobile,
                 logo_path=logo_path,
             )
 
+            # If the PDF is empty or invalid, skip counting it.
+            if not os.path.exists(pdf_path) or file_size <= 0:
+                continue
+
             rel_path = os.path.relpath(pdf_path, media_root)
             pdf_paths.append(rel_path)
+            included_lists.append([p.id for p in chunk])
 
             job.generated_pdfs += 1
             job.progress_percent = int(
-                100 * job.generated_pdfs / max(1, len(included_lists))
+                100 * job.generated_pdfs / max(1, requested_pdfs)
             )
-            job.total_designs_used = selection["total_designs_used"]
+            job.total_designs_used = sum(len(ids) for ids in included_lists)
             job.save()
 
         if not pdf_paths:
             job.status = "failed"
             job.error_message = "No PDFs could be generated for this job."
             job.progress_percent = 0
+            job.total_designs_requested = 0
+            job.total_designs_used = 0
             job.save()
             return {"status": "failed", "reason": "no_pdfs"}
 
@@ -1004,15 +1025,8 @@ def generate_client_pdfs_task(self, job_id):
 
         job.pdf_file_paths = pdf_paths
         job.zip_file_path = os.path.relpath(zip_path, media_root)
-
-        # Update client's used_product_ids with newly used designs
-        used_ids = set(job.client.used_product_ids or [])
-        for product_ids in included_lists:
-            for pid in product_ids:
-                used_ids.add(int(pid))
-        job.client.used_product_ids = sorted({int(x) for x in used_ids})
-        job.client.save()
-
+        job.included_product_ids_by_pdf = included_lists
+        job.total_designs_used = sum(len(ids) for ids in included_lists)
         job.status = "completed"
         job.progress_percent = 100
         job.save()
