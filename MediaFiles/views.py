@@ -37,6 +37,12 @@ from .serializers import MediaSerializer
                 description='Type of media',
                 example='image',
                 enum=['image', 'video', 'document', 'audio']
+            ),
+            'visibility': openapi.Schema(
+                type=openapi.TYPE_STRING,
+                description='File visibility access policy',
+                example='private',
+                enum=['public', 'private']
             )
         },
         required=['file']

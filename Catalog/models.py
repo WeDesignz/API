@@ -5,7 +5,10 @@ from django.dispatch import receiver
 from common.relations import attach_relation, get_related_ids, get_related, detach_relation
 from MediaFiles.models import Media
 from common.studio_name_generator import generate_design_numbers
+from common.storages import PrivateMediaStorage
 from Plans.models import Plan
+
+private_media_storage = PrivateMediaStorage()
 
 
 class Category(models.Model):
@@ -240,7 +243,13 @@ class PDFDownload(models.Model):
     # Customer information for mock PDF (stored per download; same user can use different name/number each time)
     customer_name = models.CharField(max_length=255, blank=True, null=True, help_text="Customer name for mock PDF")
     customer_mobile = models.CharField(max_length=20, blank=True, null=True, help_text="Customer mobile number for mock PDF")
-    customer_logo = models.ImageField(upload_to='pdf_logos/%Y/%m/', blank=True, null=True, help_text="Optional logo for PDF; if not set, WeDesignz default logo is used")
+    customer_logo = models.ImageField(
+        upload_to='pdf_logos/%Y/%m/',
+        storage=private_media_storage,
+        blank=True,
+        null=True,
+        help_text="Optional logo for PDF; if not set, WeDesignz default logo is used",
+    )
     
     # Payment information (for paid downloads)
     razorpay_payment = models.ForeignKey('Razorpay.RazorpayPayment', on_delete=models.SET_NULL, null=True, blank=True, related_name='pdf_downloads')
@@ -445,6 +454,7 @@ class PDFClientJob(models.Model):
     customer_mobile = models.CharField(max_length=20)
     customer_logo = models.ImageField(
         upload_to="admin_pdf_clients/logos/%Y/%m/",
+        storage=private_media_storage,
         null=True,
         blank=True,
     )

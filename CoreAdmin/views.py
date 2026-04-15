@@ -757,25 +757,16 @@ def admin_upload_profile_photo(request):
         profile_photo_url = None
         if profile_photo.file:
             try:
-                from django.conf import settings
-                # Get file path - this is relative to MEDIA_ROOT
-                file_path = profile_photo.file.name
-                # Construct URL: MEDIA_URL + file_path
-                # Since upload_to='media/', file_path is 'media/filename.jpg'
-                # MEDIA_URL is '/media/', so URL becomes '/media/media/filename.jpg'
-                relative_url = f"{settings.MEDIA_URL}{file_path}"
-                # Ensure it starts with /
-                if not relative_url.startswith('/'):
-                    relative_url = '/' + relative_url
-                # Build absolute URL using SITE_URL from settings to ensure it points to Django backend
+                url = profile_photo.file.url
+                # Build absolute URL using SITE_URL from settings when url is relative.
                 site_url = getattr(settings, 'SITE_URL', None)
-                if site_url:
-                    # Remove trailing slash from SITE_URL if present
+                if url.startswith('http'):
+                    profile_photo_url = url
+                elif site_url and url.startswith('/'):
                     site_url = site_url.rstrip('/')
-                    profile_photo_url = f"{site_url}{relative_url}"
+                    profile_photo_url = f"{site_url}{url}"
                 else:
-                    # Fallback to request.build_absolute_uri if SITE_URL not set
-                    profile_photo_url = request.build_absolute_uri(relative_url)
+                    profile_photo_url = request.build_absolute_uri(url if url.startswith('/') else f'/{url}')
             except (ValueError, AttributeError, Exception) as e:
                 # Fallback: try using file.url if available
                 try:

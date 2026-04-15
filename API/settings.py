@@ -74,6 +74,7 @@ INSTALLED_APPS = [
     'rest_framework',
     'rest_framework_simplejwt',
     'drf_yasg',  # Swagger documentation
+    'storages',  # AWS S3 storage backend
     
     # Celery apps
     'django_celery_beat',  # Celery Beat for periodic tasks
@@ -196,8 +197,78 @@ staticfiles_dir = os.path.join(BASE_DIR, 'staticfiles')
 STATICFILES_DIRS = [
     staticfiles_dir,
 ] if os.path.exists(staticfiles_dir) else []
-MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+
+# File storage backend:
+# - local filesystem by default
+# - AWS S3 when USE_S3=True
+USE_S3 = config('USE_S3', default=False, cast=bool)
+
+if USE_S3:
+    AWS_ACCESS_KEY_ID = config('AWS_ACCESS_KEY_ID')
+    AWS_SECRET_ACCESS_KEY = config('AWS_SECRET_ACCESS_KEY')
+    AWS_STORAGE_BUCKET_NAME = config('AWS_STORAGE_BUCKET_NAME')
+    AWS_S3_REGION_NAME = config('AWS_S3_REGION_NAME', default='ap-south-1')
+    AWS_S3_SIGNATURE_VERSION = config('AWS_S3_SIGNATURE_VERSION', default='s3v4')
+
+    # File URLs and S3 locations
+    AWS_S3_CUSTOM_DOMAIN = config('AWS_S3_CUSTOM_DOMAIN', default='')
+    AWS_MEDIA_LOCATION = config('AWS_MEDIA_LOCATION', default='media')
+    AWS_PUBLIC_MEDIA_LOCATION = config('AWS_PUBLIC_MEDIA_LOCATION', default='media/public')
+    AWS_PRIVATE_MEDIA_LOCATION = config('AWS_PRIVATE_MEDIA_LOCATION', default='media/private')
+    AWS_PRIVATE_URL_EXPIRE = config('AWS_PRIVATE_URL_EXPIRE', default=3600, cast=int)
+    AWS_PRIVATE_PATH_MARKERS = [
+        marker.strip()
+        for marker in config(
+            'AWS_PRIVATE_PATH_MARKERS',
+            default='/private/',
+        ).split(',')
+        if marker.strip()
+    ]
+
+    # Backward-compatible aliases for existing code/env usage.
+    AWS_LOCATION = AWS_MEDIA_LOCATION
+    AWS_QUERYSTRING_AUTH = config('AWS_QUERYSTRING_AUTH', default=False, cast=bool)
+    AWS_DEFAULT_ACL = None
+    AWS_S3_FILE_OVERWRITE = False
+
+    STORAGES = {
+        'default': {
+            # Safe default for unspecified fields.
+            'BACKEND': 'common.storages.PrivateMediaStorage',
+        },
+        'public_media': {
+            'BACKEND': 'common.storages.PublicMediaStorage',
+        },
+        'private_media': {
+            'BACKEND': 'common.storages.PrivateMediaStorage',
+        },
+        'mixed_media': {
+            'BACKEND': 'common.storages.MixedMediaStorage',
+        },
+        'legacy_s3': {
+            'BACKEND': 'storages.backends.s3.S3Storage',
+            'OPTIONS': {
+                'bucket_name': AWS_STORAGE_BUCKET_NAME,
+                'region_name': AWS_S3_REGION_NAME,
+                'default_acl': AWS_DEFAULT_ACL,
+                'querystring_auth': AWS_QUERYSTRING_AUTH,
+                'file_overwrite': AWS_S3_FILE_OVERWRITE,
+                'location': AWS_MEDIA_LOCATION,
+                'custom_domain': AWS_S3_CUSTOM_DOMAIN or None,
+            },
+        },
+        'staticfiles': {
+            'BACKEND': 'django.contrib.staticfiles.storage.StaticFilesStorage',
+        },
+    }
+
+    if AWS_S3_CUSTOM_DOMAIN:
+        MEDIA_URL = f'https://{AWS_S3_CUSTOM_DOMAIN}/{AWS_MEDIA_LOCATION}/'
+    else:
+        MEDIA_URL = f'https://{AWS_STORAGE_BUCKET_NAME}.s3.{AWS_S3_REGION_NAME}.amazonaws.com/{AWS_MEDIA_LOCATION}/'
+else:
+    MEDIA_URL = '/media/'
 
 # File Upload Size Limits (1GB = 1073741824 bytes)
 DATA_UPLOAD_MAX_MEMORY_SIZE = 1073741824  # 1GB
