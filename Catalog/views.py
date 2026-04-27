@@ -12,9 +12,10 @@ from django.core.files.storage import default_storage
 import random
 import os
 import uuid
+import time
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
-from .models import Product, Category, CollectionBundle, Tags, ProductCounter, PDFDownload
+from .models import Product, Category, CollectionBundle, Tags, ProductCounter, PDFDownload, LensSearchEvent
 from .serializers import (
     ProductSerializer, CategorySerializer, CategoryListSerializer, CollectionBundleSerializer,
     TagsSerializer, ProductCounterSerializer, PDFDownloadSerializer,
@@ -3871,7 +3872,60 @@ def lens_search(request):
     import logging
     import sys
     logger = logging.getLogger(__name__)
-    
+    started_at = time.monotonic()
+
+    def get_client_ip(req):
+        import ipaddress
+        x_forwarded_for = req.META.get('HTTP_X_FORWARDED_FOR')
+        candidate = x_forwarded_for.split(',')[0].strip() if x_forwarded_for else req.META.get('REMOTE_ADDR')
+        if not candidate:
+            return None
+        try:
+            return str(ipaddress.ip_address(candidate))
+        except Exception:
+            return None
+
+    def infer_device_type(user_agent: str) -> str:
+        ua = (user_agent or '').lower()
+        if any(token in ua for token in ('iphone', 'android', 'mobile')):
+            return 'mobile'
+        if any(token in ua for token in ('ipad', 'tablet')):
+            return 'tablet'
+        return 'desktop' if ua else 'unknown'
+
+    event_payload = {
+        'user': request.user if request.user.is_authenticated else None,
+        'is_authenticated': bool(request.user.is_authenticated),
+        'source': (request.POST.get('source') or request.headers.get('X-Lens-Source') or '').strip()[:64],
+        'session_id': (request.POST.get('session_id') or request.headers.get('X-Session-Id') or '').strip()[:128],
+        'referer': (request.META.get('HTTP_REFERER') or '')[:1000],
+        'ip_address': get_client_ip(request),
+        'user_agent': (request.META.get('HTTP_USER_AGENT') or '')[:2000],
+    }
+    event_payload['device_type'] = infer_device_type(event_payload['user_agent'])
+
+    def log_event(**kwargs):
+        try:
+            LensSearchEvent.objects.create(**event_payload, **kwargs)
+        except Exception as log_error:
+            logger.exception("LensSearchEvent create failed: %s", log_error)
+            try:
+                # Last-resort minimal insert so analytics still gets data.
+                LensSearchEvent.objects.create(
+                    user=event_payload.get('user'),
+                    is_authenticated=event_payload.get('is_authenticated', False),
+                    source=(event_payload.get('source') or '')[:64],
+                    success=kwargs.get('success', False),
+                    error_message=((kwargs.get('error_message') or str(log_error))[:2000]),
+                    processing_time_ms=kwargs.get('processing_time_ms'),
+                    num_results_requested=max(int(kwargs.get('num_results_requested') or 20), 1),
+                    results_count=max(int(kwargs.get('results_count') or 0), 0),
+                    total_matched=max(int(kwargs.get('total_matched') or 0), 0),
+                    result_product_numbers=(kwargs.get('result_product_numbers') or []),
+                )
+            except Exception:
+                logger.exception("LensSearchEvent fallback insert failed")
+
     try:
         # Ensure API project root is on path so "visual_search" resolves to API/visual_search
         api_root = str(settings.BASE_DIR)
@@ -3884,46 +3938,69 @@ def lens_search(request):
     except Exception as e:
         logger.exception("Visual search not available: %s", e)
         err_str = str(e)
-        # Show details for import/dependency errors so devs see install hint
         show_details = (
             getattr(settings, 'DEBUG', False)
             or isinstance(e, ImportError)
             or 'import' in err_str.lower()
             or 'module' in err_str.lower()
         )
+        log_event(
+            success=False,
+            error_message=f'Visual search unavailable: {err_str}'[:2000],
+            processing_time_ms=int((time.monotonic() - started_at) * 1000),
+        )
         return Response({
             'error': 'Visual search feature is not available',
             'success': False,
             'details': err_str if show_details else None,
         }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
-    
+
     if 'image' not in request.FILES:
+        log_event(
+            success=False,
+            error_message='No image provided',
+            processing_time_ms=int((time.monotonic() - started_at) * 1000),
+        )
         return Response({
             'error': 'No image provided',
             'success': False
         }, status=status.HTTP_400_BAD_REQUEST)
-    
+
     try:
         image_file = request.FILES['image']
         num_results = int(request.POST.get('num_results', 20))
-        
-        # Validate file type
+        num_results = max(1, num_results)
+
+        event_payload['image_file_name'] = (image_file.name or '')[:255]
+        event_payload['image_mime_type'] = (getattr(image_file, 'content_type', '') or '')[:100]
+        event_payload['image_size_bytes'] = getattr(image_file, 'size', None)
+
         allowed_extensions = ['.jpg', '.jpeg', '.png', '.webp']
         file_name = image_file.name.lower()
         if not any(file_name.endswith(ext) for ext in allowed_extensions):
+            log_event(
+                num_results_requested=num_results,
+                success=False,
+                error_message='Invalid file type',
+                processing_time_ms=int((time.monotonic() - started_at) * 1000),
+            )
             return Response({
                 'error': 'Invalid file type. Please upload JPG, PNG, or WebP image',
                 'success': False
             }, status=status.HTTP_400_BAD_REQUEST)
-        
-        # Validate file size (max 10MB)
+
         if image_file.size > 10 * 1024 * 1024:
+            log_event(
+                num_results_requested=num_results,
+                success=False,
+                error_message='File size too large',
+                processing_time_ms=int((time.monotonic() - started_at) * 1000),
+            )
             return Response({
                 'error': 'File size too large. Maximum size is 10MB',
                 'success': False
             }, status=status.HTTP_400_BAD_REQUEST)
-        
-        # Save uploaded image to media: guests -> media/search/guests/<date>, authenticated -> media/<user_id>/search/<date>
+
         date_str = timezone.now().strftime('%Y-%m-%d')
         ext = os.path.splitext(file_name)[1] or '.jpg'
         unique_name = f"{uuid.uuid4().hex}{ext}"
@@ -3936,22 +4013,34 @@ def lens_search(request):
         with open(save_path, 'wb') as f:
             for chunk in image_file.chunks():
                 f.write(chunk)
-        
-        # Load image with PIL (from saved path so upload is already persisted)
+        event_payload['image_storage_path'] = save_path[:500]
+
         try:
             img = Image.open(save_path)
-            # Convert to RGB if needed (handles RGBA, P, etc.)
             img = img.convert('RGB')
-        except Exception as e:
+        except Exception:
+            log_event(
+                num_results_requested=num_results,
+                success=False,
+                error_message='Invalid image file',
+                processing_time_ms=int((time.monotonic() - started_at) * 1000),
+            )
             return Response({
                 'error': 'Invalid image file. Please upload a valid image',
                 'success': False
             }, status=status.HTTP_400_BAD_REQUEST)
-        
-        # Search using visual search
+
         product_ids, extracted_image = search_image(img, num_results=num_results)
-        
+
         if not product_ids:
+            log_event(
+                num_results_requested=num_results,
+                success=True,
+                results_count=0,
+                total_matched=0,
+                result_product_numbers=[],
+                processing_time_ms=int((time.monotonic() - started_at) * 1000),
+            )
             return Response({
                 'success': True,
                 'products': [],
@@ -3960,23 +4049,19 @@ def lens_search(request):
                 'total_matched': 0,
                 'message': 'No similar products found. Try uploading a different image.'
             })
-        
-        # Fetch product details
+
         products = Product.objects.filter(
             product_number__in=product_ids,
             status='active',
             visibility_status='show'
         ).select_related('category', 'created_by')
-        
-        # Maintain order from search results (order by product_id order in product_ids list)
+
         product_dict = {p.product_number: p for p in products}
         ordered_products = [
-            product_dict[pid] for pid in product_ids 
+            product_dict[pid] for pid in product_ids
             if pid in product_dict
         ]
-        
-        
-        # Convert extracted image to base64 for preview
+
         extracted_image_base64 = None
         if extracted_image:
             try:
@@ -3984,37 +4069,48 @@ def lens_search(request):
                 extracted_image.save(buffered, format="PNG")
                 extracted_image_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
                 extracted_image_base64 = f'data:image/png;base64,{extracted_image_base64}'
-            except Exception as e:
+            except Exception:
                 pass
-        
+
+        log_event(
+            num_results_requested=num_results,
+            success=True,
+            results_count=len(ordered_products),
+            total_matched=len(product_ids),
+            result_product_numbers=list(product_ids[:50]),
+            processing_time_ms=int((time.monotonic() - started_at) * 1000),
+        )
+
         return Response({
             'success': True,
             'products': ProductSerializer(
-                ordered_products, 
-                many=True, 
+                ordered_products,
+                many=True,
                 context={'request': request}
             ).data,
             'extracted_image': extracted_image_base64,
             'count': len(ordered_products),
             'total_matched': len(product_ids)
         })
-        
+
     except ValueError as e:
+        log_event(
+            success=False,
+            error_message=f'Invalid parameter: {str(e)}'[:2000],
+            processing_time_ms=int((time.monotonic() - started_at) * 1000),
+        )
         return Response({
             'error': f'Invalid parameter: {str(e)}',
             'success': False
         }, status=status.HTTP_400_BAD_REQUEST)
     except Exception as e:
-        import traceback
         logger.exception("Lens search error: %s", e)
         err_msg = str(e).strip()
         err_lower = err_msg.lower()
-        # In production, always include short safe hints for connection/config errors
         details = None
         if settings.DEBUG:
             details = err_msg
         elif err_msg:
-            # Qdrant 404 = collection missing or index not ready
             if '404' in err_msg or 'not found' in err_lower:
                 details = (
                     "Visual search index is not ready. "
@@ -4024,6 +4120,11 @@ def lens_search(request):
                 details = err_msg
             elif any(x in err_lower for x in ('connection refused', 'name or service not known', 'timed out', 'nodename nor servname', 'qdrant', 'connection')):
                 details = err_msg[:200] if len(err_msg) > 200 else err_msg
+        log_event(
+            success=False,
+            error_message=(err_msg or 'Unknown error')[:2000],
+            processing_time_ms=int((time.monotonic() - started_at) * 1000),
+        )
         return Response({
             'error': 'An error occurred while processing your image. Please try again.',
             'success': False,

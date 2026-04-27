@@ -358,6 +358,54 @@ class PDFDownload(models.Model):
         return detach_relation('User:PDFDownload', self, user_obj)
 
 
+class LensSearchEvent(models.Model):
+    """
+    Stores each lens/visual image search request for analytics/reporting.
+    """
+    user = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='lens_search_events',
+    )
+    is_authenticated = models.BooleanField(default=False)
+    source = models.CharField(max_length=64, blank=True, default='')
+    session_id = models.CharField(max_length=128, blank=True, default='')
+    referer = models.TextField(blank=True, default='')
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    user_agent = models.TextField(blank=True, default='')
+    device_type = models.CharField(max_length=20, blank=True, default='')
+
+    image_file_name = models.CharField(max_length=255, blank=True, default='')
+    image_mime_type = models.CharField(max_length=100, blank=True, default='')
+    image_size_bytes = models.BigIntegerField(null=True, blank=True)
+    image_storage_path = models.CharField(max_length=500, blank=True, default='')
+
+    num_results_requested = models.PositiveIntegerField(default=20)
+    results_count = models.PositiveIntegerField(default=0)
+    total_matched = models.PositiveIntegerField(default=0)
+    result_product_numbers = models.JSONField(default=list, blank=True)
+
+    success = models.BooleanField(default=False)
+    error_message = models.TextField(blank=True, default='')
+    processing_time_ms = models.PositiveIntegerField(null=True, blank=True)
+
+    searched_at = models.DateTimeField(auto_now_add=True)
+
+    objects = models.Manager()
+
+    class Meta:
+        db_table = 'lens_search_event'
+        verbose_name = 'Lens Search Event'
+        verbose_name_plural = 'Lens Search Events'
+        ordering = ['-searched_at']
+
+    def __str__(self):
+        who = self.user.email if self.user else "guest"
+        return f"Lens Search {self.pk} - {who} - success={self.success}"
+
+
 class PDFClient(models.Model):
     """
     Admin-configured PDF client for generating non-overlapping design PDFs.
