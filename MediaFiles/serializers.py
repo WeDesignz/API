@@ -19,7 +19,7 @@ class MediaSerializer(serializers.ModelSerializer):
     class Meta:
         model = Media
         fields = [
-            'id', 'file', 'file_url', 'file_size', 'media_type',
+            'id', 'file', 'file_url', 'file_size', 'media_type', 'visibility',
             'created_by', 'created_at', 'updated_by', 'updated_at',
             'created_by_id', 'updated_by_id'
         ]
@@ -104,7 +104,7 @@ class MediaListSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Media
-        fields = ['id', 'file_url', 'file_size', 'media_type', 'created_at']
+        fields = ['id', 'file_url', 'file_size', 'media_type', 'visibility', 'created_at']
     
     def get_file_url(self, obj):
         """
@@ -146,7 +146,7 @@ class MediaCreateSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Media
-        fields = ['file', 'media_type', 'created_by_id']
+        fields = ['file', 'media_type', 'visibility', 'created_by_id']
     
     def validate_file(self, value):
         """
@@ -169,7 +169,7 @@ class MediaUpdateSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Media
-        fields = ['media_type', 'updated_by_id']
+        fields = ['media_type', 'visibility', 'updated_by_id']
     
     def validate_media_type(self, value):
         """
@@ -402,7 +402,7 @@ class BulkMediaUpdateSerializer(serializers.Serializer):
         """
         Validate update fields.
         """
-        allowed_fields = ['media_type']
+        allowed_fields = ['media_type', 'visibility']
         for field in value.keys():
             if field not in allowed_fields:
                 raise serializers.ValidationError(f"Field '{field}' is not allowed for bulk update.")

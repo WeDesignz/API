@@ -58,7 +58,7 @@ from Orders.serializers import (
     FinancialReportSerializer, FinancialReportDataSerializer, TransactionFilterSerializer,
     OrderFilterSerializer, RefundFilterSerializer
 )
-from django.db.models import Q, Sum, Count
+from django.db.models import Q, Sum, Count, Avg, Case, When, IntegerField
 from django.contrib.auth.models import User
 from django.http import FileResponse
 from django.core.paginator import Paginator
@@ -71,7 +71,7 @@ from Profiles.models import DesignerProfile
 from Wallet.models import Wallet, WalletTransaction, WalletWithdrawalRequest
 from Authentication.user_relations import get_user_wallets
 from common.relations import get_related
-from Catalog.models import PDFDownload, PDFClient, PDFClientJob
+from Catalog.models import PDFDownload, PDFClient, PDFClientJob, LensSearchEvent
 
 @swagger_auto_schema(
     method='post',
@@ -757,25 +757,16 @@ def admin_upload_profile_photo(request):
         profile_photo_url = None
         if profile_photo.file:
             try:
-                from django.conf import settings
-                # Get file path - this is relative to MEDIA_ROOT
-                file_path = profile_photo.file.name
-                # Construct URL: MEDIA_URL + file_path
-                # Since upload_to='media/', file_path is 'media/filename.jpg'
-                # MEDIA_URL is '/media/', so URL becomes '/media/media/filename.jpg'
-                relative_url = f"{settings.MEDIA_URL}{file_path}"
-                # Ensure it starts with /
-                if not relative_url.startswith('/'):
-                    relative_url = '/' + relative_url
-                # Build absolute URL using SITE_URL from settings to ensure it points to Django backend
+                url = profile_photo.file.url
+                # Build absolute URL using SITE_URL from settings when url is relative.
                 site_url = getattr(settings, 'SITE_URL', None)
-                if site_url:
-                    # Remove trailing slash from SITE_URL if present
+                if url.startswith('http'):
+                    profile_photo_url = url
+                elif site_url and url.startswith('/'):
                     site_url = site_url.rstrip('/')
-                    profile_photo_url = f"{site_url}{relative_url}"
+                    profile_photo_url = f"{site_url}{url}"
                 else:
-                    # Fallback to request.build_absolute_uri if SITE_URL not set
-                    profile_photo_url = request.build_absolute_uri(relative_url)
+                    profile_photo_url = request.build_absolute_uri(url if url.startswith('/') else f'/{url}')
             except (ValueError, AttributeError, Exception) as e:
                 # Fallback: try using file.url if available
                 try:
@@ -9270,6 +9261,190 @@ def mock_pdf_download_file(request, download_id):
         logger = logging.getLogger(__name__)
 
         return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@swagger_auto_schema(
+    method='get',
+    operation_summary='Lens usage report (admin)',
+    operation_description='Returns lens image-search analytics (who searched, where, success/fail, timings, top users, top products) with paginated event list.',
+    manual_parameters=[
+        openapi.Parameter('page', openapi.IN_QUERY, type=openapi.TYPE_INTEGER, description='Page number'),
+        openapi.Parameter('page_size', openapi.IN_QUERY, type=openapi.TYPE_INTEGER, description='Page size (max 100)'),
+        openapi.Parameter('days', openapi.IN_QUERY, type=openapi.TYPE_INTEGER, description='Lookback window in days (default 30)'),
+        openapi.Parameter('source', openapi.IN_QUERY, type=openapi.TYPE_STRING, description='Filter by source (landing, customer_dashboard, etc.)'),
+        openapi.Parameter('success', openapi.IN_QUERY, type=openapi.TYPE_STRING, description='Filter by success: true/false'),
+        openapi.Parameter('search', openapi.IN_QUERY, type=openapi.TYPE_STRING, description='Search user/email/ip/file/source'),
+    ],
+    responses={200: openapi.Response(description='Lens usage analytics report')},
+    tags=['CoreAdmin Reports']
+)
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def lens_usage_report(request):
+    try:
+        _ = request.user.admin_profile
+    except AdminUserProfile.DoesNotExist:
+        return Response({'error': 'Admin access required'}, status=status.HTTP_403_FORBIDDEN)
+
+    page = max(int(request.GET.get('page', 1)), 1)
+    page_size = min(max(int(request.GET.get('page_size', 20)), 1), 100)
+    days = max(int(request.GET.get('days', 30)), 1)
+    source = (request.GET.get('source') or '').strip()
+    success = (request.GET.get('success') or '').strip().lower()
+    search = (request.GET.get('search') or '').strip()
+
+    now = timezone.now()
+    since = now - timedelta(days=days)
+    try:
+        qs = LensSearchEvent.objects.filter(searched_at__gte=since).select_related('user')
+    except Exception as e:
+        return Response({
+            'stats': {
+                'total_searches': 0,
+                'today_searches': 0,
+                'this_week_searches': 0,
+                'success_count': 0,
+                'failed_count': 0,
+                'success_rate': 0,
+                'unique_users': 0,
+                'guest_searches': 0,
+                'avg_processing_time_ms': None,
+                'period_days': days,
+            },
+            'source_breakdown': [],
+            'top_users': [],
+            'top_products': [],
+            'top_error_reasons': [],
+            'events': [],
+            'total_count': 0,
+            'total_pages': 1,
+            'current_page': 1,
+            'warning': f'Lens usage data unavailable: {str(e)}',
+        }, status=status.HTTP_200_OK)
+
+    if source and source != 'all':
+        qs = qs.filter(source=source)
+    if success in ('true', 'false'):
+        qs = qs.filter(success=(success == 'true'))
+    if search:
+        qs = qs.filter(
+            Q(user__username__icontains=search)
+            | Q(user__email__icontains=search)
+            | Q(source__icontains=search)
+            | Q(ip_address__icontains=search)
+            | Q(image_file_name__icontains=search)
+        )
+
+    day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    week_start = now - timedelta(days=7)
+    total = qs.count()
+    success_count = qs.filter(success=True).count()
+    failed_count = total - success_count
+    unique_users = qs.exclude(user_id__isnull=True).values('user_id').distinct().count()
+    guests = qs.filter(is_authenticated=False).count()
+    avg_processing = qs.aggregate(avg=Avg('processing_time_ms')).get('avg')
+
+    source_breakdown = list(
+        qs.values('source')
+        .annotate(count=Count('id'))
+        .order_by('-count')
+    )
+
+    top_users = list(
+        qs.filter(user_id__isnull=False)
+        .values('user_id', 'user__username', 'user__email', 'user__last_login')
+        .annotate(
+            searches=Count('id'),
+            successful=Sum(
+                Case(
+                    When(success=True, then=1),
+                    default=0,
+                    output_field=IntegerField(),
+                )
+            ),
+        )
+        .order_by('-searches')[:10]
+    )
+
+    top_error_reasons = list(
+        qs.exclude(error_message='')
+        .values('error_message')
+        .annotate(count=Count('id'))
+        .order_by('-count')[:10]
+    )
+
+    # Aggregate top matched products from recent successful events
+    product_counter = {}
+    for product_numbers in qs.filter(success=True).values_list('result_product_numbers', flat=True)[:2000]:
+        for product_number in (product_numbers or [])[:20]:
+            if not product_number:
+                continue
+            product_counter[product_number] = product_counter.get(product_number, 0) + 1
+    top_products = [
+        {'product_number': product_number, 'count': count}
+        for product_number, count in sorted(product_counter.items(), key=lambda kv: kv[1], reverse=True)[:10]
+    ]
+
+    paginator = Paginator(qs.order_by('-searched_at'), page_size)
+    page_obj = paginator.get_page(page)
+
+    events = []
+    for event in page_obj.object_list:
+        user = event.user
+        events.append({
+            'id': event.id,
+            'searched_at': event.searched_at.isoformat() if event.searched_at else None,
+            'source': event.source,
+            'user': {
+                'id': user.id if user else None,
+                'username': user.username if user else None,
+                'email': user.email if user else None,
+                'last_login': user.last_login.isoformat() if user and user.last_login else None,
+                'is_authenticated': event.is_authenticated,
+            },
+            'where': {
+                'ip_address': event.ip_address,
+                'referer': event.referer,
+                'device_type': event.device_type,
+            },
+            'search_input': {
+                'image_file_name': event.image_file_name,
+                'image_mime_type': event.image_mime_type,
+                'image_size_bytes': event.image_size_bytes,
+                'num_results_requested': event.num_results_requested,
+            },
+            'results': {
+                'results_count': event.results_count,
+                'total_matched': event.total_matched,
+                'product_numbers': event.result_product_numbers[:20] if isinstance(event.result_product_numbers, list) else [],
+            },
+            'success': event.success,
+            'error_message': event.error_message,
+            'processing_time_ms': event.processing_time_ms,
+        })
+
+    return Response({
+        'stats': {
+            'total_searches': total,
+            'today_searches': qs.filter(searched_at__gte=day_start).count(),
+            'this_week_searches': qs.filter(searched_at__gte=week_start).count(),
+            'success_count': success_count,
+            'failed_count': failed_count,
+            'success_rate': round((success_count / total) * 100, 2) if total else 0,
+            'unique_users': unique_users,
+            'guest_searches': guests,
+            'avg_processing_time_ms': round(float(avg_processing), 2) if avg_processing is not None else None,
+            'period_days': days,
+        },
+        'source_breakdown': source_breakdown,
+        'top_users': top_users,
+        'top_products': top_products,
+        'top_error_reasons': top_error_reasons,
+        'events': events,
+        'total_count': paginator.count,
+        'total_pages': paginator.num_pages,
+        'current_page': page_obj.number,
+    })
 
 
 @swagger_auto_schema(

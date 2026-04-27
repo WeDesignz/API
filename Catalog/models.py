@@ -5,7 +5,10 @@ from django.dispatch import receiver
 from common.relations import attach_relation, get_related_ids, get_related, detach_relation
 from MediaFiles.models import Media
 from common.studio_name_generator import generate_design_numbers
+from common.storages import PrivateMediaStorage
 from Plans.models import Plan
+
+private_media_storage = PrivateMediaStorage()
 
 
 class Category(models.Model):
@@ -240,7 +243,13 @@ class PDFDownload(models.Model):
     # Customer information for mock PDF (stored per download; same user can use different name/number each time)
     customer_name = models.CharField(max_length=255, blank=True, null=True, help_text="Customer name for mock PDF")
     customer_mobile = models.CharField(max_length=20, blank=True, null=True, help_text="Customer mobile number for mock PDF")
-    customer_logo = models.ImageField(upload_to='pdf_logos/%Y/%m/', blank=True, null=True, help_text="Optional logo for PDF; if not set, WeDesignz default logo is used")
+    customer_logo = models.ImageField(
+        upload_to='pdf_logos/%Y/%m/',
+        storage=private_media_storage,
+        blank=True,
+        null=True,
+        help_text="Optional logo for PDF; if not set, WeDesignz default logo is used",
+    )
     
     # Payment information (for paid downloads)
     razorpay_payment = models.ForeignKey('Razorpay.RazorpayPayment', on_delete=models.SET_NULL, null=True, blank=True, related_name='pdf_downloads')
@@ -349,6 +358,54 @@ class PDFDownload(models.Model):
         return detach_relation('User:PDFDownload', self, user_obj)
 
 
+class LensSearchEvent(models.Model):
+    """
+    Stores each lens/visual image search request for analytics/reporting.
+    """
+    user = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='lens_search_events',
+    )
+    is_authenticated = models.BooleanField(default=False)
+    source = models.CharField(max_length=64, blank=True, default='')
+    session_id = models.CharField(max_length=128, blank=True, default='')
+    referer = models.TextField(blank=True, default='')
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    user_agent = models.TextField(blank=True, default='')
+    device_type = models.CharField(max_length=20, blank=True, default='')
+
+    image_file_name = models.CharField(max_length=255, blank=True, default='')
+    image_mime_type = models.CharField(max_length=100, blank=True, default='')
+    image_size_bytes = models.BigIntegerField(null=True, blank=True)
+    image_storage_path = models.CharField(max_length=500, blank=True, default='')
+
+    num_results_requested = models.PositiveIntegerField(default=20)
+    results_count = models.PositiveIntegerField(default=0)
+    total_matched = models.PositiveIntegerField(default=0)
+    result_product_numbers = models.JSONField(default=list, blank=True)
+
+    success = models.BooleanField(default=False)
+    error_message = models.TextField(blank=True, default='')
+    processing_time_ms = models.PositiveIntegerField(null=True, blank=True)
+
+    searched_at = models.DateTimeField(auto_now_add=True)
+
+    objects = models.Manager()
+
+    class Meta:
+        db_table = 'lens_search_event'
+        verbose_name = 'Lens Search Event'
+        verbose_name_plural = 'Lens Search Events'
+        ordering = ['-searched_at']
+
+    def __str__(self):
+        who = self.user.email if self.user else "guest"
+        return f"Lens Search {self.pk} - {who} - success={self.success}"
+
+
 class PDFClient(models.Model):
     """
     Admin-configured PDF client for generating non-overlapping design PDFs.
@@ -445,6 +502,7 @@ class PDFClientJob(models.Model):
     customer_mobile = models.CharField(max_length=20)
     customer_logo = models.ImageField(
         upload_to="admin_pdf_clients/logos/%Y/%m/",
+        storage=private_media_storage,
         null=True,
         blank=True,
     )

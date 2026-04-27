@@ -69,5 +69,7 @@ urlpatterns = [
 # Serve media and static files in development
 if settings.DEBUG:
     from django.contrib.staticfiles.urls import staticfiles_urlpatterns
-    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+    # Only mount local media serving routes when MEDIA_URL is a local path.
+    if settings.MEDIA_URL.startswith('/'):
+        urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
     urlpatterns += staticfiles_urlpatterns()

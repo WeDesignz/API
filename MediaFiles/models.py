@@ -2,6 +2,7 @@ from django.db import models
 from django.contrib.auth.models import User
 import logging
 import threading
+from common.storages import MixedMediaStorage
 
 # Thread-local storage for passing context during Media creation
 _thread_local = threading.local()
@@ -12,17 +13,18 @@ _context_store = {}
 _context_lock = threading.Lock()
 
 # Keep default storage - no custom storage needed
+mixed_media_storage = MixedMediaStorage()
 
 def get_media_upload_path(instance, filename):
     """
     Callable upload_to function for Media model.
     
     File organization:
-    - Design uploads (Product:Media): {user_id}/designs/{product_id}/{filename}
-    - Profile photos: {user_id}/profile/{filename}
-    - Business documents (PAN, MSME): {user_id}/documents/{filename}
-    - Custom order deliverables: {user_id}/orders/{order_id}/deliverables/{filename}
-    - Other uploads: {user_id}/media/{filename} (fallback)
+    - Design uploads (Product:Media): {user_id}/designs/{public|private}/{product_id}/{filename}
+    - Profile photos: {user_id}/profile/{public|private}/{filename}
+    - Business documents (PAN, MSME): {user_id}/documents/{public|private}/{filename}
+    - Custom order deliverables: {user_id}/orders/{public|private}/{order_id}/deliverables/{filename}
+    - Other uploads: {user_id}/media/{public|private}/{filename} (fallback)
     
     Context is passed via thread-local storage when creating Media objects.
     """
@@ -44,6 +46,11 @@ def get_media_upload_path(instance, filename):
     product_id = getattr(_thread_local, 'product_id', None)
     order_id = getattr(_thread_local, 'order_id', None)
     file_type = getattr(_thread_local, 'file_type', None)  # 'profile', 'document', 'deliverable'
+    visibility = getattr(_thread_local, 'visibility', None)
+    if not visibility and hasattr(instance, 'visibility'):
+        visibility = (instance.visibility or '').strip().lower()
+    if visibility not in {'public', 'private'}:
+        visibility = 'private'
     
     # FALLBACK 1: If product_id not in thread-local, try global context store
     if not product_id:
@@ -70,8 +77,8 @@ def get_media_upload_path(instance, filename):
     
     # Check if created_by is set and has an id
     if not (hasattr(instance, 'created_by') and instance.created_by and hasattr(instance.created_by, 'id')):
-        # Fallback: use root directory if no user context (Django will prepend MEDIA_URL)
-        result = filename
+        # Fallback: keep deterministic visibility path even without user context.
+        result = f'unknown/{visibility}/{filename}'
         # #region agent log
         try:
             with open(log_path, 'a') as f:
@@ -82,9 +89,9 @@ def get_media_upload_path(instance, filename):
     
     user_id = instance.created_by.id
     
-    # Custom order deliverables: {user_id}/orders/{order_id}/deliverables/
+    # Custom order deliverables: {user_id}/orders/{visibility}/{order_id}/deliverables/
     if order_id and file_type == 'deliverable':
-        result = f'{user_id}/orders/{order_id}/deliverables/{filename}'
+        result = f'{user_id}/orders/{visibility}/{order_id}/deliverables/{filename}'
         # #region agent log
         try:
             with open(log_path, 'a') as f:
@@ -95,11 +102,11 @@ def get_media_upload_path(instance, filename):
     
     # Design uploads: {user_id}/designs/{product_id}/
     if product_id:
-        result = f'{user_id}/designs/{product_id}/{filename}'
+        result = f'{user_id}/designs/{visibility}/{product_id}/{filename}'
         # #region agent log
         try:
             with open(log_path, 'a') as f:
-                f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"A","location":"MediaFiles/models.py:get_media_upload_path","message":"Product design path (CORRECT)","data":{"result_path":result,"product_id":product_id},"timestamp":int(__import__('time').time()*1000)})+'\n')
+                f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"A","location":"MediaFiles/models.py:get_media_upload_path","message":"Product design path (CORRECT)","data":{"result_path":result,"product_id":product_id,"visibility":visibility},"timestamp":int(__import__('time').time()*1000)})+'\n')
         except: pass
         # #endregion
         return result
@@ -120,11 +127,11 @@ def get_media_upload_path(instance, filename):
                 product_number__iexact=base_name
             ).order_by('-id').first()
             if product:
-                result = f'{user_id}/designs/{product.id}/{filename}'
+                result = f'{user_id}/designs/{visibility}/{product.id}/{filename}'
                 # #region agent log
                 try:
                     with open(log_path, 'a') as f:
-                        f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"A","location":"MediaFiles/models.py:get_media_upload_path","message":"Product design path (FALLBACK from filename DB lookup)","data":{"result_path":result,"product_id":product.id,"filename":filename,"base_name":base_name},"timestamp":int(__import__('time').time()*1000)})+'\n')
+                        f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"A","location":"MediaFiles/models.py:get_media_upload_path","message":"Product design path (FALLBACK from filename DB lookup)","data":{"result_path":result,"product_id":product.id,"filename":filename,"base_name":base_name,"visibility":visibility},"timestamp":int(__import__('time').time()*1000)})+'\n')
                 except: pass
                 # #endregion
                 return result
@@ -137,9 +144,9 @@ def get_media_upload_path(instance, filename):
             # #endregion
             pass
     
-    # Profile photos: {user_id}/profile/
+    # Profile photos: {user_id}/profile/{visibility}/
     if file_type == 'profile':
-        result = f'{user_id}/profile/{filename}'
+        result = f'{user_id}/profile/{visibility}/{filename}'
         # #region agent log
         try:
             with open(log_path, 'a') as f:
@@ -148,9 +155,9 @@ def get_media_upload_path(instance, filename):
         # #endregion
         return result
     
-    # Business documents: {user_id}/documents/
+    # Business documents: {user_id}/documents/{visibility}/
     if file_type == 'document':
-        result = f'{user_id}/documents/{filename}'
+        result = f'{user_id}/documents/{visibility}/{filename}'
         # #region agent log
         try:
             with open(log_path, 'a') as f:
@@ -159,8 +166,8 @@ def get_media_upload_path(instance, filename):
         # #endregion
         return result
     
-    # Default fallback: {user_id}/media/ (for other non-product uploads)
-    result = f'{user_id}/media/{filename}'
+    # Default fallback: {user_id}/media/{visibility}/ (for other non-product uploads)
+    result = f'{user_id}/media/{visibility}/{filename}'
     # #region agent log
     try:
         with open(log_path, 'a') as f:
@@ -182,9 +189,15 @@ class Media(models.Model):
         ('xlsx', 'XLSX'),
         ('other', 'Other'),
     ]
+
+    VISIBILITY_CHOICES = [
+        ('public', 'Public'),
+        ('private', 'Private'),
+    ]
     
-    file = models.FileField(upload_to=get_media_upload_path)
+    file = models.FileField(upload_to=get_media_upload_path, storage=mixed_media_storage)
     media_type = models.CharField(max_length=10, choices=MEDIA_TYPE_CHOICES)
+    visibility = models.CharField(max_length=10, choices=VISIBILITY_CHOICES, default='private')
     created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='created_media')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='updated_media', null=True, blank=True)
@@ -199,12 +212,32 @@ class Media(models.Model):
     
     def __str__(self):
         return f"Media {self.pk} - {self.media_type}"
+
+    @property
+    def is_private(self):
+        return self.visibility == 'private'
     
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         # Store product_id temporarily on instance for upload_to function
         # This is a fallback if thread-local storage doesn't work
         self._temp_product_id = None
+
+    @classmethod
+    def set_visibility_context(cls, visibility: str):
+        """
+        Set explicit visibility context for subsequent Media creates on this thread.
+        Accepted values: public, private.
+        """
+        normalized = (visibility or '').strip().lower()
+        if normalized in {'public', 'private'}:
+            _thread_local.visibility = normalized
+
+    @classmethod
+    def clear_visibility_context(cls):
+        """Clear visibility context from thread-local storage."""
+        if hasattr(_thread_local, 'visibility'):
+            delattr(_thread_local, 'visibility')
     
     @classmethod
     def set_product_context(cls, product_id):
@@ -247,6 +280,7 @@ class Media(models.Model):
         with _context_lock:
             if thread_id in _context_store:
                 del _context_store[thread_id]
+        cls.clear_visibility_context()
     
     @classmethod
     def set_order_context(cls, order_id):
