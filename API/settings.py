@@ -17,6 +17,11 @@ import os
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+# File storage backend toggle:
+# - False => local filesystem storage (no django-storages dependency required)
+# - True  => AWS S3 storage (requires django-storages/boto3)
+USE_S3 = config('USE_S3', default=False, cast=bool)
+
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
@@ -74,7 +79,6 @@ INSTALLED_APPS = [
     'rest_framework',
     'rest_framework_simplejwt',
     'drf_yasg',  # Swagger documentation
-    'storages',  # AWS S3 storage backend
     
     # Celery apps
     'django_celery_beat',  # Celery Beat for periodic tasks
@@ -97,6 +101,9 @@ INSTALLED_APPS = [
     'Razorpay',
     'Wallet',
 ]
+
+if USE_S3:
+    INSTALLED_APPS.append('storages')  # AWS S3 storage backend
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
@@ -198,11 +205,6 @@ STATICFILES_DIRS = [
     staticfiles_dir,
 ] if os.path.exists(staticfiles_dir) else []
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
-
-# File storage backend:
-# - local filesystem by default
-# - AWS S3 when USE_S3=True
-USE_S3 = config('USE_S3', default=False, cast=bool)
 
 if USE_S3:
     AWS_ACCESS_KEY_ID = config('AWS_ACCESS_KEY_ID')
