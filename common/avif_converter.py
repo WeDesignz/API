@@ -1,7 +1,7 @@
 from PIL import Image
 import os
 from pathlib import Path
-from django.core.files.storage import default_storage
+from django.core.files.storage import default_storage, storages
 from django.core.files.base import ContentFile
 import logging
 
@@ -17,6 +17,19 @@ except Exception as e:
     pass
 
 logger = logging.getLogger(__name__)
+
+
+def _get_media_storage():
+    """
+    Use mixed media storage for product media paths so read/write operations
+    happen in the same S3 namespace as Media.file.
+    """
+    try:
+        if "mixed_media" in storages.backends:
+            return storages["mixed_media"]
+    except Exception:
+        pass
+    return default_storage
 
 # Check if AVIF support is available
 def check_avif_support():
@@ -56,7 +69,7 @@ def is_avif_supported():
     if _avif_supported is None:
         _avif_supported = check_avif_support()
         if not _avif_supported:
-            pass
+            logger.warning("AVIF support is not available in current runtime.")
 
     return _avif_supported
 
@@ -79,6 +92,7 @@ def convert_to_avif(input_path, output_dir, base_name, is_mockup=False):
         return None
     
     try:
+        media_storage = _get_media_storage()
         # Open and convert to RGB
         img = Image.open(input_path).convert("RGB")
         
@@ -136,7 +150,7 @@ def convert_to_avif(input_path, output_dir, base_name, is_mockup=False):
                 avif_file_obj = ContentFile(avif_content, name=avif_filename)
                 
                 # Save to storage using default_storage
-                saved_path = default_storage.save(avif_path, avif_file_obj)
+                saved_path = media_storage.save(avif_path, avif_file_obj)
                 
                 # Clean up temp file
                 os.unlink(temp_avif_path)
@@ -167,13 +181,14 @@ def convert_avif_to_jpeg(avif_file_path, quality=85):
         Tuple of (jpeg_file_path_in_storage, jpeg_url), or (None, None) if conversion failed
     """
     try:
+        media_storage = _get_media_storage()
         # Check if AVIF support is available
         if not is_avif_supported():
 
             return None, None
         
         # Check if file exists
-        if not default_storage.exists(avif_file_path):
+        if not media_storage.exists(avif_file_path):
 
             return None, None
         
@@ -182,7 +197,7 @@ def convert_avif_to_jpeg(avif_file_path, quality=85):
         temp_avif_path = None
         temp_jpeg_path = None
         
-        with default_storage.open(avif_file_path, 'rb') as storage_file:
+        with media_storage.open(avif_file_path, 'rb') as storage_file:
             with tempfile.NamedTemporaryFile(delete=False, suffix='.avif') as temp_avif:
                 temp_avif.write(storage_file.read())
                 temp_avif_path = temp_avif.name
@@ -211,7 +226,7 @@ def convert_avif_to_jpeg(avif_file_path, quality=85):
             
             # Save JPEG to storage
             jpeg_file_obj = ContentFile(jpeg_content, name=jpeg_filename)
-            saved_jpeg_path = default_storage.save(jpeg_storage_path, jpeg_file_obj)
+            saved_jpeg_path = media_storage.save(jpeg_storage_path, jpeg_file_obj)
             
             # Get the URL for the JPEG file
             from django.conf import settings
@@ -255,11 +270,12 @@ def create_avif_from_media_file(media_file_path, product_number, is_mockup=False
         If product is not provided, returns (avif_path, None) for backward compatibility
     """
     try:
+        media_storage = _get_media_storage()
         # Determine the correct directory for AVIF file
         # If product is provided, ALWAYS use the product's design folder, not the original file's directory
         # This ensures AVIF files are always in the correct location even if original file is in wrong location
         if product and hasattr(product, 'created_by') and product.created_by:
-            file_dir = f"{product.created_by.id}/designs/{product.id}"
+            file_dir = f"{product.created_by.id}/designs/{product.id}/public"
         else:
             # Fallback: use the directory where the original file is located
             file_dir = os.path.dirname(media_file_path)
@@ -278,13 +294,13 @@ def create_avif_from_media_file(media_file_path, product_number, is_mockup=False
         base_name = product_number
         
         # Open file from storage
-        if not default_storage.exists(media_file_path):
+        if not media_storage.exists(media_file_path):
 
             return None, None
         
         # Read file to temporary location for PIL processing
         import tempfile
-        with default_storage.open(media_file_path, 'rb') as storage_file:
+        with media_storage.open(media_file_path, 'rb') as storage_file:
             with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(media_file_path)[1]) as temp_file:
                 temp_file.write(storage_file.read())
                 temp_input_path = temp_file.name
@@ -305,7 +321,7 @@ def create_avif_from_media_file(media_file_path, product_number, is_mockup=False
             
             # Create Media object and link to product if provided
             media_obj = None
-            if product and default_storage.exists(avif_path):
+            if product and media_storage.exists(avif_path):
                 try:
                     from MediaFiles.models import Media
                     from django.core.files import File
@@ -316,7 +332,7 @@ def create_avif_from_media_file(media_file_path, product_number, is_mockup=False
                     if not creator:
                         pass
                     else:
-                        # The AVIF file is already saved at avif_path (in the product's design folder: {user_id}/designs/{product_id}/)
+                        # The AVIF file is already saved at avif_path (in the product's public design folder).
                         # We need to create a Media object that references this existing file without Django trying to save it again
                         # Set product context so if Django processes the file, it uses the correct path
                         Media.set_product_context(product.id)
@@ -342,6 +358,7 @@ def create_avif_from_media_file(media_file_path, product_number, is_mockup=False
                             media_obj = Media(
                                 file=dummy_file,
                                 media_type='image',
+                                visibility='public',
                                 created_by=creator
                             )
                             # Set instance-level product_id as fallback
@@ -359,20 +376,20 @@ def create_avif_from_media_file(media_file_path, product_number, is_mockup=False
                             media_obj.refresh_from_db()
                             
                             # Delete the dummy file if it was created
-                            if dummy_file_path and default_storage.exists(dummy_file_path):
+                            if dummy_file_path and media_storage.exists(dummy_file_path):
                                 try:
-                                    default_storage.delete(dummy_file_path)
+                                    media_storage.delete(dummy_file_path)
                                 except Exception as e:
                                     pass
 
                             # Verify the AVIF file exists at the correct location
-                            if not default_storage.exists(avif_path):
+                            if not media_storage.exists(avif_path):
                                 pass
                             else:
                                 pass
 
                             # Validate AVIF file location - ensure it's in the correct product design folder
-                            expected_path_prefix = f'{creator.id}/designs/{product.id}/'
+                            expected_path_prefix = f'{creator.id}/designs/{product.id}/public/'
                             if not avif_path.startswith(expected_path_prefix):
                                 error_msg = f'AVIF file saved to wrong location! Expected: {expected_path_prefix}*, Got: {avif_path}'
 
