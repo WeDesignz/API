@@ -1267,6 +1267,7 @@ def download_product_zip(request, product_id):
     """
     import zipfile
     import io
+    import os
     from django.http import HttpResponse
     from MediaFiles.models import Media
     from common.relations import get_related
@@ -1331,36 +1332,74 @@ def download_product_zip(request, product_id):
     zip_buffer = io.BytesIO()
     
     try:
+        # First prefer non-AVIF files; fallback to AVIF only when no other files are available.
+        media_list = [m for m in media_files if getattr(m, 'file', None)]
+        preferred_media = [m for m in media_list if not str(m.file.name).lower().endswith('.avif')]
+        fallback_avif_media = [m for m in media_list if str(m.file.name).lower().endswith('.avif')]
+
+        added_files_count = 0
+        used_names = set()
+
+        def _safe_zip_name(media_obj):
+            original_name = os.path.basename(str(media_obj.file.name or 'file'))
+            if not original_name:
+                original_name = f"media_{media_obj.id}"
+            if original_name not in used_names:
+                used_names.add(original_name)
+                return original_name
+            base, ext = os.path.splitext(original_name)
+            candidate = f"{base}_{media_obj.id}{ext}"
+            used_names.add(candidate)
+            return candidate
+
+        def _add_media_to_zip(zip_file, media_obj):
+            file_field = media_obj.file
+            try:
+                # Use the file field storage directly (handles custom/s3 storage correctly).
+                if hasattr(file_field, 'open'):
+                    file_field.open('rb')
+                file_content = file_field.read()
+                file_field.close()
+                if not file_content:
+                    return False
+                zip_file.writestr(_safe_zip_name(media_obj), file_content)
+                return True
+            except Exception:
+                # Fallback to default storage for compatibility with older records.
+                file_path = str(file_field.name or '')
+                if not file_path:
+                    return False
+                try:
+                    with default_storage.open(file_path, 'rb') as storage_file:
+                        file_content = storage_file.read()
+                    if not file_content:
+                        return False
+                    zip_file.writestr(_safe_zip_name(media_obj), file_content)
+                    return True
+                except Exception:
+                    return False
+
         with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-            for media in media_files:
-                if media.file:
-                    try:
-                        # Get file path
-                        file_path = media.file.name
-                        
-                        # Skip AVIF files - they are only for web display, not for download
-                        file_name_lower = file_path.lower()
-                        if file_name_lower.endswith('.avif'):
-                            continue
-                        
-                        # Read file from storage
-                        if default_storage.exists(file_path):
-                            with default_storage.open(file_path, 'rb') as storage_file:
-                                file_content = storage_file.read()
-                                
-                                # Get original filename or use a default
-                                file_name = media.file.name.split('/')[-1] if '/' in media.file.name else media.file.name
-                                
-                                # Add to zip with sanitized filename
-                                zip_file.writestr(file_name, file_content)
-                    except Exception as e:
-                        continue
+            for media in preferred_media:
+                if _add_media_to_zip(zip_file, media):
+                    added_files_count += 1
+
+            # If nothing else was downloadable, include AVIF files so ZIP is never empty.
+            if added_files_count == 0:
+                for media in fallback_avif_media:
+                    if _add_media_to_zip(zip_file, media):
+                        added_files_count += 1
+
+        if added_files_count == 0:
+            return Response({
+                'error': 'No downloadable files found for this product'
+            }, status=status.HTTP_404_NOT_FOUND)
         
         # Prepare response
         zip_buffer.seek(0)
         response = HttpResponse(zip_buffer.read(), content_type='application/zip')
         response['Content-Disposition'] = f'attachment; filename="{product.title.replace(" ", "_")}_{product_id}.zip"'
-        response['Content-Length'] = zip_buffer.tell()
+        response['Content-Length'] = len(response.content)
         
         return response
         
@@ -1970,7 +2009,8 @@ def get_user_invoices(request):
 @permission_classes([IsAuthenticated])
 def download_invoice(request, invoice_id):
     """Download invoice PDF"""
-    import os
+    from django.core.files.storage import default_storage
+    from django.http import FileResponse
     
     try:
         invoice = Invoice.objects.get(id=invoice_id, user=request.user)
@@ -1979,21 +2019,28 @@ def download_invoice(request, invoice_id):
             'error': 'Invoice not found'
         }, status=status.HTTP_404_NOT_FOUND)
     
-    # Build full file path from relative path stored in database
     if not invoice.pdf_file_path:
         return Response({
             'error': 'Invoice PDF not found'
         }, status=status.HTTP_404_NOT_FOUND)
-    
-    file_path = os.path.join(settings.MEDIA_ROOT, invoice.pdf_file_path)
-    if not os.path.exists(file_path):
-        return Response({
-            'error': 'Invoice PDF not found'
-        }, status=status.HTTP_404_NOT_FOUND)
-    
-    from django.http import FileResponse
+
+    storage_path = invoice.pdf_file_path
+    try:
+        invoice_stream = default_storage.open(storage_path, 'rb')
+    except Exception:
+        # Backward compatibility for legacy local absolute/relative paths.
+        import os
+        file_path = storage_path
+        if not os.path.isabs(file_path):
+            file_path = os.path.join(settings.MEDIA_ROOT, file_path)
+        if not os.path.exists(file_path):
+            return Response({
+                'error': 'Invoice PDF not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+        invoice_stream = open(file_path, 'rb')
+
     return FileResponse(
-        open(file_path, 'rb'),
+        invoice_stream,
         content_type='application/pdf',
         filename=f"{invoice.invoice_number}.pdf"
     )

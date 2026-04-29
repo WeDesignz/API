@@ -3379,137 +3379,66 @@ def download_pdf_file(request, download_id):
                 'error': f'PDF is not ready for download. Current status: {pdf_download.status}'
             }, status=status.HTTP_400_BAD_REQUEST)
         
-        if not pdf_download.pdf_file_path:
-            # If file path is not set but status is completed, try to regenerate it
-            # This handles cases where the task completed but file path wasn't saved
-            # Try to find the file - check both new and old locations
-            from django.http import FileResponse
-            import os
-            expected_filename = f'pdf_download_{download_id}.pdf'
-            
-            # Try new location first (user-specific)
-            user = pdf_download.get_user()
-            if user:
-                user_id = user.id
-                pdf_dir = os.path.join(settings.MEDIA_ROOT, str(user_id), 'pdfs')
-                expected_path = os.path.join(pdf_dir, expected_filename)
-                if os.path.exists(expected_path):
-                    pdf_download.pdf_file_path = f'{user_id}/pdfs/{expected_filename}'
-                    pdf_download.file_size = os.path.getsize(expected_path)
-                    pdf_download.save()
-                else:
-                    # Try old location as fallback
-                    pdf_dir = os.path.join(settings.MEDIA_ROOT, 'pdfs')
-                    expected_path = os.path.join(pdf_dir, expected_filename)
-                    if os.path.exists(expected_path):
-                        pdf_download.pdf_file_path = f'pdfs/{expected_filename}'
-                        pdf_download.file_size = os.path.getsize(expected_path)
-                        pdf_download.save()
-                    else:
-                        return Response({
-                            'error': 'PDF file not available. The file may not have been generated yet.'
-                        }, status=status.HTTP_404_NOT_FOUND)
-            else:
-                # No user found, try old location
-                pdf_dir = os.path.join(settings.MEDIA_ROOT, 'pdfs')
-                expected_path = os.path.join(pdf_dir, expected_filename)
-                if os.path.exists(expected_path):
-                    pdf_download.pdf_file_path = f'pdfs/{expected_filename}'
-                    pdf_download.file_size = os.path.getsize(expected_path)
-                    pdf_download.save()
-                else:
-                    return Response({
-                        'error': 'PDF file not available. The file may not have been generated yet.'
-                    }, status=status.HTTP_404_NOT_FOUND)
-        
-        # Implement file download logic
         from django.http import FileResponse
-        import os
-        
-        file_path = os.path.join(settings.MEDIA_ROOT, pdf_download.pdf_file_path)
-        
-        if os.path.exists(file_path):
+        from django.core.files.storage import default_storage
+
+        user = pdf_download.get_user()
+        candidate_paths = []
+        if pdf_download.pdf_file_path:
+            candidate_paths.append(pdf_download.pdf_file_path)
+        if user:
+            candidate_paths.append(f'{user.id}/pdfs/pdf_download_{download_id}.pdf')
+        candidate_paths.append(f'pdfs/pdf_download_{download_id}.pdf')
+
+        file_handle = None
+        resolved_path = None
+        for path in candidate_paths:
+            if not path:
+                continue
+            try:
+                file_handle = default_storage.open(path, 'rb')
+                resolved_path = path
+                break
+            except Exception:
+                continue
+
+        if file_handle is not None:
             try:
                 # Generate filename using customer name if available
                 import re
                 customer_name = pdf_download.customer_name or ''
                 if customer_name:
-                    # Sanitize customer name for filename (remove special characters, keep spaces)
                     sanitized_name = re.sub(r'[^a-zA-Z0-9\s-]', '', customer_name)
-                    sanitized_name = re.sub(r'\s+', ' ', sanitized_name.strip())  # Keep spaces, just trim
-                    sanitized_name = sanitized_name[:50]  # Limit length
-                    filename = f'{sanitized_name}.pdf'  # Remove _mock_pdf suffix
+                    sanitized_name = re.sub(r'\s+', ' ', sanitized_name.strip())
+                    sanitized_name = sanitized_name[:50]
+                    filename = f'{sanitized_name}.pdf'
                 else:
                     filename = f'designs_{download_id}.pdf'
-                
+
                 response = FileResponse(
-                    open(file_path, 'rb'),
+                    file_handle,
                     as_attachment=True,
                     filename=filename,
                     content_type='application/pdf'
                 )
-                # Explicitly set Content-Disposition header with proper encoding for filenames with spaces
-                # Use both filename and filename* (RFC 5987) for better browser compatibility
                 from urllib.parse import quote
                 encoded_filename = quote(filename)
                 response['Content-Disposition'] = f'attachment; filename="{filename}"; filename*=UTF-8\'\'{encoded_filename}'
-                # Also set a custom header that's easier to access (will be exposed via CORS)
                 response['X-Filename'] = filename
+
+                if resolved_path and pdf_download.pdf_file_path != resolved_path:
+                    pdf_download.pdf_file_path = resolved_path
+                    try:
+                        pdf_download.file_size = default_storage.size(resolved_path)
+                    except Exception:
+                        pass
+                    pdf_download.save(update_fields=['pdf_file_path', 'file_size', 'updated_at'])
+
                 return response
             except Exception as e:
                 return Response({
                     'error': f'Error reading PDF file: {str(e)}'
                 }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        else:
-            # Try alternative paths (check new location first, then old location)
-            user = pdf_download.get_user()
-            alt_path = None
-            if user:
-                # Try new user-specific location
-                alt_path = os.path.join(settings.MEDIA_ROOT, str(user.id), 'pdfs', f'pdf_download_{download_id}.pdf')
-                if not os.path.exists(alt_path):
-                    # Fallback to old location
-                    alt_path = os.path.join(settings.MEDIA_ROOT, 'pdfs', f'pdf_download_{download_id}.pdf')
-            else:
-                # No user, try old location
-                alt_path = os.path.join(settings.MEDIA_ROOT, 'pdfs', f'pdf_download_{download_id}.pdf')
-            
-            if alt_path and os.path.exists(alt_path):
-                try:
-                    # Generate filename using customer name if available
-                    import re
-                    customer_name = pdf_download.customer_name or ''
-                    if customer_name:
-                        # Sanitize customer name for filename (remove special characters, keep spaces)
-                        sanitized_name = re.sub(r'[^a-zA-Z0-9\s-]', '', customer_name)
-                        sanitized_name = re.sub(r'\s+', ' ', sanitized_name.strip())  # Keep spaces, just trim
-                        sanitized_name = sanitized_name[:50]  # Limit length
-                        filename = f'{sanitized_name}.pdf'  # Remove _mock_pdf suffix
-                    else:
-                        filename = f'designs_{download_id}.pdf'
-                    
-                    response = FileResponse(
-                        open(alt_path, 'rb'),
-                        as_attachment=True,
-                        filename=filename,
-                        content_type='application/pdf'
-                    )
-                    # Explicitly set Content-Disposition header with proper encoding for filenames with spaces
-                    from urllib.parse import quote
-                    encoded_filename = quote(filename)
-                    response['Content-Disposition'] = f'attachment; filename="{filename}"; filename*=UTF-8\'\'{encoded_filename}'
-                    # Also set a custom header that's easier to access (will be exposed via CORS)
-                    response['X-Filename'] = filename
-                    # Update database with correct path based on location found
-                    user = pdf_download.get_user()
-                    if user and alt_path.startswith(os.path.join(settings.MEDIA_ROOT, str(user.id))):
-                        pdf_download.pdf_file_path = f'{user.id}/pdfs/pdf_download_{download_id}.pdf'
-                    else:
-                        pdf_download.pdf_file_path = f'pdfs/pdf_download_{download_id}.pdf'
-                    pdf_download.save()
-                    return response
-                except Exception as e:
-                    pass
 
             # If file doesn't exist but status is completed, try to regenerate it
             # This handles cases where the task completed but file wasn't created
