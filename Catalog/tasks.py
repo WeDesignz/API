@@ -78,13 +78,25 @@ def generate_client_pdf_for_products(
                 base_name_with_ext = os.path.basename(file_name_lower)
                 base_no_ext, ext = os.path.splitext(base_name_with_ext)
 
-                # Handle AVIF wrappers like WDG00000001_JPG.avif
+                # Handle AVIF wrappers like:
+                # - WDG00000001_JPG.avif
+                # - WDG00000001_PNG.avif
+                # - WDG00000001_MOCKUP.avif
                 logical_ext = ext
                 core_base = base_no_ext
                 if ext == ".avif":
                     if base_no_ext.endswith("_jpg"):
                         logical_ext = ".jpg"
                         core_base = base_no_ext[:-4]
+                    elif base_no_ext.endswith("_jpeg"):
+                        logical_ext = ".jpeg"
+                        core_base = base_no_ext[:-5]
+                    elif base_no_ext.endswith("_png"):
+                        logical_ext = ".png"
+                        core_base = base_no_ext[:-4]
+                    elif base_no_ext.endswith("_mockup"):
+                        # Mockup AVIF is generated from a preview image; treat as JPG-compatible for PDF.
+                        logical_ext = ".jpg"
 
                 if logical_ext not in CLIENT_PDF_JPG_EXTENSIONS:
                     continue
@@ -119,6 +131,12 @@ def generate_client_pdf_for_products(
                     suffix = ext
                     if ext == ".avif":
                         if base_no_ext.endswith("_jpg"):
+                            suffix = ".jpg"
+                        elif base_no_ext.endswith("_jpeg"):
+                            suffix = ".jpeg"
+                        elif base_no_ext.endswith("_png"):
+                            suffix = ".png"
+                        elif base_no_ext.endswith("_mockup"):
                             suffix = ".jpg"
                     if suffix not in CLIENT_PDF_JPG_EXTENSIONS:
                         suffix = ".jpg"
@@ -521,6 +539,29 @@ def generate_pdf_task(self, pdf_download_id):
         SUPPORTED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
         UNSUPPORTED_EXTENSIONS = {".cdr", ".eps", ".ai", ".svg", ".pdf"}
 
+        def _resolve_logical_image_extension(file_name: str):
+            """
+            Resolve a logical image extension from a media file name.
+            Supports AVIF wrappers generated from real images
+            (e.g. `..._JPG.avif`, `..._PNG.avif`).
+            """
+            file_name_lower = (file_name or "").lower()
+            base_name, ext = os.path.splitext(file_name_lower)
+            logical_ext = ext
+            logical_base = base_name
+
+            if ext == ".avif":
+                for candidate_ext in (".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"):
+                    suffix = f"_{candidate_ext[1:]}"
+                    if base_name.endswith(suffix):
+                        logical_ext = candidate_ext
+                        logical_base = base_name[: -len(suffix)]
+                        break
+                if logical_ext == ".avif" and base_name.endswith("_mockup"):
+                    logical_ext = ".jpg"
+
+            return logical_ext, logical_base
+
         # Get user from PDFDownload
         user = pdf_download.get_user()
         if not user:
@@ -554,10 +595,10 @@ def generate_pdf_task(self, pdf_download_id):
                     if not file_name:
                         continue
                     file_name_lower = file_name.lower()
-                    file_ext = os.path.splitext(file_name_lower)[1]
+                    file_ext, logical_base = _resolve_logical_image_extension(file_name_lower)
                     if file_ext in UNSUPPORTED_EXTENSIONS:
                         continue
-                    base_name = os.path.splitext(os.path.basename(file_name_lower))[0]
+                    base_name = os.path.basename(logical_base)
                     is_mockup_by_name = base_name == "mockup" or "mockup" in base_name
                     is_mockup_by_meta = False
                     try:
@@ -590,7 +631,7 @@ def generate_pdf_task(self, pdf_download_id):
                         if not file_name:
                             continue
                         file_name_lower = file_name.lower()
-                        file_ext = os.path.splitext(file_name_lower)[1]
+                        file_ext, _ = _resolve_logical_image_extension(file_name_lower)
                         if file_ext in SUPPORTED_IMAGE_EXTENSIONS:
                             mockup_media = media
                             break
@@ -602,31 +643,37 @@ def generate_pdf_task(self, pdf_download_id):
 
             image_path = None
             try:
-                if hasattr(mockup_media.file, "path"):
-                    image_path = mockup_media.file.path
-                else:
-                    image_path = os.path.join(settings.MEDIA_ROOT, mockup_media.file.name)
-                if not os.path.exists(image_path) and mockup_media.file.name:
-                    try:
-                        if default_storage.exists(mockup_media.file.name):
-                            with default_storage.open(mockup_media.file.name, "rb") as src:
-                                suffix = os.path.splitext(mockup_media.file.name)[1].lower()
-                                if suffix not in SUPPORTED_IMAGE_EXTENSIONS:
-                                    suffix = ".jpg"
-                                fd, image_path = tempfile.mkstemp(suffix=suffix, prefix="pdf_img_")
-                                os.close(fd)
-                                with open(image_path, "wb") as dst:
-                                    dst.write(src.read())
-                                temp_files_to_cleanup.append(image_path)
-                        else:
-                            image_path = None
-                    except Exception:
-                        image_path = None
-                if not image_path or not os.path.exists(image_path):
+                # Determine logical image type from original media name
+                media_name = getattr(mockup_media.file, "name", "") or ""
+                logical_ext, _ = _resolve_logical_image_extension(media_name)
+                if logical_ext not in SUPPORTED_IMAGE_EXTENSIONS:
                     skipped_products.append(product.id)
                     continue
-                file_ext = os.path.splitext(image_path.lower())[1]
-                if file_ext not in SUPPORTED_IMAGE_EXTENSIONS:
+
+                # Try local path if storage exposes one (works for FileSystemStorage)
+                local_candidate = None
+                try:
+                    local_candidate = mockup_media.file.path
+                except Exception:
+                    local_candidate = None
+
+                if local_candidate and os.path.exists(local_candidate):
+                    image_path = local_candidate
+                elif media_name:
+                    # Storage-agnostic path: stream from storage to temp file
+                    try:
+                        media_storage = getattr(mockup_media.file, "storage", None) or default_storage
+                        with media_storage.open(media_name, "rb") as src:
+                            suffix = logical_ext if logical_ext in SUPPORTED_IMAGE_EXTENSIONS else ".jpg"
+                            fd, image_path = tempfile.mkstemp(suffix=suffix, prefix="pdf_img_")
+                            os.close(fd)
+                            with open(image_path, "wb") as dst:
+                                dst.write(src.read())
+                            temp_files_to_cleanup.append(image_path)
+                    except Exception:
+                        image_path = None
+
+                if not image_path or not os.path.exists(image_path):
                     skipped_products.append(product.id)
                     continue
             except Exception:

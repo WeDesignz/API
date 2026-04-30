@@ -3440,29 +3440,29 @@ def download_pdf_file(request, download_id):
                     'error': f'Error reading PDF file: {str(e)}'
                 }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-            # If file doesn't exist but status is completed, try to regenerate it
-            # This handles cases where the task completed but file wasn't created
-            if pdf_download.status == 'completed':
-                try:
-                    # Trigger task asynchronously to regenerate the file
-                    generate_pdf_task.delay(download_id)
-                    return Response({
-                        'error': 'PDF file is being regenerated. Please try again in a few moments.',
-                        'status': 'regenerating',
-                        'download_id': download_id
-                    }, status=status.HTTP_202_ACCEPTED)
-                except Exception as e:
-                    return Response({
-                        'error': 'PDF file not found and regeneration failed. Please contact support.',
-                        'details': str(e)
-                    }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-            
-            return Response({
-                'error': 'PDF file not found on server. The file may not have been generated yet.',
-                'file_path': file_path,
-                'status': pdf_download.status,
-                'suggestion': 'Please try again in a few moments or contact support if the issue persists.'
-            }, status=status.HTTP_404_NOT_FOUND)
+        # If file doesn't exist but status is completed, try to regenerate it
+        # This handles cases where the task completed but file wasn't created
+        if pdf_download.status == 'completed':
+            try:
+                # Trigger task asynchronously to regenerate the file
+                generate_pdf_task.delay(download_id)
+                return Response({
+                    'error': 'PDF file is being regenerated. Please try again in a few moments.',
+                    'status': 'regenerating',
+                    'download_id': download_id
+                }, status=status.HTTP_202_ACCEPTED)
+            except Exception as e:
+                return Response({
+                    'error': 'PDF file not found and regeneration failed. Please contact support.',
+                    'details': str(e)
+                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+        return Response({
+            'error': 'PDF file not found on server. The file may not have been generated yet.',
+            'file_path': resolved_path,
+            'status': pdf_download.status,
+            'suggestion': 'Please try again in a few moments or contact support if the issue persists.'
+        }, status=status.HTTP_404_NOT_FOUND)
         
     except PDFDownload.DoesNotExist:
         return Response({
