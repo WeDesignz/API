@@ -297,7 +297,7 @@ def hero_section_designs(request):
             })
         
         # Cache key
-        cache_key = f'hero_section_designs_{config.updated_at.timestamp()}'
+        cache_key = f'hero_section_designs_v2_{config.updated_at.timestamp()}'
         cached_data = cache.get(cache_key)
         if cached_data:
             return Response(cached_data)
@@ -328,120 +328,11 @@ def hero_section_designs(request):
         
         designs = []
         
+        from common.display_media import get_product_display_image_url
+
         for product in ordered_products:
-            # Get media files - same logic as dome gallery (prefer mockup, fallback to any image)
-            image_url = None
-            mockup_media = None
-            fallback_media = None
-            
-            try:
-                media = product.get_media()
-            except Exception as e:
-                media = None
-            
-            if media:
-                try:
-                    media_list = list(media)
-                except Exception as e:
-                    media_list = []
-                
-                
-                # Prefer design images (JPG/PNG, non-mockup), then fallback to mockup
-                for m in media_list:
-                    if not m.file:
-                        continue
-                    
-                    # Only process image media files (skip vectors, documents, etc.)
-                    media_type = getattr(m, 'media_type', 'image')
-                    if media_type and media_type.lower() != 'image':
-                        continue
-                    
-                    # Check if file extension is an image format
-                    file_name = m.file.name if hasattr(m.file, 'name') else ''
-                    is_image_file = False
-                    if file_name:
-                        file_name_lower = file_name.lower()
-                        is_image_file = any(ext in file_name_lower for ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp'])
-                    
-                    # Skip if not an image file
-                    if not is_image_file:
-                        continue
-                    
-                    # Check filename for mockup
-                    is_mockup_by_name = False
-                    if file_name:
-                        file_name_lower = file_name.lower()
-                        base_name = os.path.splitext(os.path.basename(file_name_lower))[0]
-                        is_mockup_by_name = base_name == 'mockup'
-                    
-                    # Check Relation metadata for mockup
-                    is_mockup_by_meta = False
-                    try:
-                        from MediaFiles.models import Relation
-                        relation = Relation.objects.filter(
-                            relation_type='Product:Media',
-                            id_1=product.pk,
-                            id_2=m.pk
-                        ).first()
-                        
-                        if relation and relation.meta:
-                            meta = relation.meta
-                            if isinstance(meta, dict):
-                                is_mockup_by_meta = meta.get('is_mockup', False) or meta.get('type') == 'mockup'
-                            elif isinstance(meta, str):
-                                meta_lower = str(meta).lower()
-                                is_mockup_by_meta = 'mockup' in meta_lower or '"is_mockup":true' in meta_lower
-                    except Exception:
-                        pass
-                    
-                    is_mockup = is_mockup_by_name or is_mockup_by_meta
-                    
-                    # Check if it's JPG or PNG (design image)
-                    is_jpg_png = False
-                    if file_name:
-                        file_name_lower = file_name.lower()
-                        is_jpg_png = file_name_lower.endswith(('.jpg', '.jpeg', '.png'))
-                    
-                    # Prefer design images (JPG/PNG, non-mockup)
-                    if is_jpg_png and not is_mockup:
-                        try:
-                            test_url = m.file.url
-                            selected_media = m
-                            break
-                        except:
-                            pass
-                    # Store mockup as fallback
-                    elif is_mockup and not mockup_media:
-                        try:
-                            test_url = m.file.url
-                            mockup_media = m
-                        except:
-                            pass
-                    # Store first valid image as last fallback
-                    elif not fallback_media:
-                        try:
-                            test_url = m.file.url
-                            fallback_media = m
-                        except:
-                            pass
-                
-                # Use design image if found, otherwise mockup, otherwise fallback
-                if 'selected_media' not in locals():
-                    selected_media = mockup_media or fallback_media
-                
-                if selected_media and selected_media.file:
-                    try:
-                        url = selected_media.file.url
-                        if request and url.startswith('/'):
-                            url = request.build_absolute_uri(url)
-                        image_url = url
-                    except Exception as e:
-                        pass
-                else:
-                    pass
-            else:
-                pass
-            
+            image_url = get_product_display_image_url(product, request)
+
             # Get creator info
             creator = product.created_by
             creator_name = f"@{creator.username}" if creator and creator.username else "@wedesignz"
@@ -499,7 +390,7 @@ def dome_gallery_images(request):
         if not product_ids:
             return Response({'images': [], 'count': 0, 'message': 'No valid product IDs found'})
         
-        cache_key = f'dome_gallery_images_{config.updated_at.timestamp()}'
+        cache_key = f'dome_gallery_images_v2_{config.updated_at.timestamp()}'
         cached_data = cache.get(cache_key)
         if cached_data:
             return Response(cached_data)
@@ -511,110 +402,11 @@ def dome_gallery_images(request):
             visibility_status='show'
         ).only('id', 'title')
         
+        from common.display_media import get_product_display_image_url
+
         images = []
-        import os
-        from MediaFiles.models import Relation
-        
         for product in products:
-            media = product.get_media()
-            image_url = None
-            mockup_media = None
-            fallback_media = None
-            
-            if media:
-                media_list = list(media)
-                
-                # Prefer design images (JPG/PNG, non-mockup), then fallback to mockup
-                for m in media_list:
-                    if not m.file:
-                        continue
-                    
-                    # Only process image media files (skip vectors, documents, etc.)
-                    media_type = getattr(m, 'media_type', 'image')
-                    if media_type and media_type.lower() != 'image':
-                        continue
-                    
-                    # Check if file extension is an image format
-                    file_name = m.file.name if hasattr(m.file, 'name') else ''
-                    is_image_file = False
-                    if file_name:
-                        file_name_lower = file_name.lower()
-                        is_image_file = any(ext in file_name_lower for ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp'])
-                    
-                    # Skip if not an image file
-                    if not is_image_file:
-                        continue
-                    
-                    # Check filename for mockup
-                    is_mockup_by_name = False
-                    if file_name:
-                        file_name_lower = file_name.lower()
-                        base_name = os.path.splitext(os.path.basename(file_name_lower))[0]
-                        is_mockup_by_name = base_name == 'mockup'
-                    
-                    # Check Relation metadata for mockup
-                    is_mockup_by_meta = False
-                    try:
-                        relation = Relation.objects.filter(
-                            relation_type='Product:Media',
-                            id_1=product.pk,
-                            id_2=m.pk
-                        ).first()
-                        
-                        if relation and relation.meta:
-                            meta = relation.meta
-                            if isinstance(meta, dict):
-                                is_mockup_by_meta = meta.get('is_mockup', False) or meta.get('type') == 'mockup'
-                            elif isinstance(meta, str):
-                                meta_lower = str(meta).lower()
-                                is_mockup_by_meta = 'mockup' in meta_lower or '"is_mockup":true' in meta_lower
-                    except Exception:
-                        pass
-                    
-                    is_mockup = is_mockup_by_name or is_mockup_by_meta
-                    
-                    # Check if it's JPG or PNG (design image)
-                    is_jpg_png = False
-                    if file_name:
-                        file_name_lower = file_name.lower()
-                        is_jpg_png = file_name_lower.endswith(('.jpg', '.jpeg', '.png'))
-                    
-                    # Prefer design images (JPG/PNG, non-mockup)
-                    if is_jpg_png and not is_mockup:
-                        try:
-                            test_url = m.file.url
-                            selected_media = m
-                            break
-                        except:
-                            pass
-                    # Store mockup as fallback
-                    elif is_mockup and not mockup_media:
-                        try:
-                            test_url = m.file.url
-                            mockup_media = m
-                        except:
-                            pass
-                    # Store first valid image as last fallback
-                    elif not fallback_media:
-                        try:
-                            test_url = m.file.url
-                            fallback_media = m
-                        except:
-                            pass
-                
-                # Use design image if found, otherwise mockup, otherwise fallback
-                if 'selected_media' not in locals():
-                    selected_media = mockup_media or fallback_media
-                
-                if selected_media and selected_media.file:
-                    try:
-                        url = selected_media.file.url
-                        if request and url.startswith('/'):
-                            url = request.build_absolute_uri(url)
-                        image_url = url
-                    except Exception:
-                        continue
-            
+            image_url = get_product_display_image_url(product, request)
             if image_url:
                 images.append({
                     'src': image_url,
@@ -677,7 +469,7 @@ def featured_designs(request):
             })
         
         # Cache key
-        cache_key = f'featured_designs_{config.updated_at.timestamp()}'
+        cache_key = f'featured_designs_v2_{config.updated_at.timestamp()}'
         cached_data = cache.get(cache_key)
         if cached_data:
             return Response(cached_data)
@@ -699,115 +491,11 @@ def featured_designs(request):
             missing_ids = set(product_ids) - {p.id for p in ordered_products}
         
         designs = []
-        
+        from common.display_media import get_product_display_image_url
+
         for product in ordered_products:
-            # Get media files - same logic as hero section and dome gallery (prefer mockup, fallback to any image)
-            image_url = None
-            mockup_media = None
-            fallback_media = None
-            
-            try:
-                media = product.get_media()
-            except Exception as e:
-                media = None
-            
-            if media:
-                try:
-                    media_list = list(media)
-                except Exception as e:
-                    media_list = []
-                
-                # Prefer design images (JPG/PNG, non-mockup), then fallback to mockup
-                for m in media_list:
-                    if not m.file:
-                        continue
-                    
-                    # Only process image media files (skip vectors, documents, etc.)
-                    media_type = getattr(m, 'media_type', 'image')
-                    if media_type and media_type.lower() != 'image':
-                        continue
-                    
-                    # Check if file extension is an image format
-                    file_name = m.file.name if hasattr(m.file, 'name') else ''
-                    is_image_file = False
-                    if file_name:
-                        file_name_lower = file_name.lower()
-                        is_image_file = any(ext in file_name_lower for ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp'])
-                    
-                    # Skip if not an image file
-                    if not is_image_file:
-                        continue
-                    
-                    # Check filename for mockup
-                    is_mockup_by_name = False
-                    if file_name:
-                        file_name_lower = file_name.lower()
-                        base_name = os.path.splitext(os.path.basename(file_name_lower))[0]
-                        is_mockup_by_name = base_name == 'mockup'
-                    
-                    # Check Relation metadata for mockup
-                    is_mockup_by_meta = False
-                    try:
-                        relation = Relation.objects.filter(
-                            relation_type='Product:Media',
-                            id_1=product.pk,
-                            id_2=m.pk
-                        ).first()
-                        
-                        if relation and relation.meta:
-                            meta = relation.meta
-                            if isinstance(meta, dict):
-                                is_mockup_by_meta = meta.get('is_mockup', False) or meta.get('type') == 'mockup'
-                            elif isinstance(meta, str):
-                                meta_lower = str(meta).lower()
-                                is_mockup_by_meta = 'mockup' in meta_lower or '"is_mockup":true' in meta_lower
-                    except Exception:
-                        pass
-                    
-                    is_mockup = is_mockup_by_name or is_mockup_by_meta
-                    
-                    # Check if it's JPG or PNG (design image)
-                    is_jpg_png = False
-                    if file_name:
-                        file_name_lower = file_name.lower()
-                        is_jpg_png = file_name_lower.endswith(('.jpg', '.jpeg', '.png'))
-                    
-                    # Prefer design images (JPG/PNG, non-mockup)
-                    if is_jpg_png and not is_mockup:
-                        try:
-                            test_url = m.file.url
-                            selected_media = m
-                            break
-                        except:
-                            pass
-                    # Store mockup as fallback
-                    elif is_mockup and not mockup_media:
-                        try:
-                            test_url = m.file.url
-                            mockup_media = m
-                        except:
-                            pass
-                    # Store first valid image as last fallback
-                    elif not fallback_media:
-                        try:
-                            test_url = m.file.url
-                            fallback_media = m
-                        except:
-                            pass
-                
-                # Use design image if found, otherwise mockup, otherwise fallback
-                if 'selected_media' not in locals():
-                    selected_media = mockup_media or fallback_media
-                
-                if selected_media and selected_media.file:
-                    try:
-                        url = selected_media.file.url
-                        if request and url.startswith('/'):
-                            url = request.build_absolute_uri(url)
-                        image_url = url
-                    except Exception:
-                        continue
-            
+            image_url = get_product_display_image_url(product, request)
+
             # Get creator info
             creator = product.created_by
             creator_name = f"@{creator.username}" if creator and creator.username else "@wedesignz"
