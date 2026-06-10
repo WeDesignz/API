@@ -494,8 +494,13 @@ def process_design_upload_task(self, task_id, zip_file_path):
                                                     media_file_path, product_number, is_mockup=False,
                                                     product=product, created_by=product_owner
                                                 )
-                                            except Exception:
-                                                pass
+                                            except Exception as avif_error:
+                                                logger.warning(
+                                                    "AVIF conversion failed for product_id=%s file=%s: %s",
+                                                    product.id,
+                                                    media.file.name,
+                                                    avif_error,
+                                                )
                                 except Exception:
                                     pass
 
@@ -532,8 +537,13 @@ def process_design_upload_task(self, task_id, zip_file_path):
                                             media.file.name, product_number, is_mockup=True,
                                             product=product, created_by=product_owner
                                         )
-                                    except Exception:
-                                        pass
+                                    except Exception as avif_error:
+                                        logger.warning(
+                                            "AVIF mockup conversion failed for product_id=%s file=%s: %s",
+                                            product.id,
+                                            media.file.name,
+                                            avif_error,
+                                        )
                             except Exception:
                                 pass
                             finally:

@@ -9222,21 +9222,31 @@ def mock_pdf_download_file(request, download_id):
     if pdf_download.status != 'completed':
         return Response({'error': f'PDF is not ready. Status: {pdf_download.status}'}, status=status.HTTP_400_BAD_REQUEST)
 
-    file_path = None
+    from django.core.files.storage import default_storage
+
+    file_handle = None
+    candidate_paths = []
     if pdf_download.pdf_file_path:
-        file_path = os.path.join(settings.MEDIA_ROOT, pdf_download.pdf_file_path)
-    if not file_path or not os.path.exists(file_path):
-        user = pdf_download.get_user()
-        if user:
-            alt = os.path.join(settings.MEDIA_ROOT, str(user.id), 'pdfs', f'pdf_download_{download_id}.pdf')
-            if os.path.exists(alt):
-                file_path = alt
-        if not file_path or not os.path.exists(file_path):
-            alt = os.path.join(settings.MEDIA_ROOT, 'pdfs', f'pdf_download_{download_id}.pdf')
-            if os.path.exists(alt):
-                file_path = alt
-        if not file_path or not os.path.exists(file_path):
-            return Response({'error': 'PDF file not available'}, status=status.HTTP_404_NOT_FOUND)
+        candidate_paths.append(pdf_download.pdf_file_path)
+    user = pdf_download.get_user()
+    if user:
+        candidate_paths.append(f'{user.id}/pdfs/pdf_download_{download_id}.pdf')
+    candidate_paths.append(f'pdfs/pdf_download_{download_id}.pdf')
+
+    for path in candidate_paths:
+        if not path:
+            continue
+        try:
+            file_handle = default_storage.open(path, 'rb')
+            if not pdf_download.pdf_file_path:
+                pdf_download.pdf_file_path = path
+                pdf_download.save(update_fields=['pdf_file_path', 'updated_at'])
+            break
+        except Exception:
+            continue
+
+    if file_handle is None:
+        return Response({'error': 'PDF file not available'}, status=status.HTTP_404_NOT_FOUND)
 
     customer_name = (pdf_download.customer_name or '').strip()
     if customer_name:
@@ -9248,7 +9258,7 @@ def mock_pdf_download_file(request, download_id):
 
     try:
         response = FileResponse(
-            open(file_path, 'rb'),
+            file_handle,
             as_attachment=True,
             filename=filename,
             content_type='application/pdf'
@@ -9724,19 +9734,27 @@ def pdf_client_job_download(request, job_id):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    media_root = getattr(settings, "MEDIA_ROOT", None)
-    if not media_root:
-        return Response({"error": "MEDIA_ROOT is not configured"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    from django.core.files.storage import default_storage
 
-    file_path = os.path.join(media_root, job.zip_file_path)
-    if not os.path.exists(file_path):
-        return Response({"error": "ZIP file not found"}, status=status.HTTP_404_NOT_FOUND)
+    zip_handle = None
+    try:
+        zip_handle = default_storage.open(job.zip_file_path, "rb")
+    except Exception:
+        # Backward compatibility for older local absolute/relative paths.
+        import os
+        media_root = getattr(settings, "MEDIA_ROOT", None)
+        file_path = job.zip_file_path
+        if media_root and not os.path.isabs(file_path):
+            file_path = os.path.join(media_root, file_path)
+        if not os.path.exists(file_path):
+            return Response({"error": "ZIP file not found"}, status=status.HTTP_404_NOT_FOUND)
+        zip_handle = open(file_path, "rb")
 
     filename = f"{job.client.name.replace(' ', '_')}_pdfs_job_{job.id}.zip"
 
     try:
         response = FileResponse(
-            open(file_path, "rb"),
+            zip_handle,
             as_attachment=True,
             filename=filename,
             content_type="application/zip",

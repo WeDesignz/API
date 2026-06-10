@@ -20,10 +20,10 @@ def get_media_upload_path(instance, filename):
     Callable upload_to function for Media model.
     
     File organization:
-    - Design uploads (Product:Media): {user_id}/designs/{public|private}/{product_id}/{filename}
+    - Design uploads (Product:Media): {user_id}/designs/{product_id}/{public|private}/{filename}
     - Profile photos: {user_id}/profile/{public|private}/{filename}
     - Business documents (PAN, MSME): {user_id}/documents/{public|private}/{filename}
-    - Custom order deliverables: {user_id}/orders/{public|private}/{order_id}/deliverables/{filename}
+    - Custom order deliverables: {user_id}/orders/{order_id}/deliverables/{public|private}/{filename}
     - Other uploads: {user_id}/media/{public|private}/{filename} (fallback)
     
     Context is passed via thread-local storage when creating Media objects.
@@ -89,9 +89,9 @@ def get_media_upload_path(instance, filename):
     
     user_id = instance.created_by.id
     
-    # Custom order deliverables: {user_id}/orders/{visibility}/{order_id}/deliverables/
+    # Custom order deliverables: {user_id}/orders/{order_id}/deliverables/{visibility}/
     if order_id and file_type == 'deliverable':
-        result = f'{user_id}/orders/{visibility}/{order_id}/deliverables/{filename}'
+        result = f'{user_id}/orders/{order_id}/deliverables/{visibility}/{filename}'
         # #region agent log
         try:
             with open(log_path, 'a') as f:
@@ -100,9 +100,9 @@ def get_media_upload_path(instance, filename):
         # #endregion
         return result
     
-    # Design uploads: {user_id}/designs/{product_id}/
+    # Design uploads: {user_id}/designs/{product_id}/{visibility}/
     if product_id:
-        result = f'{user_id}/designs/{visibility}/{product_id}/{filename}'
+        result = f'{user_id}/designs/{product_id}/{visibility}/{filename}'
         # #region agent log
         try:
             with open(log_path, 'a') as f:
@@ -127,7 +127,7 @@ def get_media_upload_path(instance, filename):
                 product_number__iexact=base_name
             ).order_by('-id').first()
             if product:
-                result = f'{user_id}/designs/{visibility}/{product.id}/{filename}'
+                result = f'{user_id}/designs/{product.id}/{visibility}/{filename}'
                 # #region agent log
                 try:
                     with open(log_path, 'a') as f:

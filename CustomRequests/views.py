@@ -681,29 +681,47 @@ def download_custom_order_reference_files_zip(request, request_id):
     zip_buffer = io.BytesIO()
     
     try:
+        added_files_count = 0
+        used_names = set()
+
+        def _safe_zip_name(media_obj):
+            import os
+            original_name = os.path.basename(str(media_obj.file.name or f"media_{media_obj.id}"))
+            if original_name not in used_names:
+                used_names.add(original_name)
+                return original_name
+            base, ext = os.path.splitext(original_name)
+            candidate = f"{base}_{media_obj.id}{ext}"
+            used_names.add(candidate)
+            return candidate
+
         with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
             for media in reference_files:
-                if media.file:
-                    try:
-                        # Get file path
-                        file_path = media.file.name
-                        
-                        # Read file from storage
-                        if default_storage.exists(file_path):
-                            with default_storage.open(file_path, 'rb') as storage_file:
-                                file_content = storage_file.read()
-                                
-                                # Get original filename or use a default
-                                file_name = media.file.name.split('/')[-1] if '/' in media.file.name else media.file.name
-                                
-                                # Add to zip with sanitized filename
-                                zip_file.writestr(file_name, file_content)
-                    except Exception as e:
-                        # Log error but continue with other files
-                        import logging
-                        logger = logging.getLogger(__name__)
-
+                if not media.file:
+                    continue
+                try:
+                    media.file.open('rb')
+                    file_content = media.file.read()
+                    media.file.close()
+                except Exception:
+                    file_path = str(media.file.name or '')
+                    if not file_path:
                         continue
+                    try:
+                        with default_storage.open(file_path, 'rb') as storage_file:
+                            file_content = storage_file.read()
+                    except Exception:
+                        continue
+
+                if not file_content:
+                    continue
+                zip_file.writestr(_safe_zip_name(media), file_content)
+                added_files_count += 1
+
+        if added_files_count == 0:
+            return Response({
+                'error': 'No downloadable reference files found for this order'
+            }, status=status.HTTP_404_NOT_FOUND)
         
         # Prepare response
         zip_buffer.seek(0)
@@ -712,7 +730,7 @@ def download_custom_order_reference_files_zip(request, request_id):
         safe_title = custom_request.title.replace(" ", "_").replace("/", "_").replace("\\", "_")
         safe_title = ''.join(c for c in safe_title if c.isalnum() or c in ('_', '-'))[:50]
         response['Content-Disposition'] = f'attachment; filename="order_{request_id}_reference_files.zip"'
-        response['Content-Length'] = zip_buffer.tell()
+        response['Content-Length'] = len(response.content)
         
         return response
         
@@ -795,29 +813,47 @@ def download_custom_order_deliverables_zip(request, request_id):
     zip_buffer = io.BytesIO()
     
     try:
+        added_files_count = 0
+        used_names = set()
+
+        def _safe_zip_name(media_obj):
+            import os
+            original_name = os.path.basename(str(media_obj.file.name or f"media_{media_obj.id}"))
+            if original_name not in used_names:
+                used_names.add(original_name)
+                return original_name
+            base, ext = os.path.splitext(original_name)
+            candidate = f"{base}_{media_obj.id}{ext}"
+            used_names.add(candidate)
+            return candidate
+
         with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
             for media in deliverables:
-                if media.file:
-                    try:
-                        # Get file path
-                        file_path = media.file.name
-                        
-                        # Read file from storage
-                        if default_storage.exists(file_path):
-                            with default_storage.open(file_path, 'rb') as storage_file:
-                                file_content = storage_file.read()
-                                
-                                # Get original filename or use a default
-                                file_name = media.file.name.split('/')[-1] if '/' in media.file.name else media.file.name
-                                
-                                # Add to zip with sanitized filename
-                                zip_file.writestr(file_name, file_content)
-                    except Exception as e:
-                        # Log error but continue with other files
-                        import logging
-                        logger = logging.getLogger(__name__)
-
+                if not media.file:
+                    continue
+                try:
+                    media.file.open('rb')
+                    file_content = media.file.read()
+                    media.file.close()
+                except Exception:
+                    file_path = str(media.file.name or '')
+                    if not file_path:
                         continue
+                    try:
+                        with default_storage.open(file_path, 'rb') as storage_file:
+                            file_content = storage_file.read()
+                    except Exception:
+                        continue
+
+                if not file_content:
+                    continue
+                zip_file.writestr(_safe_zip_name(media), file_content)
+                added_files_count += 1
+
+        if added_files_count == 0:
+            return Response({
+                'error': 'No downloadable deliverable files found for this order'
+            }, status=status.HTTP_404_NOT_FOUND)
         
         # Prepare response
         zip_buffer.seek(0)
@@ -826,7 +862,7 @@ def download_custom_order_deliverables_zip(request, request_id):
         safe_title = custom_request.title.replace(" ", "_").replace("/", "_").replace("\\", "_")
         safe_title = ''.join(c for c in safe_title if c.isalnum() or c in ('_', '-'))[:50]
         response['Content-Disposition'] = f'attachment; filename="{safe_title}_deliverables_{request_id}.zip"'
-        response['Content-Length'] = zip_buffer.tell()
+        response['Content-Length'] = len(response.content)
         
         return response
         
