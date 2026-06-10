@@ -3,22 +3,26 @@ Remove public/private visibility segments from design media paths.
 
 Fixes two legacy layouts:
   - Swapped:   {user_id}/designs/{visibility}/{product_id}/{filename}
+               e.g. 4/designs/private/3066/WDG00002921.jpg
   - Nested:    {user_id}/designs/{product_id}/{visibility}/{filename}
+               e.g. 4/designs/3066/private/WDG00002921.jpg
 
 Target layout:
   - Flat:      {user_id}/designs/{product_id}/{filename}
+               e.g. 4/designs/3066/WDG00002921.jpg
 
 Updates Media.file paths in the database and moves objects in storage.
 
 Usage:
-    python manage.py flatten_design_media_paths --dry-run
+    python manage.py flatten_design_media_paths --dry-run --verbose
     python manage.py flatten_design_media_paths
     python manage.py flatten_design_media_paths --avif-only
-    python manage.py flatten_design_media_paths --product-id 2864 --verbose
+    python manage.py flatten_design_media_paths --product-id 3066 --verbose
 """
 
 from django.core.files.storage import default_storage
 from django.core.management.base import BaseCommand
+from django.db.models import Q
 
 from MediaFiles.models import Media
 
@@ -54,6 +58,19 @@ def flatten_design_path(path: str) -> str | None:
     return None
 
 
+def path_layout(path: str) -> str | None:
+    """Return 'swapped', 'nested', or None for design paths that need flattening."""
+    normalized = path.strip("/").replace("\\", "/")
+    parts = normalized.split("/")
+    if len(parts) < 5 or parts[1] != "designs" or not parts[0].isdigit():
+        return None
+    if parts[2] in {"public", "private"} and parts[3].isdigit():
+        return "swapped"
+    if parts[2].isdigit() and parts[3] in {"public", "private"}:
+        return "nested"
+    return None
+
+
 def extract_product_id_from_design_path(path: str) -> int | None:
     flattened = flatten_design_path(path) or path.strip("/").replace("\\", "/")
     parts = flattened.split("/")
@@ -72,9 +89,9 @@ class Command(BaseCommand):
             help="Show what would change without moving files or updating the database",
         )
         parser.add_argument(
-            "--all-formats",
+            "--avif-only",
             action="store_true",
-            help="Flatten all design file formats (default: .avif only)",
+            help="Only flatten .avif files (default: all design file formats)",
         )
         parser.add_argument(
             "--product-id",
@@ -94,7 +111,7 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         dry_run = options["dry_run"]
-        avif_only = not options["all_formats"]
+        avif_only = options["avif_only"]
         product_id_filter = options.get("product_id")
         verbose = options["verbose"]
         delete_source = options["delete_source"]
@@ -108,28 +125,33 @@ class Command(BaseCommand):
         if avif_only:
             self.stdout.write("Scope: .avif files only\n")
         else:
-            self.stdout.write(self.style.WARNING("Scope: all design file formats\n"))
+            self.stdout.write("Scope: all design file formats (jpg, png, avif, eps, cdr, ...)\n")
 
         stats = {
             "scanned": 0,
             "flattened": 0,
-            "skipped_already_flat": 0,
+            "swapped": 0,
+            "nested": 0,
             "skipped_filter": 0,
-            "skipped_exists": 0,
+            "target_exists_db_only": 0,
             "errors": 0,
         }
         errors = []
 
-        media_qs = Media.objects.exclude(file="").order_by("id")
-        self.stdout.write(f"Scanning {media_qs.count()} Media record(s)...\n")
+        media_qs = (
+            Media.objects.exclude(file="")
+            .filter(Q(file__contains="/designs/private/") | Q(file__contains="/designs/public/"))
+            .order_by("id")
+        )
+        self.stdout.write(f"Scanning {media_qs.count()} Media record(s) with public/private path segments...\n")
 
         for media in media_qs.iterator():
             stats["scanned"] += 1
             current_path = media.file.name
             target_path = flatten_design_path(current_path)
+            layout = path_layout(current_path)
 
             if not target_path or target_path == current_path:
-                stats["skipped_already_flat"] += 1
                 continue
 
             if avif_only and not current_path.lower().endswith(".avif"):
@@ -142,20 +164,24 @@ class Command(BaseCommand):
                     stats["skipped_filter"] += 1
                     continue
 
+            if layout == "swapped":
+                stats["swapped"] += 1
+            elif layout == "nested":
+                stats["nested"] += 1
+
             if verbose:
-                self.stdout.write(f"Media {media.id}:")
+                self.stdout.write(f"Media {media.id} ({layout}):")
                 self.stdout.write(f"  from: {current_path}")
                 self.stdout.write(f"  to:   {target_path}")
 
+            new_visibility = "public" if target_path.lower().endswith(".avif") else media.visibility
+
             if default_storage.exists(target_path):
-                stats["skipped_exists"] += 1
+                stats["target_exists_db_only"] += 1
                 if verbose:
-                    self.stdout.write(self.style.WARNING("  target already exists, updating DB reference only"))
+                    self.stdout.write(self.style.WARNING("  target already exists in storage, updating DB only"))
                 if not dry_run:
-                    Media.objects.filter(pk=media.pk).update(
-                        file=target_path,
-                        visibility="public" if target_path.lower().endswith(".avif") else media.visibility,
-                    )
+                    Media.objects.filter(pk=media.pk).update(file=target_path, visibility=new_visibility)
                     if delete_source and current_path != target_path and default_storage.exists(current_path):
                         default_storage.delete(current_path)
                 stats["flattened"] += 1
@@ -179,10 +205,7 @@ class Command(BaseCommand):
                 with default_storage.open(current_path, "rb") as source_file:
                     default_storage.save(target_path, source_file)
 
-                Media.objects.filter(pk=media.pk).update(
-                    file=target_path,
-                    visibility="public" if target_path.lower().endswith(".avif") else media.visibility,
-                )
+                Media.objects.filter(pk=media.pk).update(file=target_path, visibility=new_visibility)
 
                 if delete_source and current_path != target_path and default_storage.exists(current_path):
                     default_storage.delete(current_path)
@@ -200,9 +223,10 @@ class Command(BaseCommand):
         self.stdout.write("")
         self.stdout.write(self.style.SUCCESS(f"Scanned: {stats['scanned']}"))
         self.stdout.write(self.style.SUCCESS(f"Flattened: {stats['flattened']}"))
-        self.stdout.write(f"Already flat: {stats['skipped_already_flat']}")
+        self.stdout.write(f"  swapped paths (designs/private/{{id}}/...): {stats['swapped']}")
+        self.stdout.write(f"  nested paths (designs/{{id}}/private/...): {stats['nested']}")
+        self.stdout.write(f"DB-only updates (target already in storage): {stats['target_exists_db_only']}")
         self.stdout.write(f"Skipped by filter: {stats['skipped_filter']}")
-        self.stdout.write(f"Target already existed: {stats['skipped_exists']}")
         if stats["errors"]:
             self.stdout.write(self.style.ERROR(f"Errors: {stats['errors']}"))
             for msg in errors[:20]:
